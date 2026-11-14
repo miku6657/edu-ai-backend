@@ -34,7 +34,7 @@ public class TaskChangeDraftService {
     public TaskChangeDraftService(
             DdlTaskMapper taskMapper,
             TaskChangeDraftMapper draftMapper,
-            DdlDisplayCodeGenerator displayCodeGenerator,
+             DdlDisplayCodeGenerator displayCodeGenerator,
             DdlTaskStatusResolver statusResolver) {
 
         this.taskMapper = taskMapper;
@@ -52,10 +52,44 @@ public class TaskChangeDraftService {
             Long targetTaskId,
             TaskChangeDraftCreateRequest request) {
 
-        DdlTask original = requireOwnedTask(
-                targetTaskId,
-                userId
+        if (request == null
+                || request.getNewTaskTitle() == null
+                || request.getNewTaskTitle().isBlank()
+                || request.getNewTaskTitle().length() > 200
+                || request.getNewTimePrecision() == null
+                || request.getNewTimePrecision().isBlank()) {
+
+            throw new BusinessException(
+                    400,
+                    "草案参数不完整或不合法"
+            );
+        }
+
+        if (!List.of(
+                "EXACT_DATETIME",
+                "DATE_ONLY",
+                "VAGUE_OR_MISSING"
+        ).contains(request.getNewTimePrecision())) {
+
+            throw new BusinessException(
+                    400,
+                    "不支持的时间精度"
+            );
+        }
+
+        DdlTask original = taskMapper.selectOne(
+                new LambdaQueryWrapper<DdlTask>()
+                        .eq(DdlTask::getId, targetTaskId)
+                        .eq(DdlTask::getUserId, userId)
+                        .last("LIMIT 1 FOR UPDATE")
         );
+
+        if (original == null) {
+            throw new BusinessException(
+                    404,
+                    "任务不存在或无权访问"
+            );
+        }
 
         if ("COMPLETED".equals(original.getStatus())
                 || "CANCELED".equals(original.getStatus())) {
@@ -66,11 +100,13 @@ public class TaskChangeDraftService {
             );
         }
 
-        // 先把已过期的草案标记为 EXPIRED
+        // 先把已过期的草案标记为 EXPIRED（仅当前任务）
         draftMapper.update(
                 null,
                 new LambdaUpdateWrapper<TaskChangeDraft>()
                         .eq(TaskChangeDraft::getUserId, userId)
+                        .eq(TaskChangeDraft::getTargetTaskId,
+                                targetTaskId)
                         .eq(TaskChangeDraft::getStatus, "PENDING")
                         .le(TaskChangeDraft::getExpiresAt,
                                 LocalDateTime.now())
@@ -280,10 +316,19 @@ public class TaskChangeDraftService {
             );
         }
 
-        DdlTask original = requireOwnedTask(
-                targetTaskId,
-                userId
+        DdlTask original = taskMapper.selectOne(
+                new LambdaQueryWrapper<DdlTask>()
+                        .eq(DdlTask::getId, targetTaskId)
+                        .eq(DdlTask::getUserId, userId)
+                        .last("LIMIT 1 FOR UPDATE")
         );
+
+        if (original == null) {
+            throw new BusinessException(
+                    404,
+                    "任务不存在或无权访问"
+            );
+        }
 
         TaskChangeDraft draft = draftMapper.selectOne(
                 new LambdaQueryWrapper<TaskChangeDraft>()
@@ -314,12 +359,63 @@ public class TaskChangeDraftService {
         int claimed = draftMapper.update(
                 null,
                 new LambdaUpdateWrapper<TaskChangeDraft>()
-                        .eq(TaskChangeDraft::getId, draft.getId())
-                        .eq(TaskChangeDraft::getStatus, "PENDING")
-                        .set(TaskChangeDraft::getStatus, "PROCESSING")
+                        .eq(
+                                TaskChangeDraft::getId,
+                                draft.getId()
+                        )
+                        .eq(
+                                TaskChangeDraft::getStatus,
+                                "PENDING"
+                        )
+                        .gt(
+                                TaskChangeDraft::getExpiresAt,
+                                now
+                        )
+                        .set(
+                                TaskChangeDraft::getStatus,
+                                "PROCESSING"
+                        )
+                        .set(
+                                TaskChangeDraft::getUpdateTime,
+                                now
+                        )
         );
 
         if (claimed != 1) {
+
+            // 再次检查是否是同一个请求已经处理成功
+            TaskChangeDraft previousResult =
+                    draftMapper.selectOne(
+                            new LambdaQueryWrapper<TaskChangeDraft>()
+                                    .eq(
+                                            TaskChangeDraft::getUserId,
+                                            userId
+                                    )
+                                    .eq(
+                                            TaskChangeDraft::getDecisionRequestId,
+                                            request.getClientRequestId()
+                                    )
+                                    .last("LIMIT 1")
+                    );
+
+            if (previousResult != null) {
+
+                if (!targetTaskId.equals(
+                            previousResult.getTargetTaskId())
+                        || !decision.equals(
+                            previousResult.getDecision())) {
+
+                    throw new BusinessException(
+                            409,
+                            "请求编号已被其他操作使用"
+                    );
+                }
+
+                return taskMapper.selectById(
+                        previousResult.getResultTaskId()
+                );
+            }
+
             throw new BusinessException(
                     409,
                     "草案已经被处理，请刷新后重试"
@@ -410,6 +506,10 @@ public class TaskChangeDraftService {
                 || !java.util.Objects.equals(
                         task.getDueAt(),
                         draft.getNewDueAt()
+                )
+                || !java.util.Objects.equals(
+                        task.getTimePrecision(),
+                        draft.getNewTimePrecision()
                 );
 
         task.setTaskTitle(draft.getNewTaskTitle());
@@ -506,7 +606,9 @@ public class TaskChangeDraftService {
                 Boolean.TRUE.equals(draft.getNewTimeInferred())
         );
 
-        task.setRelativeTime(draft.getNewRelativeTime());
+        task.setRelativeTime(
+                Boolean.TRUE.equals(draft.getNewRelativeTime())
+        );
 
         task.setTimeAmbiguityReason(
                 draft.getNewTimeAmbiguityReason()

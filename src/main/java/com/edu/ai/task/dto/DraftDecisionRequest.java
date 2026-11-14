@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 
 import lombok.Data;
 
@@ -14,6 +15,7 @@ public class DraftDecisionRequest {
     private Decision decision;
 
     @NotBlank(message = "请求编号不能为空")
+    @Size(max = 100, message = "请求编号不能超过100个字符")
     @JsonProperty("client_request_id")
     private String clientRequestId;
 
