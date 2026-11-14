@@ -248,14 +248,15 @@ public class DdlTaskService {
     }
 
     /**
-     * 任务看板。
+     * 任务看板
      */
     public DdlTaskBoardVO getBoard(
             Long userId,
-            Long courseId) {
+            Long courseId,
+            String statusGroup) {
 
         List<DdlTask> tasks =
-                listTasks(userId, "ALL", courseId);
+                listTasks(userId, statusGroup, courseId);
 
         DdlTaskBoardVO board = new DdlTaskBoardVO();
 
@@ -285,7 +286,7 @@ public class DdlTaskService {
                         .toList()
         );
 
-        // 变更草案由 DdlTaskChangeDraftService 提供
+        // 变更草案暂时由后续的草案查询接口接入
         board.setPendingChangeDrafts(List.of());
 
         return board;

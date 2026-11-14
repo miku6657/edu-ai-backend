@@ -1,9 +1,9 @@
 package com.edu.ai.chat.controller;
 
+import com.edu.ai.chat.dto.ChatMessageVO;
 import com.edu.ai.chat.dto.ChatRequest;
 import com.edu.ai.chat.dto.ChatSessionUpdateRequest;
-import com.edu.ai.chat.entity.ChatMessage;
-import com.edu.ai.chat.entity.ChatSession;
+import com.edu.ai.chat.dto.ChatSessionVO;
 import com.edu.ai.chat.service.ChatService;
 import com.edu.ai.chat.service.ChatSessionManageService;
 import com.edu.ai.common.BusinessException;
@@ -48,28 +48,36 @@ public class ChatController {
 
     // 查询当前用户的历史会话
     @GetMapping("/sessions")
-    public Result<List<ChatSession>> sessions(
+    public Result<List<ChatSessionVO>> sessions(
             Authentication authentication) {
 
-        return Result.success(
+        List<ChatSessionVO> result =
                 chatService.listSessions(
                         getUserId(authentication)
                 )
-        );
+                .stream()
+                .map(ChatSessionVO::from)
+                .toList();
+
+        return Result.success(result);
     }
 
     // 查询会话历史消息
     @GetMapping("/sessions/{sessionId}/messages")
-    public Result<List<ChatMessage>> messages(
+    public Result<List<ChatMessageVO>> messages(
             @PathVariable Long sessionId,
             Authentication authentication) {
 
-        return Result.success(
+        List<ChatMessageVO> result =
                 chatService.listMessages(
                         sessionId,
                         getUserId(authentication)
                 )
-        );
+                .stream()
+                .map(ChatMessageVO::from)
+                .toList();
+
+        return Result.success(result);
     }
 
     // 修改会话标题
@@ -124,7 +132,9 @@ public class ChatController {
                 instanceof Long userId)) {
 
             throw new BusinessException(
-                    401, "登录状态无效");
+                    401,
+                    "登录状态无效"
+            );
         }
 
         return userId;

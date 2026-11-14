@@ -1,19 +1,22 @@
 package com.edu.ai.task.service;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.edu.ai.common.BusinessException;
-
+import com.edu.ai.course.entity.Course;
+import com.edu.ai.course.mapper.CourseMapper;
 import com.edu.ai.task.ai.DdlTaskExtractGateway;
-
 import com.edu.ai.task.dto.*;
-
 import com.edu.ai.task.entity.DdlTask;
 import com.edu.ai.task.mapper.DdlTaskMapper;
 
+import tools.jackson.databind.ObjectMapper;
+
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.util.List;
 
@@ -21,188 +24,313 @@ import java.util.List;
 public class DdlTaskExtractService {
 
     private final DdlTaskExtractGateway extractGateway;
-
     private final DdlTaskDuplicateService duplicateService;
-
     private final DdlTaskMapper taskMapper;
-
     private final TaskChangeDraftService draftService;
+    private final CourseMapper courseMapper;
+    private final DdlExtractIdempotencyService idempotencyService;
+    private final DdlRequestHashService hashService;
+    private final ObjectMapper objectMapper;
+    private final TransactionTemplate transactionTemplate;
 
     public DdlTaskExtractService(
             DdlTaskExtractGateway extractGateway,
             DdlTaskDuplicateService duplicateService,
             DdlTaskMapper taskMapper,
-            TaskChangeDraftService draftService) {
+            TaskChangeDraftService draftService,
+            CourseMapper courseMapper,
+            DdlExtractIdempotencyService idempotencyService,
+            DdlRequestHashService hashService,
+            ObjectMapper objectMapper,
+            TransactionTemplate transactionTemplate) {
 
         this.extractGateway = extractGateway;
         this.duplicateService = duplicateService;
         this.taskMapper = taskMapper;
         this.draftService = draftService;
+        this.courseMapper = courseMapper;
+        this.idempotencyService = idempotencyService;
+        this.hashService = hashService;
+        this.objectMapper = objectMapper;
+        this.transactionTemplate = transactionTemplate;
     }
 
     /**
-     * AI 任务提取主流程。
+     * AI 提取任务主流程（接入数据库幂等）
      */
-    @Transactional(rollbackFor = Exception.class)
     public DdlExtractResult extract(
             Long userId,
             DdlExtractRequest request) {
 
         validateRequest(request);
 
-        String timezone = request.getUserTimezone();
+        String timezone = "Asia/Shanghai";
+        ZoneId zoneId = ZoneId.of(timezone);
 
-        if (timezone == null || timezone.isBlank()) {
-            timezone = "Asia/Shanghai";
+        LocalDateTime now;
+
+        if (request.getReferenceTime() == null
+                || request.getReferenceTime().isBlank()) {
+
+            now = LocalDateTime.now(zoneId);
+
+        } else {
+
+            try {
+                now = OffsetDateTime.parse(
+                        request.getReferenceTime()
+                ).atZoneSameInstant(zoneId).toLocalDateTime();
+
+            } catch (Exception e) {
+                throw new BusinessException(
+                        400,
+                        "reference_time 格式不正确"
+                );
+            }
         }
 
-        ZoneId zoneId;
+        // 1. 校验课程归属
+        String courseName = resolveCourseName(
+                userId,
+                request.getCourseId()
+        );
+
+        // 2. 计算完整请求摘要
+        String requestHash = hashService.hashRequest(request);
+
+        // 3. 登记请求，独立提交 PROCESSING
+        var idempotencyRecord = idempotencyService.acquire(
+                userId,
+                request.getClientRequestId(),
+                requestHash
+        );
+
+        // 4. 如果之前已经成功，直接恢复原始响应
+        if ("SUCCEEDED".equals(idempotencyRecord.getStatus())) {
+
+            try {
+                return objectMapper.readValue(
+                        idempotencyRecord.getResponseJson(),
+                        DdlExtractResult.class
+                );
+
+            } catch (Exception e) {
+                throw new BusinessException(
+                        500,
+                        "历史提取结果无法恢复，请联系管理员"
+                );
+            }
+        }
 
         try {
-            zoneId = ZoneId.of(timezone);
-        } catch (Exception e) {
-            throw new BusinessException(
-                    400,
-                    "不支持的时区"
-            );
-        }
 
-        LocalDateTime now = LocalDateTime.now(zoneId);
+            // 5. 调用 AI
+            DdlTaskExtractedData data =
+                    extractGateway.extract(
+                            request.getSourceText(),
+                            courseName,
+                            timezone,
+                            now
+                    );
 
-        // 第一步：调用 AI 提取
-        DdlTaskExtractedData data =
-                extractGateway.extract(
-                        request.getSourceText(),
-                        request.getCourseName(),
+            // 6. 校验 AI 结果
+            validateExtractedData(data);
+
+            // 7. 标准化时间
+            normalizeTime(data, now);
+
+            // 8. 一个事务内完成业务操作和幂等结果保存
+            return transactionTemplate.execute(status -> {
+
+                List<DdlDuplicateCandidateVO> candidates;
+
+                if (Boolean.TRUE.equals(request.getForceCreate())) {
+                    candidates = List.of();
+                } else {
+                    candidates = duplicateService.findCandidates(
+                            userId,
+                            request.getCourseId(),
+                            data
+                    );
+                }
+
+                // 9. 处理相似任务
+                if (!candidates.isEmpty()) {
+
+                    DdlDuplicateCandidateVO candidate =
+                            candidates.get(0);
+
+                    DdlTask existing = taskMapper.selectOne(
+                            new LambdaQueryWrapper<DdlTask>()
+                                    .eq(DdlTask::getId,
+                                            candidate.getTaskId())
+                                    .eq(DdlTask::getUserId, userId)
+                                    .last("LIMIT 1")
+                    );
+
+                    if (existing == null) {
+                        throw new BusinessException(
+                                409,
+                                "重复任务数据已发生变化，请重新提取"
+                        );
+                    }
+
+                    // 完全相同的任务
+                    if (candidate.getSimilarity() >= 0.95
+                            && duplicateService.isSameDeadline(
+                                    existing, data)) {
+
+                        return saveIdempotentResult(
+                                idempotencyRecord.getId(),
+                                idempotencyRecord.getProcessingToken(),
+                                "IDEMPOTENT_HIT",
+                                existing,
+                                null
+                        );
+                    }
+
+                    // 相似任务但截止时间发生变化
+                    if (duplicateService.needsChangeConfirmation(
+                            existing, data)) {
+
+                        TaskChangeDraftCreateRequest draftRequest =
+                                buildDraftRequest(
+                                        data,
+                                        request,
+                                        timezone
+                                );
+
+                        TaskChangeDraftVO draft =
+                                draftService.createDraft(
+                                        userId,
+                                        existing.getId(),
+                                        draftRequest
+                                );
+
+                        return saveIdempotentResult(
+                                idempotencyRecord.getId(),
+                                idempotencyRecord.getProcessingToken(),
+                                "CHANGE_DRAFT_CONFIRM_REQUIRED",
+                                existing,
+                                draft
+                        );
+                    }
+
+                    // 其他相似任务
+                    return saveIdempotentResult(
+                            idempotencyRecord.getId(),
+                            idempotencyRecord.getProcessingToken(),
+                            "SEMANTIC_DUPLICATE_HINT",
+                            existing,
+                            null
+                    );
+                }
+
+                // 10. 创建新任务
+                DdlTask task = buildTask(
+                        userId,
+                        request,
+                        data,
                         timezone,
+                        courseName,
                         now
                 );
 
-        // 第二步：校验 AI 返回结果
-        validateExtractedData(data);
+                taskMapper.insert(task);
 
-        // 第三步：处理时间
-        normalizeTime(data, now);
-
-        // 第四步：查询重复任务
-        List<DdlDuplicateCandidateVO> candidates =
-                duplicateService.findCandidates(
-                        userId,
-                        request.getCourseId(),
-                        data
+                // 11. 保存完整响应和 SUCCEEDED 状态
+                return saveIdempotentResult(
+                        idempotencyRecord.getId(),
+                        idempotencyRecord.getProcessingToken(),
+                        "CREATED",
+                        task,
+                        null
                 );
+            });
 
-        // 第五步：处理重复情况
-        if (!candidates.isEmpty()) {
+        } catch (RuntimeException e) {
 
-            DdlDuplicateCandidateVO candidate =
-                    candidates.get(0);
-
-            DdlTask existing = taskMapper.selectById(
-                    candidate.getTaskId()
-            );
-
-            if (existing == null) {
-                throw new BusinessException(
-                        409,
-                        "重复任务数据已发生变化，请重新提取"
+            // 12. 业务事务失败，独立记录失败状态
+            try {
+                idempotencyService.fail(
+                        idempotencyRecord.getId(),
+                        idempotencyRecord.getProcessingToken(),
+                        e.getMessage()
                 );
+            } catch (RuntimeException recordException) {
+                e.addSuppressed(recordException);
             }
 
-            // 标题完全一致且时间一致
-            if (candidate.getSimilarity() >= 0.95
-                    && duplicateService.isSameDeadline(
-                            existing,
-                            data
-                    )) {
-
-                DdlExtractResult result =
-                        DdlExtractResult.of(
-                                "IDEMPOTENT_HIT",
-                                "该任务已经存在，无需重复创建"
-                        );
-
-                result.setTaskId(existing.getId());
-                result.setExtractedData(data);
-
-                return result;
-            }
-
-            // 相似任务但时间发生变化
-            if (duplicateService.needsChangeConfirmation(
-                    existing,
-                    data)) {
-
-                TaskChangeDraftCreateRequest draftRequest =
-                        buildDraftRequest(data, request, timezone);
-
-                TaskChangeDraftVO draft =
-                        draftService.createDraft(
-                                userId,
-                                existing.getId(),
-                                draftRequest
-                        );
-
-                DdlExtractResult result =
-                        DdlExtractResult.of(
-                                "CHANGE_DRAFT_CONFIRM_REQUIRED",
-                                "发现已有相似任务，请确认是否更新"
-                        );
-
-                result.setMatchedTaskId(
-                        existing.getId()
-                );
-
-                result.setChangeDraft(draft);
-                result.setExtractedData(data);
-
-                return result;
-            }
-
-            // 其他相似情况只提示，不自动覆盖
-            DdlExtractResult result =
-                    DdlExtractResult.of(
-                            "SEMANTIC_DUPLICATE_HINT",
-                            "发现可能重复的任务，请检查"
-                    );
-
-            result.setDuplicateCandidates(candidates);
-            result.setExtractedData(data);
-
-            return result;
+            throw e;
         }
+    }
 
-        // 第六步：没有重复任务，创建任务
-        DdlTask task = buildTask(
-                userId,
-                request,
-                data,
-                timezone,
-                now
+    /**
+     * 保存幂等结果。
+     */
+    private DdlExtractResult saveIdempotentResult(
+            Long requestId,
+            String token,
+            String outcome,
+            DdlTask task,
+            TaskChangeDraftVO draft) {
+
+        DdlExtractResult result = buildResult(
+                outcome,
+                task,
+                draft
         );
 
-        taskMapper.insert(task);
+        String responseJson;
 
-        DdlExtractResult result =
-                DdlExtractResult.of(
-                        "CREATED",
-                        "成功提取并创建任务"
-                );
+        try {
+            responseJson = objectMapper.writeValueAsString(result);
+        } catch (Exception e) {
+            throw new BusinessException(
+                    500,
+                    "提取结果序列化失败"
+            );
+        }
 
-        result.setTaskId(task.getId());
-        result.setExtractedData(data);
+        idempotencyService.complete(
+                requestId,
+                token,
+                task == null ? null : task.getId(),
+                outcome,
+                responseJson
+        );
 
         return result;
     }
 
     /**
-     * 构造 DDL 任务。
+     * 构造新版统一返回对象
+     */
+    private DdlExtractResult buildResult(
+            String outcome,
+            DdlTask task,
+            TaskChangeDraftVO draft) {
+
+        DdlExtractResult result = new DdlExtractResult();
+
+        result.setExtractOutcome(outcome);
+        result.setTask(
+                task == null ? null : DdlTaskVO.from(task)
+        );
+        result.setChangeDraft(draft);
+
+        return result;
+    }
+
+    /**
+     * 构造任务实体
      */
     private DdlTask buildTask(
             Long userId,
             DdlExtractRequest request,
             DdlTaskExtractedData data,
             String timezone,
+            String courseName,
             LocalDateTime now) {
 
         DdlTask task = new DdlTask();
@@ -210,10 +338,11 @@ public class DdlTaskExtractService {
         task.setUserId(userId);
 
         task.setCourseId(request.getCourseId());
+
         task.setCourseName(
                 data.getCourseName() != null
                         ? data.getCourseName()
-                        : request.getCourseName()
+                        : courseName
         );
 
         task.setTaskTitle(data.getTaskTitle());
@@ -229,17 +358,16 @@ public class DdlTaskExtractService {
                 Boolean.TRUE.equals(data.getTimeInferred())
         );
 
+        task.setRelativeTime(
+                Boolean.TRUE.equals(data.getTimeInferred())
+        );
+
         task.setTimeAmbiguityReason(
                 data.getTimeAmbiguityReason()
         );
 
-        task.setDeliverableFormat(
-                data.getDeliverableFormat()
-        );
-
-        task.setSubmissionChannel(
-                data.getSubmissionChannel()
-        );
+        task.setDeliverableFormat(data.getDeliverableFormat());
+        task.setSubmissionChannel(data.getSubmissionChannel());
 
         task.setRawSourceText(request.getSourceText());
         task.setRawTimeText(data.getRawTimeText());
@@ -252,17 +380,25 @@ public class DdlTaskExtractService {
                         : BigDecimal.valueOf(data.getConfidence())
         );
 
-        task.setStatus(
-                data.getDueAt() == null
-                        ? "PENDING_TIME"
-                        : data.getDueAt().isBefore(now)
-                        ? "OVERDUE"
-                        : "ACTIVE"
-        );
+        String precision = data.getTimePrecision();
 
-        task.setRelativeTime(
-                Boolean.TRUE.equals(data.getTimeInferred())
-        );
+        if ("INVALID_OR_PAST".equals(precision)
+                || "VAGUE_OR_MISSING".equals(precision)) {
+
+            task.setStatus("PENDING_CONFIRM");
+
+        } else if (data.getDueAt() == null) {
+
+            task.setStatus("PENDING_TIME");
+
+        } else if (data.getDueAt().isBefore(now)) {
+
+            task.setStatus("PENDING_CONFIRM");
+
+        } else {
+
+            task.setStatus("ACTIVE");
+        }
 
         task.setFollowUpCount(0);
 
@@ -279,7 +415,7 @@ public class DdlTaskExtractService {
     }
 
     /**
-     * 构造任务变更草案。
+     * 构造任务变更草案请求
      */
     private TaskChangeDraftCreateRequest buildDraftRequest(
             DdlTaskExtractedData data,
@@ -302,13 +438,8 @@ public class DdlTaskExtractService {
                 data.getTimeAmbiguityReason()
         );
 
-        draft.setNewDeliverableFormat(
-                data.getDeliverableFormat()
-        );
-
-        draft.setNewSubmissionChannel(
-                data.getSubmissionChannel()
-        );
+        draft.setNewDeliverableFormat(data.getDeliverableFormat());
+        draft.setNewSubmissionChannel(data.getSubmissionChannel());
 
         draft.setRawSourceText(request.getSourceText());
         draft.setRawTimeText(data.getRawTimeText());
@@ -318,7 +449,34 @@ public class DdlTaskExtractService {
     }
 
     /**
-     * 时间标准化。
+     * 从课程表查询课程名称，并校验归属。
+     */
+    private String resolveCourseName(Long userId, Long courseId) {
+
+        if (courseId == null) {
+            return null;
+        }
+
+        Course course = courseMapper.selectOne(
+                new LambdaQueryWrapper<Course>()
+                        .eq(Course::getId, courseId)
+                        .eq(Course::getUserId, userId)
+                        .eq(Course::getStatus, 1)
+                        .last("LIMIT 1")
+        );
+
+        if (course == null) {
+            throw new BusinessException(
+                    404,
+                    "课程不存在或无权使用"
+            );
+        }
+
+        return course.getName();
+    }
+
+    /**
+     * 时间标准化
      */
     private void normalizeTime(
             DdlTaskExtractedData data,
@@ -340,7 +498,12 @@ public class DdlTaskExtractService {
 
             data.setDueDate(dueAt.toLocalDate());
             data.setDueTime(dueAt.toLocalTime());
-            data.setTimePrecision("DATE_TIME");
+
+            data.setTimePrecision(
+                    dueAt.isBefore(now)
+                            ? "INVALID_OR_PAST"
+                            : "EXACT_DATETIME"
+            );
 
             return;
         }
@@ -355,45 +518,49 @@ public class DdlTaskExtractService {
                     )
             );
 
-            data.setTimePrecision("DATE_TIME");
+            data.setTimePrecision(
+                    data.getDueAt().isBefore(now)
+                            ? "INVALID_OR_PAST"
+                            : "EXACT_DATETIME"
+            );
 
         } else if (data.getDueDate() != null) {
 
-            data.setTimePrecision("DATE");
-
-        } else if (data.getDueTime() != null) {
-
-            data.setTimePrecision("TIME");
+            data.setTimePrecision("DATE_ONLY");
 
         } else {
 
-            data.setTimePrecision("UNKNOWN");
+            data.setTimePrecision("VAGUE_OR_MISSING");
         }
     }
 
-    private void validateRequest(
-            DdlExtractRequest request) {
+    /**
+     * 校验请求
+     */
+    private void validateRequest(DdlExtractRequest request) {
 
         if (request == null
                 || request.getSourceText() == null
                 || request.getSourceText().isBlank()) {
 
-            throw new BusinessException(
-                    400,
-                    "提取文本不能为空"
-            );
+            throw new BusinessException(400, "提取文本不能为空");
         }
 
         if (request.getSourceText().length() > 10000) {
-            throw new BusinessException(
-                    400,
-                    "提取文本不能超过10000个字符"
-            );
+            throw new BusinessException(400, "提取文本不能超过10000个字符");
+        }
+
+        if (request.getClientRequestId() == null
+                || request.getClientRequestId().isBlank()) {
+
+            throw new BusinessException(400, "请求编号不能为空");
         }
     }
 
-    private void validateExtractedData(
-            DdlTaskExtractedData data) {
+    /**
+     * 校验 AI 返回结果
+     */
+    private void validateExtractedData(DdlTaskExtractedData data) {
 
         if (data == null
                 || data.getTaskTitle() == null

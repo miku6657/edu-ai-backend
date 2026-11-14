@@ -263,19 +263,23 @@ ChatService {
             });
 
             Future<?> future = executor.submit(() -> {
-                running.markStarted();
 
                 try {
-                    if (!running.isCancelled()) {
-                        forwardStream(
-                                emitter,
-                                session,
-                                question,
-                                history,
-                                running
-                        );
+                    // 只有 QUEUED 状态才能进入 RUNNING
+                    if (!running.markStarted()) {
+                        return;
                     }
+
+                    forwardStream(
+                            emitter,
+                            session,
+                            question,
+                            history,
+                            running
+                    );
+
                 } finally {
+                    // 只释放当前任务
                     streamRegistry.release(sessionId, running);
                 }
             });
@@ -346,6 +350,7 @@ ChatService {
 
             running.setUpstream(response.body());
 
+            // 取消状态可能在 HTTP 请求等待期间发生
             if (running.isCancelled()) {
                 return;
             }
@@ -364,7 +369,7 @@ ChatService {
             // 将会话ID首先返回给前端
             send(emitter, "session", objectMapper
                     .createObjectNode()
-                    .put("sessionId", session.getId()));
+                    .put("sessionId", session.getId().toString()));
 
             try (BufferedReader reader =
                          new BufferedReader(
@@ -444,7 +449,13 @@ ChatService {
                         "Python SSE stream ended unexpectedly");
             }
 
-            // 仅完整生成的答案才写入聊天记录
+            // 第一步：尝试进入 COMPLETING
+            // 如果用户取消已经成功，这里就不能继续保存
+            if (!running.beginCompletion()) {
+                return;
+            }
+
+            // 第二步：保存完整 AI 回答
             saveMessage(
                     session.getId(),
                     "assistant",
@@ -452,24 +463,36 @@ ChatService {
                     sourcesJson
             );
 
+            // 第三步：更新会话最后活动时间
             ChatSession update = new ChatSession();
+
             update.setId(session.getId());
             update.setUpdateTime(LocalDateTime.now());
 
             sessionMapper.updateById(update);
 
-            if (!running.isCancelled()) {
-
-                ObjectNode donePayload =
-                        objectMapper.createObjectNode();
-
-                donePayload.put("sessionId", session.getId());
-
-                send(emitter, "done", donePayload);
-
-                running.markSuccessful();
-                emitter.complete();
+            // 第四步：确认任务完成
+            if (!running.markSuccessful()) {
+                throw new IllegalStateException(
+                        "聊天任务状态异常，无法标记成功");
             }
+
+            // 第五步：通知前端
+            ObjectNode donePayload =
+                    objectMapper.createObjectNode();
+
+            donePayload.put(
+                    "sessionId",
+                    session.getId().toString()
+            );
+
+            send(
+                    emitter,
+                    "done",
+                    donePayload
+            );
+
+            emitter.complete();
 
         } catch (Exception e) {
 
@@ -477,15 +500,23 @@ ChatService {
                 Thread.currentThread().interrupt();
             }
 
-            if (!running.isCancelled()) {
+            // 尝试将任务标记为 FAILED
+            // 已取消、已成功的任务不会被覆盖
+            boolean failed = running.markFailed();
+
+            if (failed) {
                 try {
                     send(
                             emitter,
                             "error",
                             objectMapper.createObjectNode()
-                                    .put("message", "AI回答失败或连接中断")
+                                    .put(
+                                            "message",
+                                            "AI回答失败或连接中断"
+                                    )
                     );
                 } catch (Exception ignored) {
+                    // 客户端可能已经断开
                 }
             }
 
@@ -586,9 +617,33 @@ ChatService {
                     403, "无权操作此会话");
         }
 
-        if (!streamRegistry.cancel(sessionId)) {
+        ChatStreamRegistry.StreamState state =
+                streamRegistry.getState(sessionId);
+
+        if (state == null) {
             throw new BusinessException(
                     409, "当前会话没有正在运行的回答");
+        }
+
+        if (state == ChatStreamRegistry.StreamState.COMPLETING) {
+            throw new BusinessException(
+                    409, "AI回答已完成，正在保存，无法取消");
+        }
+
+        if (state == ChatStreamRegistry.StreamState.SUCCEEDED) {
+            throw new BusinessException(
+                    409, "AI回答已经完成");
+        }
+
+        if (state == ChatStreamRegistry.StreamState.CANCELLED
+                || state == ChatStreamRegistry.StreamState.FAILED) {
+            throw new BusinessException(
+                    409, "当前任务已经结束");
+        }
+
+        if (!streamRegistry.cancel(sessionId)) {
+            throw new BusinessException(
+                    409, "任务状态已发生变化，请刷新后重试");
         }
     }
 }

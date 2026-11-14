@@ -3,11 +3,20 @@ package com.edu.ai.task.controller;
 import com.edu.ai.common.BusinessException;
 import com.edu.ai.common.Result;
 
-import com.edu.ai.task.dto.DdlTaskCreateRequest;
-import com.edu.ai.task.dto.DdlTaskUpdateRequest;
+import com.edu.ai.task.dto.CreateDdlTaskRequest;
+import com.edu.ai.task.dto.UpdateDdlTaskRequest;
 import com.edu.ai.task.dto.DdlTaskVO;
+import com.edu.ai.task.dto.DdlTaskBoardVO;
+import com.edu.ai.task.dto.DdlExtractRequest;
+import com.edu.ai.task.dto.DdlExtractResult;
 import com.edu.ai.task.dto.DraftDecisionRequest;
+import com.edu.ai.task.dto.DdlTaskCompletionRequest;
+import com.edu.ai.task.dto.DeleteDdlTaskResult;
+
+import com.edu.ai.task.entity.DdlTask;
+
 import com.edu.ai.task.service.DdlTaskService;
+import com.edu.ai.task.service.DdlTaskExtractService;
 import com.edu.ai.task.service.TaskChangeDraftService;
 
 import jakarta.validation.Valid;
@@ -15,121 +24,156 @@ import jakarta.validation.Valid;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
-
 @RestController
-@RequestMapping("/api/ddl/tasks")
+@RequestMapping("/v1/ddl/tasks")
 public class DdlTaskController {
 
     private final DdlTaskService ddlTaskService;
+    private final DdlTaskExtractService extractService;
     private final TaskChangeDraftService draftService;
 
     public DdlTaskController(
             DdlTaskService ddlTaskService,
+            DdlTaskExtractService extractService,
             TaskChangeDraftService draftService) {
+
         this.ddlTaskService = ddlTaskService;
+        this.extractService = extractService;
         this.draftService = draftService;
     }
 
-    // 创建个人任务
-    @PostMapping
-    public Result<DdlTaskVO> create(
-            @Valid @RequestBody DdlTaskCreateRequest request,
+    /**
+     * AI 提取任务
+     */
+    @PostMapping("/extract")
+    public Result<DdlExtractResult> extract(
+            @Valid @RequestBody DdlExtractRequest request,
             Authentication authentication) {
 
         return Result.success(
-                ddlTaskService.create(
+                extractService.extract(
                         getUserId(authentication),
                         request
                 )
         );
     }
 
-    // 查询当前用户的任务列表
+    /**
+     * 查询个人 DDL 任务看板
+     */
     @GetMapping
-    public Result<List<DdlTaskVO>> list(
+    public Result<DdlTaskBoardVO> list(
+            @RequestParam(
+                    name = "status_group",
+                    defaultValue = "ALL"
+            ) String statusGroup,
+            @RequestParam(
+                    name = "course_id",
+                    required = false
+            ) Long courseId,
             Authentication authentication) {
 
         return Result.success(
-                ddlTaskService.list(
-                        getUserId(authentication)
+                ddlTaskService.getBoard(
+                        getUserId(authentication),
+                        courseId,
+                        statusGroup
                 )
         );
     }
 
-    // 查询任务详情
+    /**
+     * 手动创建任务
+     */
+    @PostMapping
+    public Result<DdlTaskVO> create(
+            @Valid @RequestBody CreateDdlTaskRequest request,
+            Authentication authentication) {
+
+        DdlTask task = ddlTaskService.createTask(
+                getUserId(authentication),
+                request
+        );
+
+        return Result.success(DdlTaskVO.from(task));
+    }
+
+    /**
+     * 查询任务详情
+     */
     @GetMapping("/{taskId}")
     public Result<DdlTaskVO> detail(
             @PathVariable Long taskId,
             Authentication authentication) {
 
-        return Result.success(
-                ddlTaskService.detail(
-                        taskId,
-                        getUserId(authentication)
-                )
+        DdlTask task = ddlTaskService.requireOwnedTask(
+                taskId,
+                getUserId(authentication)
         );
+
+        return Result.success(DdlTaskVO.from(task));
     }
 
-    // 修改个人任务
+    /**
+     * 修改任务
+     */
     @PutMapping("/{taskId}")
     public Result<DdlTaskVO> update(
             @PathVariable Long taskId,
-            @Valid @RequestBody DdlTaskUpdateRequest request,
+            @Valid @RequestBody UpdateDdlTaskRequest request,
             Authentication authentication) {
 
+        DdlTask task = ddlTaskService.updateTask(
+                taskId,
+                getUserId(authentication),
+                request
+        );
+
+        return Result.success(DdlTaskVO.from(task));
+    }
+
+    /**
+     * 标记完成或撤销完成
+     */
+    @PatchMapping("/{taskId}/completion")
+    public Result<DdlTaskVO> completion(
+            @PathVariable Long taskId,
+            @Valid @RequestBody DdlTaskCompletionRequest request,
+            Authentication authentication) {
+
+        DdlTask task = ddlTaskService.setCompletion(
+                taskId,
+                getUserId(authentication),
+                request.completed()
+        );
+
+        return Result.success(DdlTaskVO.from(task));
+    }
+
+    /**
+     * 删除任务（逻辑删除）
+     */
+    @DeleteMapping("/{taskId}")
+    public Result<DeleteDdlTaskResult> delete(
+            @PathVariable Long taskId,
+            Authentication authentication) {
+
+        DdlTask task = ddlTaskService.cancelTask(
+                taskId,
+                getUserId(authentication)
+        );
+
         return Result.success(
-                ddlTaskService.update(
-                        taskId,
-                        getUserId(authentication),
-                        request
+                new DeleteDdlTaskResult(
+                        task.getId(),
+                        task.getStatus()
                 )
         );
     }
 
-    // 完成任务
-    @PostMapping("/{taskId}/complete")
-    public Result<String> complete(
-            @PathVariable Long taskId,
-            Authentication authentication) {
-
-        ddlTaskService.complete(
-                taskId,
-                getUserId(authentication)
-        );
-
-        return Result.success("任务已完成");
-    }
-
-    // 取消任务
-    @PostMapping("/{taskId}/cancel")
-    public Result<String> cancel(
-            @PathVariable Long taskId,
-            Authentication authentication) {
-
-        ddlTaskService.cancel(
-                taskId,
-                getUserId(authentication)
-        );
-
-        return Result.success("任务已取消");
-    }
-
-    // 撤销完成
-    @PostMapping("/{taskId}/reopen")
-    public Result<String> reopen(
-            @PathVariable Long taskId,
-            Authentication authentication) {
-
-        ddlTaskService.reopen(
-                taskId,
-                getUserId(authentication)
-        );
-
-        return Result.success("已恢复任务");
-    }
-
-    // 用户处理任务变更草案
+    /**
+     * 处理 AI 识别出的任务变更草案
+     */
     @PostMapping("/{taskId}/draft-decision")
     public Result<DdlTaskVO> decideDraft(
             @PathVariable Long taskId,
@@ -145,7 +189,9 @@ public class DdlTaskController {
         return Result.success(DdlTaskVO.from(task));
     }
 
-    // 从 JWT 认证信息中获取用户 ID
+    /**
+     * 获取当前登录用户 ID
+     */
     private Long getUserId(Authentication authentication) {
 
         if (authentication == null
@@ -153,7 +199,9 @@ public class DdlTaskController {
                 instanceof Long userId)) {
 
             throw new BusinessException(
-                    401, "登录状态无效");
+                    401,
+                    "登录状态无效"
+            );
         }
 
         return userId;

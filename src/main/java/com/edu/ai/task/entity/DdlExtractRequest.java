@@ -57,4 +57,15 @@ public class DdlExtractRequest {
     private LocalDateTime createdAt;
 
     private LocalDateTime updatedAt;
+
+    /**
+     * 当前处理线程的唯一令牌。
+     * 旧线程不能使用新线程的令牌提交结果。
+     */
+    private String processingToken;
+
+    /**
+     * 当前处理租约的截止时间。
+     */
+    private LocalDateTime leaseUntil;
 }

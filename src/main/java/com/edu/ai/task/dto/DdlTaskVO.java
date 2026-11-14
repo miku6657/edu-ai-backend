@@ -1,7 +1,7 @@
 package com.edu.ai.task.dto;
 
 import com.edu.ai.task.entity.DdlTask;
-import tools.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Data;
 
 import java.math.BigDecimal;
