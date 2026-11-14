@@ -1,5 +1,6 @@
 package com.edu.ai.task.dto;
 
+import com.edu.ai.task.entity.DdlTaskChangeDraft;
 import tools.jackson.annotation.JsonProperty;
 import lombok.Data;
 
@@ -51,4 +52,44 @@ public class TaskChangeDraftVO {
 
     @JsonProperty("expires_at")
     private LocalDateTime expiresAt;
+
+    public static TaskChangeDraftVO from(
+            DdlTaskChangeDraft draft) {
+
+        TaskChangeDraftVO vo = new TaskChangeDraftVO();
+
+        vo.setTargetTaskId(draft.getTargetTaskId());
+        vo.setNewTaskTitle(draft.getNewTaskTitle());
+        vo.setNewTimePrecision(
+                draft.getNewTimePrecision()
+        );
+
+        vo.setNewDueDate(draft.getNewDueDate());
+        vo.setNewDueTime(draft.getNewDueTime());
+        vo.setNewDueAt(draft.getNewDueAt());
+
+        vo.setNewTimeInferred(
+                draft.getNewTimeInferred()
+        );
+
+        vo.setNewTimeAmbiguityReason(
+                draft.getNewTimeAmbiguityReason()
+        );
+
+        vo.setNewDeliverableFormat(
+                draft.getNewDeliverableFormat()
+        );
+
+        vo.setNewSubmissionChannel(
+                draft.getNewSubmissionChannel()
+        );
+
+        vo.setRawSourceText(draft.getRawSourceText());
+        vo.setRawTimeText(draft.getRawTimeText());
+
+        vo.setUserTimezone(draft.getUserTimezone());
+        vo.setExpiresAt(draft.getExpiresAt());
+
+        return vo;
+    }
 }

@@ -1,112 +1,113 @@
 package com.edu.ai.task.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-
 import com.edu.ai.common.BusinessException;
-import com.edu.ai.course.entity.Course;
-import com.edu.ai.course.mapper.CourseMapper;
-
-import com.edu.ai.task.dto.DdlTaskCreateRequest;
-import com.edu.ai.task.dto.DdlTaskUpdateRequest;
+import com.edu.ai.task.dto.CreateDdlTaskRequest;
+import com.edu.ai.task.dto.DdlTaskBoardVO;
 import com.edu.ai.task.dto.DdlTaskVO;
-
+import com.edu.ai.task.dto.UpdateDdlTaskRequest;
 import com.edu.ai.task.entity.DdlTask;
 import com.edu.ai.task.mapper.DdlTaskMapper;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.util.Comparator;
 import java.util.List;
-import java.util.UUID;
 
 @Service
 public class DdlTaskService {
 
-    private final DdlTaskMapper ddlTaskMapper;
-    private final CourseMapper courseMapper;
+    private final DdlTaskMapper taskMapper;
 
-    public DdlTaskService(
-            DdlTaskMapper ddlTaskMapper,
-            CourseMapper courseMapper) {
-
-        this.ddlTaskMapper = ddlTaskMapper;
-        this.courseMapper = courseMapper;
+    public DdlTaskService(DdlTaskMapper taskMapper) {
+        this.taskMapper = taskMapper;
     }
 
     /**
-     * 创建个人 DDL 任务
+     * 查询当前用户的全部任务。
+     */
+    public List<DdlTask> listTasks(
+            Long userId,
+            String statusGroup,
+            Long courseId) {
+
+        LambdaQueryWrapper<DdlTask> wrapper =
+                new LambdaQueryWrapper<DdlTask>()
+                        .eq(DdlTask::getUserId, userId)
+                        .ne(DdlTask::getStatus, "CANCELED");
+
+        if (courseId != null) {
+            wrapper.eq(DdlTask::getCourseId, courseId);
+        }
+
+        List<DdlTask> tasks = taskMapper.selectList(wrapper);
+
+        LocalDateTime now = LocalDateTime.now();
+
+        // 动态计算逾期状态
+        for (DdlTask task : tasks) {
+            refreshOverdueStatus(task, now);
+        }
+
+        tasks.sort(
+                Comparator.comparing(
+                        DdlTask::getDueAt,
+                        Comparator.nullsLast(
+                                Comparator.naturalOrder()
+                        )
+                )
+        );
+
+        return tasks.stream()
+                .filter(task -> matchesGroup(
+                        task.getStatus(), statusGroup))
+                .toList();
+    }
+
+    /**
+     * 手动创建任务。
      */
     @Transactional(rollbackFor = Exception.class)
-    public DdlTaskVO create(
+    public DdlTask createTask(
             Long userId,
-            DdlTaskCreateRequest request) {
+            CreateDdlTaskRequest request) {
 
-        validateUser(userId);
         validateCreateRequest(request);
 
-        // 如果关联课程，检查当前用户是否有权限
-        if (request.getCourseId() != null) {
-            Course course = requireOwnedCourse(
-                    request.getCourseId(), userId);
-
-            request.setCourseName(course.getName());
-        }
+        LocalDateTime now = LocalDateTime.now();
 
         DdlTask task = new DdlTask();
 
         task.setUserId(userId);
-
-        task.setDisplayCode(
-                "DDL-" + UUID.randomUUID()
-                        .toString()
-                        .replace("-", "")
-                        .substring(0, 12)
-                        .toUpperCase()
-        );
-
         task.setCourseId(request.getCourseId());
-        task.setCourseName(
-                request.getCourseName() == null
-                        ? "未关联课程"
-                        : request.getCourseName()
-        );
-
+        task.setCourseName(request.getCourseName().trim());
         task.setTaskTitle(request.getTaskTitle().trim());
 
-        task.setDeliverableFormat(
-                request.getDeliverableFormat());
-
-        task.setSubmissionChannel(
-                request.getSubmissionChannel());
-
-        task.setRawSourceText(request.getRawSourceText());
-        task.setRawTimeText(request.getRawTimeText());
-
         task.setTimePrecision(
-                normalizePrecision(request.getTimePrecision()));
-
-        task.setRelativeTime(
-                Boolean.TRUE.equals(request.getRelativeTime()));
+                request.getTimePrecision() == null
+                        ? "EXACT_DATETIME"
+                        : request.getTimePrecision()
+        );
 
         task.setDueDate(request.getDueDate());
         task.setDueTime(request.getDueTime());
-        task.setDueAt(request.getDueAt());
 
-        task.setTimeInferred(
-                Boolean.TRUE.equals(request.getTimeInferred()));
+        task.setDeliverableFormat(
+                request.getDeliverableFormat()
+        );
 
-        task.setTimeAmbiguityReason(
-                request.getTimeAmbiguityReason());
+        task.setSubmissionChannel(
+                request.getSubmissionChannel()
+        );
 
-        task.setUserTimezone(
-                request.getUserTimezone() == null
-                        ? "Asia/Shanghai"
-                        : request.getUserTimezone());
+        task.setTimeInferred(false);
+        task.setRelativeTime(false);
 
-        task.setStatus(resolveInitialStatus(task));
-
-        task.setConfidence(null);
+        task.setSourcePlatform("MANUAL");
 
         task.setFollowUpCount(0);
 
@@ -114,213 +115,197 @@ public class DdlTaskService {
         task.setRemindedT6h(false);
         task.setRemindedOverdue(false);
 
-        task.setSourcePlatform(
-                request.getSourcePlatform() == null
-                        ? "MANUAL"
-                        : request.getSourcePlatform());
-
-        LocalDateTime now = LocalDateTime.now();
-
         task.setCreatedAt(now);
         task.setUpdatedAt(now);
 
-        ddlTaskMapper.insert(task);
+        normalizeTime(task);
 
-        return DdlTaskVO.from(task);
+        task.setStatus(determineInitialStatus(task, now));
+
+        taskMapper.insert(task);
+
+        return task;
     }
 
     /**
-     * 查询当前用户全部任务
-     */
-    public List<DdlTaskVO> list(Long userId) {
-
-        validateUser(userId);
-
-        List<DdlTask> tasks = ddlTaskMapper.selectList(
-                new LambdaQueryWrapper<DdlTask>()
-                        .eq(DdlTask::getUserId, userId)
-                        .orderByAsc(DdlTask::getDueAt)
-                        .orderByDesc(DdlTask::getCreatedAt)
-        );
-
-        return tasks.stream()
-                .map(DdlTaskVO::from)
-                .toList();
-    }
-
-    /**
-     * 查询单个任务
-     */
-    public DdlTaskVO detail(
-            Long taskId,
-            Long userId) {
-
-        DdlTask task = requireUserTask(taskId, userId);
-
-        return DdlTaskVO.from(task);
-    }
-
-    /**
-     * 修改个人任务
+     * 修改任务。
      */
     @Transactional(rollbackFor = Exception.class)
-    public DdlTaskVO update(
+    public DdlTask updateTask(
             Long taskId,
             Long userId,
-            DdlTaskUpdateRequest request) {
+            UpdateDdlTaskRequest request) {
 
-        validateUser(userId);
-
-        if (request == null
-                || request.getTaskTitle() == null
-                || request.getTaskTitle().isBlank()) {
-
-            throw new BusinessException(
-                    400, "任务标题不能为空");
-        }
-
-        DdlTask task = requireUserTask(taskId, userId);
+        DdlTask task = requireOwnedTask(taskId, userId);
 
         if ("COMPLETED".equals(task.getStatus())
                 || "CANCELED".equals(task.getStatus())) {
-
             throw new BusinessException(
                     400, "已完成或已取消的任务不能修改");
         }
 
-        if (request.getCourseId() != null) {
+        validateUpdateRequest(request);
 
-            Course course = requireOwnedCourse(
-                    request.getCourseId(), userId);
+        LocalDate oldDate = task.getDueDate();
+        LocalTime oldTime = task.getDueTime();
 
-            task.setCourseId(course.getId());
-            task.setCourseName(course.getName());
-
-        } else {
-            task.setCourseId(null);
-            task.setCourseName("未关联课程");
-        }
-
+        task.setCourseId(request.getCourseId());
+        task.setCourseName(request.getCourseName().trim());
         task.setTaskTitle(request.getTaskTitle().trim());
 
         task.setDeliverableFormat(
-                request.getDeliverableFormat());
+                request.getDeliverableFormat()
+        );
 
         task.setSubmissionChannel(
-                request.getSubmissionChannel());
+                request.getSubmissionChannel()
+        );
 
-        task.setTimePrecision(
-                normalizePrecision(request.getTimePrecision()));
-
+        task.setTimePrecision(request.getTimePrecision());
         task.setDueDate(request.getDueDate());
         task.setDueTime(request.getDueTime());
-        task.setDueAt(request.getDueAt());
 
-        task.setTimeInferred(
-                Boolean.TRUE.equals(request.getTimeInferred()));
+        boolean timeChanged =
+                !java.util.Objects.equals(
+                        oldDate, request.getDueDate())
+                || !java.util.Objects.equals(
+                        oldTime, request.getDueTime());
 
-        task.setTimeAmbiguityReason(
-                request.getTimeAmbiguityReason());
+        normalizeTime(task);
 
-        if (request.getUserTimezone() != null) {
-            task.setUserTimezone(request.getUserTimezone());
+        if (Boolean.TRUE.equals(request.getReconfirmTime())) {
+            task.setStatus(determineInitialStatus(
+                    task, LocalDateTime.now()));
+        } else if (timeChanged) {
+            task.setStatus(determineInitialStatus(
+                    task, LocalDateTime.now()));
         }
-
-        task.setStatus(resolveInitialStatus(task));
 
         task.setUpdatedAt(LocalDateTime.now());
 
-        ddlTaskMapper.updateById(task);
+        taskMapper.updateById(task);
 
-        return DdlTaskVO.from(task);
+        return task;
     }
 
     /**
-     * 完成任务
+     * 标记完成或取消完成。
      */
     @Transactional(rollbackFor = Exception.class)
-    public void complete(
+    public DdlTask setCompletion(
             Long taskId,
-            Long userId) {
+            Long userId,
+            boolean completed) {
 
-        DdlTask task = requireUserTask(taskId, userId);
+        DdlTask task = requireOwnedTask(taskId, userId);
 
         if ("CANCELED".equals(task.getStatus())) {
             throw new BusinessException(
-                    400, "已取消的任务不能完成");
+                    400, "已取消的任务不能修改完成状态");
         }
 
-        if ("PENDING_TIME".equals(task.getStatus())
-                || "PENDING_CONFIRM".equals(task.getStatus())) {
-
-            throw new BusinessException(
-                    400, "请先确认任务截止时间");
+        if (completed) {
+            task.setStatus("COMPLETED");
+            task.setCompletedAt(LocalDateTime.now());
+        } else {
+            task.setCompletedAt(null);
+            task.setStatus(
+                    determineInitialStatus(
+                            task, LocalDateTime.now())
+            );
         }
 
-        task.setStatus("COMPLETED");
-        task.setCompletedAt(LocalDateTime.now());
         task.setUpdatedAt(LocalDateTime.now());
 
-        ddlTaskMapper.updateById(task);
+        taskMapper.updateById(task);
+
+        return task;
     }
 
     /**
-     * 取消任务
+     * 删除任务。
      *
-     * 使用逻辑取消，不物理删除数据库记录
+     * 这里使用逻辑删除，不真正删除数据库记录。
      */
     @Transactional(rollbackFor = Exception.class)
-    public void cancel(
+    public DdlTask cancelTask(
             Long taskId,
             Long userId) {
 
-        DdlTask task = requireUserTask(taskId, userId);
+        DdlTask task = requireOwnedTask(taskId, userId);
 
-        if ("COMPLETED".equals(task.getStatus())) {
+        if ("CANCELED".equals(task.getStatus())) {
             throw new BusinessException(
-                    400, "已完成的任务不能取消");
+                    400, "任务已经取消");
         }
 
         task.setStatus("CANCELED");
         task.setUpdatedAt(LocalDateTime.now());
 
-        ddlTaskMapper.updateById(task);
+        taskMapper.updateById(task);
+
+        return task;
     }
 
     /**
-     * 撤销完成
+     * 任务看板。
      */
-    @Transactional(rollbackFor = Exception.class)
-    public void reopen(
+    public DdlTaskBoardVO getBoard(
+            Long userId,
+            Long courseId) {
+
+        List<DdlTask> tasks =
+                listTasks(userId, "ALL", courseId);
+
+        DdlTaskBoardVO board = new DdlTaskBoardVO();
+
+        board.setPendingInboxTasks(
+                tasks.stream()
+                        .filter(t ->
+                                "PENDING_TIME".equals(t.getStatus())
+                                || "PENDING_CONFIRM".equals(t.getStatus()))
+                        .map(DdlTaskVO::from)
+                        .toList()
+        );
+
+        board.setActiveTasks(
+                tasks.stream()
+                        .filter(t ->
+                                "ACTIVE".equals(t.getStatus())
+                                || "OVERDUE".equals(t.getStatus()))
+                        .map(DdlTaskVO::from)
+                        .toList()
+        );
+
+        board.setCompletedTasks(
+                tasks.stream()
+                        .filter(t ->
+                                "COMPLETED".equals(t.getStatus()))
+                        .map(DdlTaskVO::from)
+                        .toList()
+        );
+
+        // 变更草案由 DdlTaskChangeDraftService 提供
+        board.setPendingChangeDrafts(List.of());
+
+        return board;
+    }
+
+    /**
+     * 查询并校验任务归属。
+     */
+    public DdlTask requireOwnedTask(
             Long taskId,
             Long userId) {
 
-        DdlTask task = requireUserTask(taskId, userId);
-
-        if (!"COMPLETED".equals(task.getStatus())) {
+        if (taskId == null || taskId <= 0) {
             throw new BusinessException(
-                    400, "只有已完成的任务可以撤销完成");
+                    400, "任务ID不合法");
         }
 
-        task.setCompletedAt(null);
-        task.setStatus(resolveInitialStatus(task));
-        task.setUpdatedAt(LocalDateTime.now());
-
-        ddlTaskMapper.updateById(task);
-    }
-
-    /**
-     * 按用户归属查询任务
-     */
-    private DdlTask requireUserTask(
-            Long taskId,
-            Long userId) {
-
-        validateUser(userId);
-
-        DdlTask task = ddlTaskMapper.selectOne(
+        DdlTask task = taskMapper.selectOne(
                 new LambdaQueryWrapper<DdlTask>()
-                        .eq(DdlTask::getTaskId, taskId)
+                        .eq(DdlTask::getId, taskId)
                         .eq(DdlTask::getUserId, userId)
                         .last("LIMIT 1")
         );
@@ -334,107 +319,178 @@ public class DdlTaskService {
     }
 
     /**
-     * 校验课程归属
+     * 根据日期和时间生成 dueAt。
      */
-    private Course requireOwnedCourse(
-            Long courseId,
-            Long userId) {
+    private void normalizeTime(DdlTask task) {
 
-        Course course = courseMapper.selectById(courseId);
-
-        if (course == null) {
-            throw new BusinessException(
-                    404, "关联课程不存在");
+        if (task.getDueDate() == null) {
+            task.setDueAt(null);
+            return;
         }
 
-        if (!userId.equals(course.getOwnerId())) {
-            throw new BusinessException(
-                    403, "只能关联自己创建的课程");
+        if (task.getDueTime() == null) {
+            task.setDueAt(null);
+            return;
         }
 
-        if (!Integer.valueOf(1).equals(course.getStatus())) {
-            throw new BusinessException(
-                    403, "关联课程已停用");
-        }
-
-        return course;
-    }
-
-    private void validateUser(Long userId) {
-
-        if (userId == null || userId <= 0) {
-            throw new BusinessException(
-                    401, "用户身份无效");
-        }
-    }
-
-    private void validateCreateRequest(
-            DdlTaskCreateRequest request) {
-
-        if (request == null
-                || request.getTaskTitle() == null
-                || request.getTaskTitle().isBlank()) {
-
-            throw new BusinessException(
-                    400, "任务标题不能为空");
-        }
-
-        if (request.getTaskTitle().trim().length() > 200) {
-            throw new BusinessException(
-                    400, "任务标题不能超过200个字符");
-        }
+        task.setDueAt(
+                LocalDateTime.of(
+                        task.getDueDate(),
+                        task.getDueTime()
+                )
+        );
     }
 
     /**
-     * 统一时间精度
+     * 确定任务初始状态。
      */
-    private String normalizePrecision(String precision) {
-
-        if (precision == null || precision.isBlank()) {
-            return "VAGUE_OR_MISSING";
-        }
-
-        return switch (precision) {
-            case "EXACT_DATETIME",
-                 "DATE_ONLY",
-                 "VAGUE_OR_MISSING",
-                 "INVALID_OR_PAST" -> precision;
-
-            default -> throw new BusinessException(
-                    400, "不支持的时间精度");
-        };
-    }
-
-    /**
-     * 确定任务初始状态
-     */
-    private String resolveInitialStatus(DdlTask task) {
+    private String determineInitialStatus(
+            DdlTask task,
+            LocalDateTime now) {
 
         String precision = task.getTimePrecision();
 
         if ("VAGUE_OR_MISSING".equals(precision)
-                || task.getDueDate() == null) {
+                || "PENDING_CONFIRM".equals(precision)) {
+            return "PENDING_CONFIRM";
+        }
 
+        if (task.getDueDate() == null) {
             return "PENDING_TIME";
         }
 
-        if ("INVALID_OR_PAST".equals(precision)) {
-            return "PENDING_CONFIRM";
+        if (task.getDueAt() == null) {
+            return "PENDING_TIME";
         }
 
-        if (Boolean.TRUE.equals(task.getTimeInferred())
-                || (task.getTimeAmbiguityReason() != null
-                && !task.getTimeAmbiguityReason().isBlank())) {
-
-            return "PENDING_CONFIRM";
-        }
-
-        if (task.getDueAt() != null
-                && task.getDueAt().isBefore(LocalDateTime.now())) {
-
+        if (task.getDueAt().isBefore(now)) {
             return "PENDING_CONFIRM";
         }
 
         return "ACTIVE";
+    }
+
+    /**
+     * 动态刷新逾期状态。
+     */
+    private void refreshOverdueStatus(
+            DdlTask task,
+            LocalDateTime now) {
+
+        if (!"ACTIVE".equals(task.getStatus())) {
+            return;
+        }
+
+        if (task.getDueAt() != null
+                && task.getDueAt().isBefore(now)) {
+
+            task.setStatus("OVERDUE");
+            task.setUpdatedAt(now);
+
+            taskMapper.updateById(task);
+        }
+    }
+
+    private boolean matchesGroup(
+            String status,
+            String group) {
+
+        if (group == null || "ALL".equals(group)) {
+            return true;
+        }
+
+        return switch (group) {
+            case "PENDING_INBOX" ->
+                    "PENDING_TIME".equals(status)
+                    || "PENDING_CONFIRM".equals(status);
+
+            case "ACTIVE_BOARD" ->
+                    "ACTIVE".equals(status)
+                    || "OVERDUE".equals(status);
+
+            case "COMPLETED" ->
+                    "COMPLETED".equals(status);
+
+            default -> throw new BusinessException(
+                    400, "不支持的任务状态分组");
+        };
+    }
+
+    private void validateCreateRequest(
+            CreateDdlTaskRequest request) {
+
+        if (request == null) {
+            throw new BusinessException(
+                    400, "请求参数不能为空");
+        }
+
+        if (request.getClientRequestId() == null
+                || request.getClientRequestId().isBlank()) {
+            throw new BusinessException(
+                    400, "请求ID不能为空");
+        }
+
+        if (request.getCourseName() == null
+                || request.getCourseName().isBlank()) {
+            throw new BusinessException(
+                    400, "课程名称不能为空");
+        }
+
+        if (request.getTaskTitle() == null
+                || request.getTaskTitle().isBlank()) {
+            throw new BusinessException(
+                    400, "任务标题不能为空");
+        }
+
+        if (request.getCourseName().length() > 100) {
+            throw new BusinessException(
+                    400, "课程名称过长");
+        }
+
+        if (request.getTaskTitle().length() > 200) {
+            throw new BusinessException(
+                    400, "任务标题不能超过200个字符");
+        }
+
+        String precision = request.getTimePrecision();
+
+        if (precision != null
+                && !List.of(
+                        "EXACT_DATETIME",
+                        "DATE_ONLY",
+                        "VAGUE_OR_MISSING"
+                ).contains(precision)) {
+            throw new BusinessException(
+                    400, "不支持的时间精度");
+        }
+    }
+
+    private void validateUpdateRequest(
+            UpdateDdlTaskRequest request) {
+
+        if (request == null
+                || request.getCourseName() == null
+                || request.getCourseName().isBlank()
+                || request.getTaskTitle() == null
+                || request.getTaskTitle().isBlank()) {
+
+            throw new BusinessException(
+                    400, "课程名称和任务标题不能为空");
+        }
+
+        if (request.getTaskTitle().length() > 200
+                || request.getCourseName().length() > 100) {
+            throw new BusinessException(
+                    400, "课程名称或任务标题过长");
+        }
+
+        if (!List.of(
+                "EXACT_DATETIME",
+                "DATE_ONLY",
+                "VAGUE_OR_MISSING"
+        ).contains(request.getTimePrecision())) {
+            throw new BusinessException(
+                    400, "不支持的时间精度");
+        }
     }
 }

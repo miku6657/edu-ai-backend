@@ -310,7 +310,7 @@ public class TaskChangeDraftService {
             );
         }
 
-        draft.setResultTaskId(result.getTaskId());
+        draft.setResultTaskId(result.getId());
         draft.setDecision(decision);
         draft.setDecisionRequestId(
                 request.getClientRequestId()
@@ -470,7 +470,7 @@ public class TaskChangeDraftService {
 
         DdlTask task = taskMapper.selectOne(
                 new LambdaQueryWrapper<DdlTask>()
-                        .eq(DdlTask::getTaskId, taskId)
+                        .eq(DdlTask::getId, taskId)
                         .eq(DdlTask::getUserId, userId)
                         .last("LIMIT 1")
         );

@@ -1,6 +1,7 @@
 package com.edu.ai.task.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
@@ -14,35 +15,34 @@ import java.time.LocalTime;
 @TableName("ddl_task")
 public class DdlTask {
 
-    @TableId(value = "task_id", type = IdType.AUTO)
-    private Long taskId;
+    @TableId(type = IdType.AUTO)
+    private Long id;
 
-    // 所属用户
     private Long userId;
 
-    // 任务显示编号
     private String displayCode;
 
-    // 关联课程，可以为空
     private Long courseId;
 
     private String courseName;
 
-    // 任务基本信息
     private String taskTitle;
+
+    private String description;
 
     private String deliverableFormat;
 
     private String submissionChannel;
 
-    // 原始通知内容
     private String rawSourceText;
 
     private String rawTimeText;
 
-    // 时间信息
     private String timePrecision;
 
+    // 数据库字段为 is_relative_time
+    // Java 属性保持 relativeTime
+    @TableField("is_relative_time")
     private Boolean relativeTime;
 
     private LocalDate dueDate;
@@ -59,23 +59,18 @@ public class DdlTask {
 
     private BigDecimal confidence;
 
-    // PENDING_TIME、PENDING_CONFIRM、
-    // ACTIVE、OVERDUE、COMPLETED、CANCELED
     private String status;
 
-    // 后续跟进
     private LocalDateTime followUpAt;
 
     private Integer followUpCount;
 
-    // 提醒标记
     private Boolean remindedT24h;
 
     private Boolean remindedT6h;
 
     private Boolean remindedOverdue;
 
-    // MANUAL、AI、IMPORT 等
     private String sourcePlatform;
 
     private LocalDateTime completedAt;
