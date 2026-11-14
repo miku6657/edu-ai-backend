@@ -48,6 +48,7 @@ def migrate_course(
     collection_name, collection = create_migration_collection(
         migration_id,
         execution_token,
+        course_id,
     )
 
     client = create_embedding_client(api_key, base_url)
@@ -95,6 +96,7 @@ def migrate_course(
             chunks,
             model=model,
             embedding_client=client,
+            active="1",
         )
 
         total_documents += 1

@@ -160,7 +160,7 @@ public class DocumentLifecycleService {
 
             lease.assertValid();
 
-            cleanup(documentId);
+            cleanup(documentId, lease);
         }
     }
 
@@ -280,7 +280,7 @@ public class DocumentLifecycleService {
         lease.assertValid();
 
         try {
-            cleanup(documentId);
+            cleanup(documentId, lease);
         } catch (BusinessException ex) {
             log.warn(
                     "Document cleanup recovery failed: {}",
@@ -290,7 +290,9 @@ public class DocumentLifecycleService {
     }
 
     // 实际清理流程
-    private void cleanup(Long documentId) {
+    private void cleanup(
+            Long documentId,
+            CourseIndexLease.Handle lease) {
 
         CourseDocument doc =
                 requireDocument(documentId);
@@ -345,11 +347,17 @@ public class DocumentLifecycleService {
                 );
             }
 
+            // Python 删除成功后，再次检查课程锁。
+            lease.assertValid();
+
             // 第二步：删除磁盘上的 PDF
             Path filePath = safeFilePath(
                     doc.getStorageName());
 
             Files.deleteIfExists(filePath);
+
+            // 删除 PDF 后、更新状态前，再次检查课程锁。
+            lease.assertValid();
 
             // 第三步：保留数据库记录，标记删除完成
             documentMapper.update(

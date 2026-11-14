@@ -68,8 +68,9 @@ def get_collection_by_name(name: str):
 def create_migration_collection(
     migration_id: int,
     execution_token: str,
+    course_id: int,
 ):
-    """创建执行者独占的临时 Collection，不允许复用。"""
+    """创建迁移执行者独占的临时 Collection，不允许复用。"""
     name = migration_collection_name(
         migration_id,
         execution_token,
@@ -84,6 +85,7 @@ def create_migration_collection(
         embedding_function=None,
         metadata={
             "migration_id": str(migration_id),
+            "course_id": str(course_id),
             "execution_token_hash": token_hash,
             "status": "STAGED",
         },
@@ -371,11 +373,17 @@ def delete_document_vectors_all_versions(
     course_id: int,
     document_id: int,
 ) -> int:
-    """删除一个文档在该课程所有版本Collection中的向量。
+    """删除指定课程、指定文档在所有正式和临时Collection中的向量。
 
-    不删除Collection本身。
+    覆盖：
+    1. course_{id}
+    2. course_{id}_v*
+    3. mig_* 中 metadata.course_id 对应的迁移 Collection
+
+    不删除 Collection 本身。
     """
     prefix = f"course_{course_id}"
+    course_id_str = str(course_id)
     total_deleted = 0
 
     for item in client.list_collections():
@@ -385,15 +393,28 @@ def delete_document_vectors_all_versions(
             else str(item)
         )
 
-        if name != prefix and not name.startswith(prefix + "_v"):
-            continue
-
         try:
             collection = client.get_collection(
                 name=name,
                 embedding_function=None,
             )
         except chromadb.errors.NotFoundError:
+            continue
+
+        metadata = collection.metadata or {}
+
+        # 正式 Collection：course_{id} 或 course_{id}_v*
+        is_legacy = (
+            name == prefix or name.startswith(prefix + "_v")
+        )
+
+        # 临时迁移 Collection：mig_* 且 metadata.course_id 匹配
+        is_migration = (
+            name.startswith("mig_")
+            and metadata.get("course_id") == course_id_str
+        )
+
+        if not is_legacy and not is_migration:
             continue
 
         ids = set()
