@@ -58,7 +58,7 @@ public class DocumentServiceImpl implements DocumentService {
             Long userId,
             MultipartFile file) {
 
-        Course course = getCourse(courseId);
+        Course course = requireMyCourse(courseId, userId);
 
         if (!Integer.valueOf(1).equals(course.getStatus())) {
             throw new BusinessException(400, "课程已停用");
@@ -129,7 +129,7 @@ public class DocumentServiceImpl implements DocumentService {
             Long courseId,
             Long userId) {
 
-        getCourse(courseId);
+        requireMyCourse(courseId, userId);
 
         LambdaQueryWrapper<CourseDocument> query =
                 new LambdaQueryWrapper<CourseDocument>()
@@ -184,15 +184,7 @@ public class DocumentServiceImpl implements DocumentService {
             throw new BusinessException(404, "该资料已删除或正在删除");
         }
 
-        getCourse(doc.getCourseId());
-
-        boolean isReady = "READY".equals(doc.getStatus());
-
-        boolean isUploader = userId.equals(doc.getUploaderId());
-
-        if (!isReady && !isUploader) {
-            throw new BusinessException(403, "该资料尚未开放下载");
-        }
+        requireMyCourse(doc.getCourseId(), userId);
 
         String storageName = doc.getStorageName();
 
@@ -232,6 +224,26 @@ public class DocumentServiceImpl implements DocumentService {
 
         if (course == null) {
             throw new BusinessException(404, "课程不存在");
+        }
+
+        return course;
+    }
+
+    /**
+     * 个人课程空间权限检查：
+     * 当前登录用户只能访问自己创建的课程。
+     */
+    private Course requireMyCourse(Long courseId, Long userId) {
+
+        Course course = getCourse(courseId);
+
+        if (userId == null ||
+                !userId.equals(course.getOwnerId())) {
+
+            throw new BusinessException(
+                    403,
+                    "无权访问其他用户的课程资料"
+            );
         }
 
         return course;

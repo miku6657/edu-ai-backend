@@ -5,9 +5,7 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 
 import com.edu.ai.common.BusinessException;
 import com.edu.ai.course.entity.Course;
-import com.edu.ai.course.entity.CourseStudent;
 import com.edu.ai.course.mapper.CourseMapper;
-import com.edu.ai.course.mapper.CourseStudentMapper;
 
 import com.edu.ai.task.dto.LearningTaskRequest;
 import com.edu.ai.task.dto.StudentTaskVO;
@@ -23,8 +21,6 @@ import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.stream.Collectors;
 
 @Service
 public class LearningTaskService {
@@ -32,18 +28,15 @@ public class LearningTaskService {
     private final LearningTaskMapper taskMapper;
     private final TaskStudentMapper taskStudentMapper;
     private final CourseMapper courseMapper;
-    private final CourseStudentMapper courseStudentMapper;
 
     public LearningTaskService(
             LearningTaskMapper taskMapper,
             TaskStudentMapper taskStudentMapper,
-            CourseMapper courseMapper,
-            CourseStudentMapper courseStudentMapper) {
+            CourseMapper courseMapper) {
 
         this.taskMapper = taskMapper;
         this.taskStudentMapper = taskStudentMapper;
         this.courseMapper = courseMapper;
-        this.courseStudentMapper = courseStudentMapper;
     }
 
     // 创建课程任务
@@ -198,40 +191,26 @@ public class LearningTaskService {
             Long userId) {
 
         LearningTask task = requireTask(taskId);
+
         requireCourseOwner(task.getCourseId(), userId);
 
-        List<CourseStudent> members =
-                courseStudentMapper.selectList(
-                        new LambdaQueryWrapper<CourseStudent>()
-                                .eq(
-                                        CourseStudent::getCourseId,
-                                        task.getCourseId()
-                                )
-                );
+        TaskStudent record = taskStudentMapper.selectOne(
+                new LambdaQueryWrapper<TaskStudent>()
+                        .eq(TaskStudent::getTaskId, taskId)
+                        .eq(TaskStudent::getStudentId, userId)
+        );
 
-        Set<Long> memberIds = members.stream()
-                .map(CourseStudent::getStudentId)
-                .collect(Collectors.toSet());
-
-        long completedCount = 0;
-
-        if (!memberIds.isEmpty()) {
-            completedCount = taskStudentMapper.selectCount(
-                    new LambdaQueryWrapper<TaskStudent>()
-                            .eq(TaskStudent::getTaskId, taskId)
-                            .eq(TaskStudent::getCompleted, 1)
-                            .in(TaskStudent::getStudentId, memberIds)
-            );
-        }
+        boolean completed = record != null
+                && Integer.valueOf(1)
+                        .equals(record.getCompleted());
 
         Map<String, Object> result = new HashMap<>();
 
         result.put("taskId", taskId);
-        result.put("totalStudents", memberIds.size());
-        result.put("completedStudents", completedCount);
+        result.put("completed", completed);
         result.put(
-                "uncompletedStudents",
-                memberIds.size() - completedCount
+                "completedTime",
+                record == null ? null : record.getCompletedTime()
         );
 
         return result;
@@ -282,31 +261,11 @@ public class LearningTaskService {
         }
     }
 
-    /**
-     * 课程创建者或已经加入课程的用户可以访问。
-     */
     private void requireCourseAccess(
             Long courseId,
             Long userId) {
 
-        Course course = requireCourse(courseId);
-
-        // 创建者直接放行
-        if (userId.equals(course.getOwnerId())) {
-            return;
-        }
-
-        // 检查当前用户是否加入课程
-        Long count = courseStudentMapper.selectCount(
-                new LambdaQueryWrapper<CourseStudent>()
-                        .eq(CourseStudent::getCourseId, courseId)
-                        .eq(CourseStudent::getStudentId, userId)
-        );
-
-        if (count == 0) {
-            throw new BusinessException(
-                    403, "无权访问该课程任务");
-        }
+        requireCourseOwner(courseId, userId);
     }
 
     private void validateRequest(LearningTaskRequest request) {

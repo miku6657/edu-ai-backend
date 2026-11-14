@@ -1,4 +1,3 @@
-
 package com.edu.ai.system.init;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -27,8 +26,8 @@ public class UserInitializer implements CommandLineRunner {
     public void run(String... args) {
 
         createUser("admin01", "ADMIN", "ADMIN_INIT_PASSWORD");
-        createUser("owner01", "OWNER", "OWNER_INIT_PASSWORD");
-        createUser("student01", "STUDENT", "STUDENT_INIT_PASSWORD");
+        createUser("owner01", "USER", "OWNER_INIT_PASSWORD");
+        createUser("student01", "USER", "STUDENT_INIT_PASSWORD");
     }
 
     private void createUser(

@@ -361,9 +361,7 @@ public class DocumentLifecycleService {
     }
 
     /**
-     * 文档管理权限：
-     * 1. 课程创建者可以管理课程内所有文档
-     * 2. 文档上传者可以管理自己上传的文档
+     * 文档管理权限：只有课程创建者可以管理课程内的文件。
      */
     private void requireDocumentManagePermission(
             CourseDocument document,
@@ -380,16 +378,12 @@ public class DocumentLifecycleService {
             );
         }
 
-        boolean isCourseOwner =
-                userId.equals(course.getOwnerId());
+        if (userId == null ||
+                !userId.equals(course.getOwnerId())) {
 
-        boolean isUploader =
-                userId.equals(document.getUploaderId());
-
-        if (!isCourseOwner && !isUploader) {
             throw new BusinessException(
                     403,
-                    "只能管理自己上传的文件或自己创建课程中的文件"
+                    "无权管理其他用户课程中的文件"
             );
         }
     }

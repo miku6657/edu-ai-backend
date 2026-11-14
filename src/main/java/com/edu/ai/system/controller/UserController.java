@@ -21,7 +21,7 @@ import java.util.Set;
 public class UserController {
 
     private static final Set<String> VALID_ROLES =
-            Set.of("ADMIN", "OWNER", "STUDENT");
+            Set.of("ADMIN", "USER");
 
     private final UserService userService;
     private final PasswordEncoder passwordEncoder;

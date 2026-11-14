@@ -2,9 +2,7 @@ package com.edu.ai.task.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.edu.ai.course.entity.Course;
-import com.edu.ai.course.entity.CourseStudent;
 import com.edu.ai.course.mapper.CourseMapper;
-import com.edu.ai.course.mapper.CourseStudentMapper;
 import com.edu.ai.task.dto.TaskReminderVO;
 import com.edu.ai.task.dto.TaskReminderSummaryVO;
 import com.edu.ai.task.entity.LearningTask;
@@ -24,18 +22,15 @@ public class TaskReminderService {
 
     private static final long DUE_SOON_HOURS = 24;
 
-    private final CourseStudentMapper courseStudentMapper;
     private final CourseMapper courseMapper;
     private final LearningTaskMapper taskMapper;
     private final TaskStudentMapper taskStudentMapper;
 
     public TaskReminderService(
-            CourseStudentMapper courseStudentMapper,
             CourseMapper courseMapper,
             LearningTaskMapper taskMapper,
             TaskStudentMapper taskStudentMapper) {
 
-        this.courseStudentMapper = courseStudentMapper;
         this.courseMapper = courseMapper;
         this.taskMapper = taskMapper;
         this.taskStudentMapper = taskStudentMapper;
@@ -51,36 +46,10 @@ public class TaskReminderService {
         summary.setOverdueCount(0);
         summary.setReminders(List.of());
 
-        // 1. 查询当前用户加入的课程
-        List<CourseStudent> enrollments =
-                courseStudentMapper.selectList(
-                        new LambdaQueryWrapper<CourseStudent>()
-                                .eq(CourseStudent::getStudentId, userId)
-                );
-
-        Set<Long> courseIds = enrollments.stream()
-                .map(CourseStudent::getCourseId)
-                .collect(Collectors.toSet());
-
-        // 2. 查询当前用户创建的课程
-        List<Course> ownedCourses = courseMapper.selectList(
-                new LambdaQueryWrapper<Course>()
-                        .eq(Course::getOwnerId, userId)
-                        .eq(Course::getStatus, 1)
-        );
-
-        ownedCourses.stream()
-                .map(Course::getId)
-                .forEach(courseIds::add);
-
-        if (courseIds.isEmpty()) {
-            return summary;
-        }
-
-        // 3. 查询用户有权访问的开放课程
+        // 个人课程空间：只查询当前用户创建的正常课程
         List<Course> courses = courseMapper.selectList(
                 new LambdaQueryWrapper<Course>()
-                        .in(Course::getId, courseIds)
+                        .eq(Course::getOwnerId, userId)
                         .eq(Course::getStatus, 1)
         );
 

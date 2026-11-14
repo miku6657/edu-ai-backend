@@ -29,7 +29,7 @@ public class JwtAuthenticationFilter
         extends OncePerRequestFilter {
 
     private static final Set<String> VALID_ROLES =
-            Set.of("ADMIN", "OWNER", "STUDENT");
+            Set.of("ADMIN", "USER");
 
     private final JwtTokenProvider jwtTokenProvider;
     private final UserMapper userMapper;

@@ -18,7 +18,7 @@ public class UserDTO {
     // 昵称
     private String nickname;
 
-    // 角色：ADMIN、OWNER、STUDENT
+    // 角色：ADMIN、USER
     private String role;
 
     // 用户状态：1 正常，0 禁用

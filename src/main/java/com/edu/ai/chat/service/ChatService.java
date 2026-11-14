@@ -8,9 +8,7 @@ import com.edu.ai.chat.mapper.ChatMessageMapper;
 import com.edu.ai.chat.mapper.ChatSessionMapper;
 import com.edu.ai.common.BusinessException;
 import com.edu.ai.course.entity.Course;
-import com.edu.ai.course.entity.CourseStudent;
 import com.edu.ai.course.mapper.CourseMapper;
-import com.edu.ai.course.mapper.CourseStudentMapper;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -47,7 +45,6 @@ ChatService {
     private final ChatSessionMapper sessionMapper;
     private final ChatMessageMapper messageMapper;
     private final CourseMapper courseMapper;
-    private final CourseStudentMapper studentMapper;
     private final ThreadPoolTaskExecutor executor;
     private final ObjectMapper objectMapper;
     private final ChatStreamRegistry streamRegistry;
@@ -60,7 +57,6 @@ ChatService {
             ChatSessionMapper sessionMapper,
             ChatMessageMapper messageMapper,
             CourseMapper courseMapper,
-            CourseStudentMapper studentMapper,
             @Qualifier("chatStreamExecutor")
             ThreadPoolTaskExecutor executor,
             ObjectMapper objectMapper,
@@ -71,7 +67,6 @@ ChatService {
         this.sessionMapper = sessionMapper;
         this.messageMapper = messageMapper;
         this.courseMapper = courseMapper;
-        this.studentMapper = studentMapper;
         this.executor = executor;
         this.objectMapper = objectMapper;
         this.streamRegistry = streamRegistry;
@@ -84,39 +79,34 @@ ChatService {
     }
 
     /**
-     * 检查当前用户是否有权访问课程知识库。
-     *
-     * 不再区分 OWNER 和 STUDENT：
-     * 1. 课程创建者可以访问。
-     * 2. 已加入课程的用户可以访问开放课程。
+     * 个人课程空间权限：
+     * 只能使用自己创建且正常开放的课程知识库。
      */
     private void checkAccess(Long courseId, Long userId) {
 
         Course course = courseMapper.selectById(courseId);
 
         if (course == null) {
-            throw new BusinessException(404, "课程不存在");
-        }
-
-        // 课程创建者可以访问自己的课程
-        if (userId.equals(course.getOwnerId())) {
-            return;
-        }
-
-        // 其他用户必须加入课程，并且课程处于开放状态
-        if (!Integer.valueOf(1).equals(course.getStatus())) {
-            throw new BusinessException(403, "课程暂不可访问");
-        }
-
-        Long count = studentMapper.selectCount(
-                new LambdaQueryWrapper<CourseStudent>()
-                        .eq(CourseStudent::getCourseId, courseId)
-                        .eq(CourseStudent::getStudentId, userId)
-        );
-
-        if (count == 0) {
             throw new BusinessException(
-                    403, "请先加入该课程");
+                    404,
+                    "课程不存在"
+            );
+        }
+
+        if (userId == null ||
+                !userId.equals(course.getOwnerId())) {
+
+            throw new BusinessException(
+                    403,
+                    "无权访问其他用户的课程知识库"
+            );
+        }
+
+        if (!Integer.valueOf(1).equals(course.getStatus())) {
+            throw new BusinessException(
+                    403,
+                    "课程已停用"
+            );
         }
     }
 
