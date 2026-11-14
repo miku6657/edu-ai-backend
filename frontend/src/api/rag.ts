@@ -2,6 +2,42 @@ import { apiRequest, apiStream } from '@/api/client'
 import { ApiError, CLIENT_ERROR_CODES } from '@/api/error'
 import type { BigIntId } from '@/api/types'
 
+/** Java ChatSession DTO。 */
+export interface ChatSession {
+  id: BigIntId
+  courseId: BigIntId
+  userId: BigIntId
+  title: string
+  createTime: string
+  updateTime: string
+}
+
+/** Java ChatMessage DTO。 */
+export interface ChatMessage {
+  id: BigIntId
+  sessionId: BigIntId
+  role: 'user' | 'assistant'
+  content: string
+  sourcesJson: string | null
+  createTime: string
+}
+
+/** 历史消息的页面展示模型。 */
+export interface ChatHistoryMessage {
+  message_id: BigIntId
+  course_id: BigIntId | null
+  platform: string
+  role: 'USER' | 'ASSISTANT' | 'SYSTEM'
+  intent_type: string | null
+  content: string
+  citations: RagCitation[] | null
+  is_rejected: boolean
+  trace_id: string | null
+  retrieval_cost_ms: number | null
+  llm_first_token_ms: number | null
+  created_at: string
+}
+
 /**
  * RAG 问答与会话历史 API（`04` §4.5 `API-RAG-001` / `API-CHAT-001/002`）。
  *
@@ -38,13 +74,11 @@ export interface TokenPayload {
 }
 
 export interface DonePayload {
-  user_message_id: string
-  assistant_message_id: string
-  is_rejected: boolean
-  retrieval_cost_ms: number
-  llm_first_token_ms: number
-  stripped_citation_count: number
-  trace_id: string
+  sessionId: BigIntId
+}
+
+export interface SessionPayload {
+  sessionId: BigIntId
 }
 
 export interface RagErrorPayload {
@@ -54,6 +88,7 @@ export interface RagErrorPayload {
 }
 
 export interface RagStreamHandlers {
+  onSession?: (payload: SessionPayload) => void
   onCitation?: (payload: CitationPayload) => void
   onRejectionNotice?: (payload: RejectionNoticePayload) => void
   onToken?: (payload: TokenPayload) => void
@@ -69,23 +104,8 @@ export interface RagStreamRequest {
   clientMsgId?: string
 }
 
-export interface ChatMessage {
-  message_id: BigIntId
-  course_id: BigIntId | null
-  platform: string
-  role: 'USER' | 'ASSISTANT' | 'SYSTEM'
-  intent_type: string | null
-  content: string
-  citations: RagCitation[] | null
-  is_rejected: boolean
-  trace_id: string | null
-  retrieval_cost_ms: number | null
-  llm_first_token_ms: number | null
-  created_at: string
-}
-
 export interface ChatMessagePage {
-  items: ChatMessage[]
+  items: ChatHistoryMessage[]
   next_cursor: string | null
   has_more: boolean
 }
@@ -98,6 +118,105 @@ export interface ClearMessagesResult {
 export interface ParsedSseFrame {
   event: string
   data: string
+}
+
+interface JavaSource {
+  documentId: number
+  page: number
+}
+
+const sessionCache = new Map<string, BigIntId>()
+
+function normalizeId(id: BigIntId): string {
+  if (!/^[1-9]\d*$/.test(id)) {
+    throw new Error('课程 ID 不合法')
+  }
+  return id
+}
+
+function requireSessionId(value: unknown): BigIntId {
+  if (typeof value !== 'string' || !/^[1-9]\d*$/.test(value)) {
+    throw new ApiError({
+      code: CLIENT_ERROR_CODES.MALFORMED_RESPONSE,
+      message: '服务端 SSE 事件缺少有效会话 ID。',
+    })
+  }
+  return value
+}
+
+function sourceToCitation(source: JavaSource): RagCitation {
+  return {
+    parent_chunk_id: `${source.documentId}-${source.page}`,
+    doc_id: String(source.documentId),
+    doc_name: `文档 ${source.documentId}`,
+    page_start: source.page,
+    page_end: source.page,
+    section_title: null,
+    content: '',
+    similarity_score: null,
+  }
+}
+
+function isJavaSource(value: unknown): value is JavaSource {
+  if (typeof value !== 'object' || value === null) {
+    return false
+  }
+  const source = value as Record<string, unknown>
+  return typeof source.documentId === 'number' && typeof source.page === 'number'
+}
+
+function parseSources(json: string | null): RagCitation[] {
+  if (!json) {
+    return []
+  }
+  try {
+    const parsed: unknown = JSON.parse(json)
+    return Array.isArray(parsed)
+      ? parsed.filter(isJavaSource).map(sourceToCitation)
+      : []
+  } catch {
+    return []
+  }
+}
+
+function toChatHistoryMessage(item: ChatMessage): ChatHistoryMessage {
+  return {
+    message_id: item.id,
+    course_id: null,
+    platform: 'EDU-05',
+    role: item.role === 'assistant' ? 'ASSISTANT' : 'USER',
+    intent_type: null,
+    content: item.content,
+    citations: parseSources(item.sourcesJson),
+    is_rejected: false,
+    trace_id: null,
+    retrieval_cost_ms: null,
+    llm_first_token_ms: null,
+    created_at: item.createTime,
+  }
+}
+
+async function sessionsForCourse(courseId: string): Promise<ChatSession[]> {
+  const sessions = await apiRequest<ChatSession[]>('/chat/sessions')
+  return sessions
+    .filter((item) => item.courseId === courseId)
+    .sort((a, b) => b.updateTime.localeCompare(a.updateTime))
+}
+
+async function resolveSessionId(courseId: string): Promise<BigIntId | null> {
+  const sessions = await sessionsForCourse(courseId)
+  const cached = sessionCache.get(courseId)
+  const latestId = sessions[0]?.id ?? null
+  if (cached !== undefined && cached === latestId) {
+    return cached
+  }
+
+  if (latestId === null) {
+    sessionCache.delete(courseId)
+  } else {
+    sessionCache.set(courseId, latestId)
+  }
+  return latestId
 }
 
 /** 解析一个 SSE 帧块；无 data 返回 null。 */
@@ -158,37 +277,91 @@ export function createSseFrameParser(onFrame: (frame: ParsedSseFrame) => void): 
 }
 
 /**
- * 发起 RAG SSE 问答并逐帧回调。
- *
- * @throws ApiError 建流失败或帧 JSON 非法；`AbortSignal` 取消时抛 `DOMException`。
+ * 发起 Java 聊天 SSE 问答并逐帧回调。
  */
 export async function streamRagQa(
   request: RagStreamRequest,
   handlers: RagStreamHandlers,
   signal?: AbortSignal,
 ): Promise<void> {
-  const response = await apiStream('/v1/rag/qa/stream', {
+  const courseId = normalizeId(request.courseId)
+  const sessionId = await resolveSessionId(courseId)
+
+  if (signal?.aborted) {
+    throw new DOMException('请求已取消', 'AbortError')
+  }
+
+  const response = await apiStream('/chat/stream', {
     method: 'POST',
     body: {
-      course_id: request.courseId,
-      query: request.query,
-      client_msg_id: request.clientMsgId ?? null,
+      courseId,
+      sessionId,
+      question: request.query,
     },
     signal,
   })
-  const body = response.body
-  if (body === null) {
+  if (response.body === null) {
     throw new ApiError({
       code: CLIENT_ERROR_CODES.MALFORMED_RESPONSE,
-      message: '服务端未返回可读取的流。',
+      message: '服务端未返回 SSE 流。',
       httpStatus: response.status,
     })
   }
 
-  const reader = body.getReader()
+  const reader = response.body.getReader()
   const decoder = new TextDecoder('utf-8')
+  let completed = false
+  let upstreamError = false
   const parser = createSseFrameParser((frame) => {
-    dispatchFrame(frame, handlers)
+    let payload: Record<string, unknown>
+    try {
+      const parsed: unknown = JSON.parse(frame.data)
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+        throw new Error('SSE payload must be an object')
+      }
+      payload = parsed as Record<string, unknown>
+    } catch (error) {
+      throw new ApiError({
+        code: CLIENT_ERROR_CODES.MALFORMED_RESPONSE,
+        message: '服务端 SSE 数据格式错误。',
+        cause: error,
+      })
+    }
+
+    if (frame.event === 'session') {
+      const sessionId = requireSessionId(payload.sessionId)
+      sessionCache.set(courseId, sessionId)
+      handlers.onSession?.({ sessionId })
+    } else if (frame.event === 'sources') {
+      const sources = Array.isArray(payload.sources)
+        ? payload.sources.filter(isJavaSource).map(sourceToCitation)
+        : []
+      handlers.onCitation?.({
+        user_message_id: '',
+        course_index_status: 'UNKNOWN',
+        rebuild_progress_note: null,
+        citations: sources,
+      })
+    } else if (frame.event === 'token') {
+      handlers.onToken?.({
+        delta: typeof payload.content === 'string' ? payload.content : '',
+        is_general_supplement: false,
+      })
+    } else if (frame.event === 'error') {
+      upstreamError = true
+      handlers.onErrorEvent?.({
+        code: 'AI_STREAM_ERROR',
+        message: typeof payload.message === 'string' && payload.message !== ''
+          ? payload.message
+          : 'AI 回答失败',
+        trace_id: '',
+      })
+    } else if (frame.event === 'done') {
+      const sessionId = requireSessionId(payload.sessionId)
+      sessionCache.set(courseId, sessionId)
+      completed = true
+      handlers.onDone?.({ sessionId })
+    }
   })
   try {
     for (;;) {
@@ -200,61 +373,59 @@ export async function streamRagQa(
     }
     parser.push(decoder.decode())
     parser.flush()
+    if (!completed && !upstreamError && !signal?.aborted) {
+      handlers.onErrorEvent?.({
+        code: 'STREAM_INTERRUPTED',
+        message: '连接结束，但未收到完成事件',
+        trace_id: '',
+      })
+    }
     handlers.onClosed?.()
   } finally {
     reader.releaseLock()
   }
 }
 
-function dispatchFrame(frame: ParsedSseFrame, handlers: RagStreamHandlers): void {
-  let payload: unknown
-  try {
-    payload = JSON.parse(frame.data)
-  } catch (error) {
-    throw new ApiError({
-      code: CLIENT_ERROR_CODES.MALFORMED_RESPONSE,
-      message: '流式事件不是合法 JSON，已停止处理。',
-      cause: error,
-    })
-  }
-  switch (frame.event) {
-    case 'citation':
-      handlers.onCitation?.(payload as CitationPayload)
-      break
-    case 'rejection_notice':
-      handlers.onRejectionNotice?.(payload as RejectionNoticePayload)
-      break
-    case 'token':
-      handlers.onToken?.(payload as TokenPayload)
-      break
-    case 'done':
-      handlers.onDone?.(payload as DonePayload)
-      break
-    case 'error':
-      handlers.onErrorEvent?.(payload as RagErrorPayload)
-      break
-    default:
-      break
-  }
-}
-
-export function listMessages(
+export async function listMessages(
   courseId: BigIntId,
-  beforeMessageId?: BigIntId | null,
-  limit = 20,
+  _beforeMessageId?: BigIntId | null,
+  _limit = 20,
 ): Promise<ChatMessagePage> {
-  const params = new URLSearchParams({ limit: String(limit) })
-  if (beforeMessageId !== undefined && beforeMessageId !== null) {
-    params.set('before_message_id', beforeMessageId)
+  void _beforeMessageId
+  void _limit
+  const id = await resolveSessionId(normalizeId(courseId))
+  if (id === null) {
+    return { items: [], next_cursor: null, has_more: false }
   }
-  return apiRequest<ChatMessagePage>(
-    `/v1/courses/${encodeURIComponent(courseId)}/messages?${params.toString()}`,
+
+  const messages = await apiRequest<ChatMessage[]>(
+    `/chat/sessions/${encodeURIComponent(id)}/messages`,
   )
+  return {
+    items: messages.map(toChatHistoryMessage),
+    next_cursor: null,
+    has_more: false,
+  }
 }
 
-export function clearMessages(courseId: BigIntId): Promise<ClearMessagesResult> {
-  return apiRequest<ClearMessagesResult>(
-    `/v1/courses/${encodeURIComponent(courseId)}/messages`,
-    { method: 'DELETE' },
-  )
+export async function clearMessages(
+  courseId: BigIntId,
+): Promise<ClearMessagesResult> {
+  const id = normalizeId(courseId)
+  const sessions = await sessionsForCourse(id)
+  let deleted = 0
+
+  for (const session of sessions) {
+    const messages = await apiRequest<ChatMessage[]>(
+      `/chat/sessions/${encodeURIComponent(session.id)}/messages`,
+    )
+    await apiRequest<string>(
+      `/chat/sessions/${encodeURIComponent(session.id)}`,
+      { method: 'DELETE' },
+    )
+    deleted += messages.length
+  }
+
+  sessionCache.delete(id)
+  return { course_id: id, deleted_count: deleted }
 }

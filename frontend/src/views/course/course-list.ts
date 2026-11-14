@@ -1,22 +1,26 @@
-import type { CourseNamespace } from '@/api/course'
+import type { Course } from '@/api/course'
 
 /**
- * 课程页的客户端筛选（P3）。
- *
- * 后端没有课程搜索/学期字段，因此这里只做**已有数据**的名称/备注过滤；
- * 不把“学期”“已归档”伪装成后端过滤。
+ * 课程列表客户端搜索。
+ * 根据课程名称和描述过滤。
  */
 export function filterCourses(
-  courses: CourseNamespace[],
+  courses: Course[],
   query: string,
-): CourseNamespace[] {
+): Course[] {
   const keyword = query.trim().toLowerCase()
+
   if (keyword === '') {
     return courses
   }
+
   return courses.filter((course) => {
-    const name = course.course_name.toLowerCase()
+    const name = course.name.toLowerCase()
     const description = (course.description ?? '').toLowerCase()
-    return name.includes(keyword) || description.includes(keyword)
+
+    return (
+      name.includes(keyword) ||
+      description.includes(keyword)
+    )
   })
 }

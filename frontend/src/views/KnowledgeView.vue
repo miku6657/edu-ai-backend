@@ -15,6 +15,7 @@ import type {
   KnowledgeDoc,
   DocumentStatus,
 } from '@/api/knowledge'
+import type { BigIntId } from '@/api/types'
 import BaseCard from '@/components/ui/BaseCard.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import TagBadge from '@/components/ui/TagBadge.vue'
@@ -40,7 +41,7 @@ const courseStore = useCourseStore()
 
 const courses = ref<Course[]>([])
 const docs = ref<KnowledgeDoc[]>([])
-const selectedCourseId = ref<string | null>(
+const selectedCourseId = ref<BigIntId | null>(
   courseStore.selectedCourseId,
 )
 const filterStatus = ref<DocumentStatus | ''>('')
@@ -48,7 +49,7 @@ const loadingCourses = ref(true)
 const loadingDocs = ref(false)
 const uploading = ref(false)
 const dragActive = ref(false)
-const actionDocId = ref<string | null>(null)
+const actionDocId = ref<BigIntId | null>(null)
 const loadError = ref('')
 const fileInput = ref<HTMLInputElement | null>(null)
 const compact = ref(false)
@@ -64,7 +65,7 @@ function syncCompact(): void {
 const currentCourse = computed(
   () =>
     courses.value.find(
-      (item) => String(item.id) === selectedCourseId.value,
+      (item) => item.id === selectedCourseId.value,
     ) ?? null,
 )
 
@@ -83,7 +84,7 @@ const pendingCount = computed(
     docs.value.filter(
       (doc) =>
         doc.status === 'UPLOADED' ||
-        doc.status === 'PARSING',
+          doc.status === 'PARSING',
     ).length,
 )
 
@@ -94,6 +95,7 @@ const statusOptions: Array<{ value: DocumentStatus | ''; label: string }> = [
   { value: 'READY', label: '已就绪' },
   { value: 'FAILED', label: '处理失败' },
   { value: 'DELETING', label: '删除中' },
+  { value: 'DELETE_FAILED', label: '删除失败' },
   { value: 'DELETED', label: '已删除' },
 ]
 
@@ -142,11 +144,11 @@ async function loadCourses(): Promise<void> {
   try {
     courses.value = await listCourses()
     const exists = courses.value.some(
-      (item) => String(item.id) === selectedCourseId.value,
+      (item) => item.id === selectedCourseId.value,
     )
     if (!exists) {
       selectedCourseId.value = courses.value[0]
-        ? String(courses.value[0].id)
+        ? courses.value[0].id
         : null
     }
     courseStore.select(selectedCourseId.value)
@@ -188,7 +190,7 @@ async function loadDocs(): Promise<void> {
   }
 }
 
-function selectCourse(courseId: string): void {
+function selectCourse(courseId: BigIntId): void {
   if (selectedCourseId.value === courseId) {
     return
   }
@@ -235,7 +237,7 @@ async function uploadFile(file: File): Promise<void> {
   }
   uploading.value = true
   try {
-    const uploaded = await uploadDoc(String(course.id), file)
+    const uploaded = await uploadDoc(course.id, file)
     notifySuccess(
       `《${uploaded.originalName}》上传成功，当前状态：${uploaded.status}`,
     )
@@ -275,7 +277,7 @@ async function onDelete(doc: KnowledgeDoc): Promise<void> {
   } catch {
     return
   }
-  actionDocId.value = String(doc.id)
+  actionDocId.value = doc.id
   try {
     await deleteDoc(doc.id)
     notifySuccess('课件删除成功')
@@ -288,7 +290,7 @@ async function onDelete(doc: KnowledgeDoc): Promise<void> {
 }
 
 async function onRetry(doc: KnowledgeDoc): Promise<void> {
-  actionDocId.value = String(doc.id)
+  actionDocId.value = doc.id
   try {
     await retryDoc(doc.id)
     notifySuccess(`《${doc.originalName}》已提交重新处理`)
@@ -390,8 +392,8 @@ function documentTone(doc: KnowledgeDoc): Tone {
               :key="item.id"
               type="button"
               class="rail-course"
-              :class="{ 'rail-course--active': String(item.id) === selectedCourseId }"
-              @click="selectCourse(String(item.id))"
+              :class="{ 'rail-course--active': item.id === selectedCourseId }"
+              @click="selectCourse(item.id)"
             >
               <span class="rail-course__top">
                 <strong>{{ item.name }}</strong>
@@ -479,7 +481,7 @@ function documentTone(doc: KnowledgeDoc): Tone {
                 </span>
                 <span class="upload-zone__text">
                   <strong>{{ uploading ? '正在上传…' : '拖拽课件到此处，或点击上传' }}</strong>
-                  <small>支持 PDF / MD / TXT；扩展名、大小与编码由服务端再次校验</small>
+                  <small>支持 PDF；扩展名与大小由服务端再次校验</small>
                 </span>
                 <el-button
                   type="primary"
@@ -511,7 +513,7 @@ function documentTone(doc: KnowledgeDoc): Tone {
                 v-else-if="visibleDocs.length === 0"
                 image="/illustrations/scene-study-desk.png"
                 :title="docs.length === 0 ? '当前课程还没有课件' : '没有符合条件的课件'"
-                description="上传 PDF / MD / TXT 后，系统会自动处理课件。"
+                description="上传 PDF 课件后，系统会自动处理课件。"
                 compact
               >
                 <template #action>
@@ -572,7 +574,7 @@ function documentTone(doc: KnowledgeDoc): Tone {
                       v-if="canRetry(row)"
                       text
                       type="primary"
-                      :loading="actionDocId === String(row.id)"
+                      :loading="actionDocId === row.id"
                       @click="onRetry(row)"
                     >
                       重试

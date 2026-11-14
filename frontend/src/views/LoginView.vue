@@ -2,7 +2,6 @@
 import { computed, reactive, ref } from 'vue'
 
 import { CalendarClock, Library, Sparkles } from '@lucide/vue'
-import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -144,7 +143,6 @@ function handleEnter(): void {
 
 function showRegister(): void {
   switchMode('register')
-  ElMessage.info('注册功能暂未开放，后续将支持新用户注册。')
 }
 </script>
 
@@ -230,7 +228,7 @@ function showRegister(): void {
             {{
               mode === 'login'
                 ? '登录后继续使用课程知识库、DDL 提醒与 AI 问答。'
-                : '填写账号信息，注册功能即将开放。'
+                : '创建你的个人账号，开启专属学习空间。'
             }}
           </p>
         </header>

@@ -3,17 +3,16 @@ import { computed, onMounted, ref } from 'vue'
 import { Plus, Search, BookOpen, MoreHorizontal } from '@lucide/vue'
 import { ElMessageBox } from 'element-plus'
 
-import {
-  listCourses,
-  createCourse,
-  updateCourse,
-  deleteCourse,
-} from '@/api/course'
-
+import { listCourses, createCourse, updateCourse, deleteCourse } from '@/api/course'
 import type { Course } from '@/api/course'
+import type { BigIntId } from '@/api/types'
 import BaseCard from '@/components/ui/BaseCard.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { notifyError, notifySuccess, notifyWarning } from '@/utils/notify'
+import {
+  CourseFormValidationError,
+  toCreateCourseRequest,
+} from '@/views/course/course-form'
 
 const loading = ref(false)
 const loadError = ref('')
@@ -23,15 +22,19 @@ const searchQuery = ref('')
 const creating = ref(false)
 const editing = ref(false)
 const submitting = ref(false)
-const deletingId = ref<number | null>(null)
+const deletingId = ref<BigIntId | null>(null)
 
 const createForm = ref({
   name: '',
   description: '',
 })
 
-const editForm = ref({
-  id: 0,
+const editForm = ref<{
+  id: BigIntId
+  name: string
+  description: string
+}>({
+  id: '',
   name: '',
   description: '',
 })
@@ -52,9 +55,7 @@ const filteredCourses = computed(() => {
 })
 
 const summary = computed(() => ({
-  total: courses.value.length,
-  active: courses.value.filter(course => course.status === 1).length,
-  disabled: courses.value.filter(course => course.status === 0).length,
+  courses: courses.value.length,
 }))
 
 onMounted(() => {
@@ -95,30 +96,30 @@ function openCreate(): void {
  * 创建课程
  */
 async function submitCreate(): Promise<void> {
-  const name = createForm.value.name.trim()
-
-  if (!name) {
-    notifyWarning('请输入课程名称')
-    return
-  }
-
-  if (name.length > 100) {
-    notifyWarning('课程名称不能超过100个字符')
-    return
-  }
-
   if (submitting.value) return
+
+  let request
+  try {
+    request = toCreateCourseRequest(
+      createForm.value.name,
+      createForm.value.description,
+    )
+  } catch (error) {
+    if (error instanceof CourseFormValidationError) {
+      notifyWarning(error.message)
+    } else {
+      notifyError(error)
+    }
+    return
+  }
 
   submitting.value = true
 
   try {
-    await createCourse({
-      name,
-      description: createForm.value.description.trim(),
-    })
+    const created = await createCourse(request)
 
     creating.value = false
-    notifySuccess('课程创建成功')
+    notifySuccess(`课程空间「${created.name}」创建成功`)
 
     await loadCourses()
   } catch (error) {
@@ -229,9 +230,7 @@ async function disableCourse(course: Course): Promise<void> {
           </p>
 
           <div class="courses-hero__summary">
-            <span>全部课程 {{ summary.total }}</span>
-            <span>正常 {{ summary.active }}</span>
-            <span>已停用 {{ summary.disabled }}</span>
+            <span>我的课程 {{ summary.courses }}</span>
           </div>
         </div>
 

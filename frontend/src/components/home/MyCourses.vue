@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { ChevronRight, BookOpen } from '@lucide/vue'
 
 import type { Course } from '@/api/course'
+import type { BigIntId } from '@/api/types'
 import BaseCard from '@/components/ui/BaseCard.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import type { ModuleState } from '@/views/home/use-home-data'
@@ -17,15 +18,15 @@ defineEmits<{ retry: [] }>()
 
 const showCourses = computed(() => props.state.data.slice(0, 4))
 
-function ddlCountFor(courseId: number): number | null {
+function ddlCountFor(courseId: BigIntId): number | null {
   return props.ddlCounts === null
     ? null
-    : (props.ddlCounts[String(courseId)] ?? 0)
+    : (props.ddlCounts[courseId] ?? 0)
 }
 </script>
 
 <template>
-  <BaseCard title="我的课程" subtitle="管理课程与学习资料">
+  <BaseCard title="我的课程" subtitle="个人课程空间">
     <template #actions>
       <router-link class="card-link" :to="{ name: 'courses' }">
         查看全部

@@ -68,7 +68,7 @@ const QUICK_ACTIONS: QuickAction[] = [
   },
   {
     title: '上传课件',
-    description: 'PDF / MD / TXT',
+    description: 'PDF 课件',
     image: '/illustrations/status-loading.png',
     to: { name: 'knowledge' },
     tone: 'pink',
@@ -112,7 +112,7 @@ const calendarLoading = computed(() => boardState.value.status === 'loading')
 const calendarError = computed(() =>
   boardState.value.status === 'error' ? boardState.value.error : '',
 )
-const courseName = computed(() => selectedCourse.value?.course_name ?? null)
+const courseName = computed(() => selectedCourse.value?.name ?? null)
 const authenticated = computed(() => auth.isAuthenticated)
 
 function onRetryCourses(): void {

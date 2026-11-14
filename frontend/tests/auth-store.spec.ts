@@ -11,7 +11,7 @@ const TEST_USER = {
   user_id: '10001',
   username: 'zhangsan_cs',
   nickname: '张三',
-  role: 'STUDENT' as const,
+  role: 'USER' as const,
 }
 
 /**
@@ -41,10 +41,9 @@ describe('useAuthStore', () => {
     expect(auth.isAuthenticated).toBe(true)
     expect(auth.getToken()).toBe('jwt-token-value')
     expect(auth.displayName).toBe('张三')
-    expect(auth.role).toBe('STUDENT')
-    expect(auth.isStudent).toBe(true)
+    expect(auth.role).toBe('USER')
+    expect(auth.isUser).toBe(true)
     expect(auth.isAdmin).toBe(false)
-    expect(auth.isOwner).toBe(false)
     expect(browserStorage.read<{ token: string }>(STORAGE_KEY)?.token).toBe('jwt-token-value')
   })
 

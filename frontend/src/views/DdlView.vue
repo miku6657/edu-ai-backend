@@ -5,7 +5,7 @@ import { CalendarDays, ClipboardPaste, List, Plus, RefreshCw } from '@lucide/vue
 import { ElMessageBox } from 'element-plus'
 
 import { listCourses } from '@/api/course'
-import type { CourseNamespace } from '@/api/course'
+import type { Course } from '@/api/course'
 import {
   createDdlTask,
   decideDdlDraft,
@@ -80,7 +80,7 @@ import {
  */
 
 const board = ref(emptyBoard())
-const courses = ref<CourseNamespace[]>([])
+const courses = ref<Course[]>([])
 const courseFilter = ref('')
 const loading = ref(true)
 const loadError = ref('')
@@ -556,9 +556,9 @@ async function cancelTask(task: DdlTask): Promise<void> {
           >
             <el-option
               v-for="course in courses"
-              :key="course.course_id"
-              :label="course.course_name"
-              :value="course.course_id"
+              :key="course.id"
+              :label="course.name"
+              :value="course.id"
             />
           </el-select>
           <el-button :icon="RefreshCw" :loading="loading" @click="loadBoard">刷新</el-button>
@@ -876,9 +876,9 @@ async function cancelTask(task: DdlTask): Promise<void> {
           >
             <el-option
               v-for="course in courses"
-              :key="course.course_id"
-              :label="course.course_name"
-              :value="course.course_id"
+              :key="course.id"
+              :label="course.name"
+              :value="course.id"
             />
           </el-select>
         </el-form-item>

@@ -1,17 +1,17 @@
-import type { CourseNamespace } from '@/api/course'
+import type { Course } from '@/api/course'
 import type { DdlTask, DdlTaskBoard } from '@/api/ddl'
 import type { KnowledgeDoc } from '@/api/knowledge'
 import type { NotificationItem } from '@/api/notifications'
-import type { ChatMessage } from '@/api/rag'
+import type { ChatHistoryMessage } from '@/api/rag'
+import type { BigIntId } from '@/api/types'
 
 /**
  * 首页 Dashboard 的纯逻辑（P2）。
  *
  * 这里只做确定性计算，不发请求、不碰 DOM，便于 node 环境单测：
- * 资料就绪度、DDL 排序与分组、日历网格、最近文档/问答、通知合并、问候与时区日期。
+ * DDL 排序与分组、日历网格、最近文档/问答、通知合并、问候与时区日期。
  *
  * 口径铁律：
- * * **资料就绪度** = READY / 文档总数；总数为 0 时返回 `null`，由组件显示「暂无资料」；
  * * **DDL 日历** 只按后端 `due_date`（YYYY-MM-DD）聚合，不用浏览器 `Date` 二次换算；
  * * **今日/问候** 按用户时区用 `Intl` 计算，默认 `Asia/Shanghai`。
  */
@@ -19,13 +19,6 @@ import type { ChatMessage } from '@/api/rag'
 export const DEFAULT_TIMEZONE = 'Asia/Shanghai'
 
 const WEEKDAY_LABELS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'] as const
-
-export interface Readiness {
-  ready: number
-  total: number
-  /** `null` 表示没有文档，禁止显示 0%。 */
-  percent: number | null
-}
 
 export interface ZonedDateParts {
   year: number
@@ -47,29 +40,12 @@ export interface CalendarCell {
 }
 
 export interface ChatPair {
-  user: ChatMessage
-  assistant: ChatMessage
+  user: ChatHistoryMessage
+  assistant: ChatHistoryMessage
 }
 
 export function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message !== '' ? error.message : fallback
-}
-
-/** 资料就绪度；文档数为 0 时 `percent` 为 `null`。 */
-export function courseReadiness(
-  course: Pick<CourseNamespace, 'ready_doc_count' | 'parsing_doc_count' | 'failed_doc_count'>,
-): Readiness {
-  const ready = Math.max(0, course.ready_doc_count)
-  const total =
-    ready + Math.max(0, course.parsing_doc_count) + Math.max(0, course.failed_doc_count)
-  if (total === 0) {
-    return { ready: 0, total: 0, percent: null }
-  }
-  return {
-    ready,
-    total,
-    percent: Math.max(0, Math.min(100, Math.round((ready / total) * 100))),
-  }
 }
 
 function parseTimestamp(value: string | null): number | null {
@@ -125,13 +101,17 @@ export function groupDdlCountByCourse(board: DdlTaskBoard): Record<string, numbe
   return counts
 }
 
-/** 最近学习：排除已删除/删除中，按更新时间降序。 */
-export function recentDocs(docs: KnowledgeDoc[], limit = 5): KnowledgeDoc[] {
+/** 最近学习：排除已删除/删除中，按创建时间降序。 */
+export function recentDocs(
+  docs: KnowledgeDoc[],
+  limit = 5,
+): KnowledgeDoc[] {
   return docs
     .filter((doc) => doc.status !== 'DELETED' && doc.status !== 'DELETING')
     .sort((left, right) => {
-      const leftTime = parseTimestamp(left.updated_at) ?? 0
-      const rightTime = parseTimestamp(right.updated_at) ?? 0
+      const leftTime = parseTimestamp(left.createTime) ?? 0
+      const rightTime = parseTimestamp(right.createTime) ?? 0
+
       return rightTime - leftTime
     })
     .slice(0, limit)
@@ -141,7 +121,7 @@ export function recentDocs(docs: KnowledgeDoc[], limit = 5): KnowledgeDoc[] {
  * 最近问答：从尾部向前配对 USER + 紧随其后的 ASSISTANT。
  * 返回顺序为“最新在前”，最多 `limit` 对。
  */
-export function recentChatPairs(messages: ChatMessage[], limit = 4): ChatPair[] {
+export function recentChatPairs(messages: ChatHistoryMessage[], limit = 4): ChatPair[] {
   const ordered = [...messages].sort((left, right) => {
     const leftTime = parseTimestamp(left.created_at) ?? 0
     const rightTime = parseTimestamp(right.created_at) ?? 0
@@ -155,7 +135,7 @@ export function recentChatPairs(messages: ChatMessage[], limit = 4): ChatPair[] 
       index -= 1
       continue
     }
-    let user: ChatMessage | null = null
+    let user: ChatHistoryMessage | null = null
     for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
       const candidate = ordered[cursor]
       if (candidate === undefined) {
@@ -373,10 +353,10 @@ export function relativeTimeLabel(iso: string | null, nowMs: number): string {
 }
 
 export function pickDefaultCourse(
-  courses: CourseNamespace[],
-  selectedCourseId: string | null,
-): CourseNamespace | null {
+  courses: Course[],
+  selectedCourseId: BigIntId | null,
+): Course | null {
   return (
-    courses.find((course) => course.course_id === selectedCourseId) ?? courses[0] ?? null
+    courses.find((course) => course.id === selectedCourseId) ?? courses[0] ?? null
   )
 }

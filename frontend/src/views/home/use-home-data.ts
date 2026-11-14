@@ -6,10 +6,11 @@ import { listDdlTasks } from '@/api/ddl'
 import type { DdlTask, DdlTaskBoard } from '@/api/ddl'
 import { listDocs } from '@/api/knowledge'
 import type { KnowledgeDoc } from '@/api/knowledge'
+import type { BigIntId } from '@/api/types'
 import { listNotifications } from '@/api/notifications'
 import type { NotificationItem } from '@/api/notifications'
 import { listMessages } from '@/api/rag'
-import type { ChatMessage } from '@/api/rag'
+import type { ChatHistoryMessage } from '@/api/rag'
 import { getUserConfig } from '@/api/user-config'
 import { useAuthStore } from '@/stores/auth'
 import { useCourseStore } from '@/stores/course'
@@ -32,8 +33,8 @@ import {
  * 首页数据聚合（P2）。
  *
  * 所有首页模块的取数都收敛在这里，后续后端补接口时只改本文件与 `src/api/*`，
- * 组件不需要重写。每个模块独立 loading/error/empty，`Promise.allSettled` 保证
- * 单个接口失败不会让整页空白。所有模块都接真实接口，未登录时不发请求，
+ * 组件不需要重写。每个模块独立 loading/error/empty，单个接口失败不会让整页空白。
+ * 所有模块都接真实接口，未登录时不发请求，
  * 由组件按 `authenticated` 渲染「登录后查看」，不伪造任何数据。
  */
 
@@ -79,7 +80,7 @@ export function useHomeData() {
     data: [],
     error: '',
   })
-  const messagesState = ref<ModuleState<ChatMessage[]>>({
+  const messagesState = ref<ModuleState<ChatHistoryMessage[]>>({
     status: 'loading',
     data: [],
     error: '',
@@ -90,6 +91,8 @@ export function useHomeData() {
   const nowMs = ref(Date.now())
 
   let clockTimer: ReturnType<typeof setInterval> | null = null
+  let documentRequestSequence = 0
+  let messageRequestSequence = 0
 
   const todayTasksState = computed<ModuleState<DdlTask[]>>(() => {
     const board = boardState.value
@@ -124,7 +127,7 @@ export function useHomeData() {
     return { status: items.length === 0 ? 'empty' : 'ready', data: items, error: '' }
   })
 
-  const recentChatsState = computed<ModuleState<ChatMessage[]>>(() => {
+  const recentChatsState = computed<ModuleState<ChatHistoryMessage[]>>(() => {
     const state = messagesState.value
     if (state.status !== 'ready') {
       return state
@@ -163,49 +166,91 @@ export function useHomeData() {
     }
   }
 
-  async function loadCourseContent(courseId: number | null): Promise<void> {
-    if (courseId === null) {
+  async function loadCourseDocuments(
+    courseId: BigIntId | null,
+  ): Promise<void> {
+    const requestId = ++documentRequestSequence
+
+    if (!auth.isAuthenticated || courseId === null) {
       docsState.value = { status: 'empty', data: [], error: '' }
-      messagesState.value = { status: 'empty', data: [], error: '' }
       return
     }
+
     docsState.value = { status: 'loading', data: [], error: '' }
-    messagesState.value = { status: 'loading', data: [], error: '' }
 
-    const [docsResult, messagesResult] = await Promise.allSettled([
-      listDocs(courseId),
-      // Chat API 暂时保持原有参数格式
-      listMessages(String(courseId), null, 20),
-    ])
+    try {
+      const docs = await listDocs(courseId)
+      if (requestId !== documentRequestSequence) {
+        return
+      }
 
-    if (docsResult.status === 'fulfilled') {
-      docsState.value = { status: 'ready', data: docsResult.value, error: '' }
-    } else {
+      docsState.value = {
+        status: docs.length === 0 ? 'empty' : 'ready',
+        data: docs,
+        error: '',
+      }
+    } catch (error) {
+      if (requestId !== documentRequestSequence) {
+        return
+      }
+
       docsState.value = {
         status: 'error',
         data: [],
-        error: errorMessage(docsResult.reason, '最近学习读取失败。'),
+        error: errorMessage(error, '课程文档读取失败。'),
       }
     }
+  }
 
-    if (messagesResult.status === 'fulfilled') {
+  async function loadCourseMessages(
+    courseId: BigIntId | null,
+  ): Promise<void> {
+    const requestId = ++messageRequestSequence
+
+    if (!auth.isAuthenticated || courseId === null) {
+      messagesState.value = { status: 'empty', data: [], error: '' }
+      return
+    }
+
+    messagesState.value = { status: 'loading', data: [], error: '' }
+
+    try {
+      // Chat API 暂时保持旧版参数格式，接口迁移留到 RAG 阶段。
+      const result = await listMessages(courseId, null, 20)
+      if (requestId !== messageRequestSequence) {
+        return
+      }
+
       messagesState.value = {
-        status: 'ready',
-        data: messagesResult.value.items,
+        status: result.items.length === 0 ? 'empty' : 'ready',
+        data: result.items,
         error: '',
       }
-    } else {
+    } catch (error) {
+      if (requestId !== messageRequestSequence) {
+        return
+      }
+
       messagesState.value = {
         status: 'error',
         data: [],
-        error: errorMessage(messagesResult.reason, '最近问答读取失败。'),
+        error: errorMessage(error, '最近问答读取失败。'),
       }
     }
+  }
+
+  async function loadCourseContent(courseId: BigIntId | null): Promise<void> {
+    await Promise.all([
+      loadCourseDocuments(courseId),
+      loadCourseMessages(courseId),
+    ])
   }
 
   async function loadCourses(): Promise<void> {
     if (!auth.isAuthenticated) {
       coursesState.value = { status: 'empty', data: [], error: '' }
+      selectedCourse.value = null
+      courseStore.clear()
       await loadCourseContent(null)
       return
     }
@@ -218,20 +263,22 @@ export function useHomeData() {
         error: '',
       }
       const course =
-        courses.find((item) => String(item.id) === courseStore.selectedCourseId) ??
+        courses.find((item) => item.id === courseStore.selectedCourseId) ??
         courses[0] ??
         null
       selectedCourse.value = course
       if (course !== null) {
-        courseStore.select(String(course.id))
+        courseStore.select(course.id)
+      } else {
+        courseStore.clear()
       }
       await loadCourseContent(course ? course.id : null)
     } catch (error) {
       const message = errorMessage(error, '课程列表读取失败。')
       coursesState.value = { status: 'error', data: [], error: message }
       selectedCourse.value = null
-      docsState.value = { status: 'error', data: [], error: message }
-      messagesState.value = { status: 'error', data: [], error: message }
+      courseStore.clear()
+      await loadCourseContent(null)
     }
   }
 
@@ -304,7 +351,7 @@ export function useHomeData() {
   }
 
   async function retryContent(): Promise<void> {
-    await loadCourseContent(currentCourse.value ? currentCourse.value.id : null)
+    await loadCourseContent(currentCourse.value?.id ?? null)
   }
 
   onMounted(() => {
@@ -319,6 +366,9 @@ export function useHomeData() {
       clearInterval(clockTimer)
       clockTimer = null
     }
+
+    documentRequestSequence++
+    messageRequestSequence++
   })
 
   return {

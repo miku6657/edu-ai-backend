@@ -3,11 +3,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { configureApiClient, resetApiClient } from '@/api/client'
 import { ApiError } from '@/api/error'
 import {
+  clearMessages,
   createSseFrameParser,
+  listMessages,
   parseSseFrameBlock,
   streamRagQa,
 } from '@/api/rag'
-import type { DonePayload, TokenPayload } from '@/api/rag'
+import type { RagCitation, TokenPayload } from '@/api/rag'
 
 function sseResponse(chunks: string[]): Response {
   const encoder = new TextEncoder()
@@ -25,8 +27,12 @@ function sseResponse(chunks: string[]): Response {
   })
 }
 
-function jsonResponse(body: unknown, status: number): Response {
-  return new Response(JSON.stringify(body), {
+function jsonResponse(data: unknown, status = 200): Response {
+  return new Response(JSON.stringify({
+    code: status === 200 ? 200 : 4001,
+    message: status === 200 ? '操作成功' : '请求失败',
+    data,
+  }), {
     status,
     headers: { 'Content-Type': 'application/json' },
   })
@@ -34,9 +40,9 @@ function jsonResponse(body: unknown, status: number): Response {
 
 describe('sse frame parsing', () => {
   it('解析 event/data 并忽略注释与心跳', () => {
-    expect(parseSseFrameBlock(': ping\nevent: token\ndata: {"delta":"x"}')).toEqual({
+    expect(parseSseFrameBlock(': ping\nevent: token\ndata: {"content":"x"}')).toEqual({
       event: 'token',
-      data: '{"delta":"x"}',
+      data: '{"content":"x"}',
     })
     expect(parseSseFrameBlock(': ping')).toBeNull()
   })
@@ -45,19 +51,19 @@ describe('sse frame parsing', () => {
     const frames: Array<{ event: string; data: string }> = []
     const parser = createSseFrameParser((frame) => frames.push(frame))
 
-    parser.push('event: token\r\ndata: {"del')
-    parser.push('ta":"x"}\r\n\r\n')
+    parser.push('event: token\r\ndata: {"cont')
+    parser.push('ent":"x"}\r\n\r\n')
     parser.push('event: done\ndata: {"ok":true}\n\n')
     parser.flush()
 
     expect(frames).toEqual([
-      { event: 'token', data: '{"delta":"x"}' },
+      { event: 'token', data: '{"content":"x"}' },
       { event: 'done', data: '{"ok":true}' },
     ])
   })
 })
 
-describe('streamRagQa', () => {
+describe('Java chat API', () => {
   beforeEach(() => {
     resetApiClient()
     configureApiClient({ tokenProvider: () => 'jwt-token' })
@@ -68,67 +74,228 @@ describe('streamRagQa', () => {
     resetApiClient()
   })
 
-  it('发送带鉴权的 POST 并分发五类事件', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(sseResponse([
-      'event: citation\ndata: {"user_message_id":"90001","course_index_status":"ACTIVE",'
-        + '"rebuild_progress_note":null,"citations":[]}\n\n',
-      'event: token\ndata: {"delta":"答案","is_general_supplement":false}\n\n',
-      'event: done\ndata: {"user_message_id":"90001","assistant_message_id":"90002",'
-        + '"is_rejected":false,"retrieval_cost_ms":185,"llm_first_token_ms":1120,'
-        + '"stripped_citation_count":0,"trace_id":"tr_0123456789ab"}\n\n',
-    ]))
+  it('通过 Java 会话接口创建流并转换 session、sources、token、done 事件', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(sseResponse([
+        'event: session\ndata: {"sessionId":"301"}\n\n',
+        'event: sources\ndata: {"sources":[{"documentId":501,"page":4}]}\n\n',
+        'event: token\ndata: {"content":"答案"}\n\n',
+        'event: done\ndata: {"sessionId":"301"}\n\n',
+      ]))
     vi.stubGlobal('fetch', fetchMock)
     const tokens: TokenPayload[] = []
-    const done: DonePayload[] = []
+    const citations: RagCitation[][] = []
+    let receivedSessionId: string | null = null
+    let receivedDoneSessionId: string | null = null
+    let done = false
     let closed = false
 
     await streamRagQa(
-      { courseId: '2001', query: '问题', clientMsgId: 'c-1' },
+      { courseId: '2001', query: '问题', clientMsgId: 'ignored-client-id' },
       {
+        onSession: (payload) => {
+          receivedSessionId = payload.sessionId
+        },
+        onCitation: (payload) => citations.push(payload.citations),
         onToken: (payload) => tokens.push(payload),
-        onDone: (payload) => done.push(payload),
+        onDone: (payload) => {
+          receivedDoneSessionId = payload.sessionId
+          done = true
+        },
         onClosed: () => {
           closed = true
         },
       },
     )
 
-    expect(tokens).toEqual([{ delta: '答案', is_general_supplement: false }])
-    expect(done[0]?.assistant_message_id).toBe('90002')
-    expect(closed).toBe(true)
-    const request = fetchMock.mock.calls[0] as [string, RequestInit]
-    expect(request[0]).toBe('/api/v1/rag/qa/stream')
-    expect(request[1].method).toBe('POST')
-    expect((request[1].headers as Record<string, string>).Authorization)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/chat/sessions')
+    expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/chat/stream')
+    const streamRequest = fetchMock.mock.calls[1] as [string, RequestInit]
+    expect(streamRequest[1].method).toBe('POST')
+    expect((streamRequest[1].headers as Record<string, string>).Authorization)
       .toBe('Bearer jwt-token')
-    expect(request[1].body).toBe(JSON.stringify({
-      course_id: '2001', query: '问题', client_msg_id: 'c-1',
+    expect(streamRequest[1].body).toBe(JSON.stringify({
+      courseId: '2001',
+      sessionId: null,
+      question: '问题',
     }))
+    expect(citations[0]?.[0]).toMatchObject({
+      doc_id: '501',
+      doc_name: '文档 501',
+      page_start: 4,
+      page_end: 4,
+      content: '',
+    })
+    expect(tokens).toEqual([{ delta: '答案', is_general_supplement: false }])
+    expect(receivedSessionId).toBe('301')
+    expect(receivedDoneSessionId).toBe('301')
+    expect(done).toBe(true)
+    expect(closed).toBe(true)
   })
 
-  it('建流前 4xx 信封原样保留错误码', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
-      code: 'COURSE_NO_READY_DOCS',
-      message: '该课程下暂无已就绪的课件',
-      data: null,
-      trace_id: 'tr_0123456789ab',
-      timestamp: '2026-10-23T10:00:00.000+08:00',
-    }, 400)))
+  it('继续当前课程最近更新的会话', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(sseResponse([
+        'event: session\ndata: {"sessionId":"301"}\n\n',
+        'event: done\ndata: {"sessionId":"301"}\n\n',
+      ]))
+      .mockResolvedValueOnce(jsonResponse([
+        {
+          id: '301',
+          courseId: '2001',
+          userId: '1',
+          title: '旧会话',
+          createTime: '2026-01-01T10:00:00',
+          updateTime: '2026-01-01T10:00:00',
+        },
+        {
+          id: '9007199254740993',
+          courseId: '2001',
+          userId: '1',
+          title: '最近会话',
+          createTime: '2026-01-02T10:00:00',
+          updateTime: '2026-01-03T10:00:00',
+        },
+      ]))
+      .mockResolvedValueOnce(sseResponse(['event: done\ndata: {"sessionId":"302"}\n\n']))
+    vi.stubGlobal('fetch', fetchMock)
 
-    await expect(streamRagQa(
-      { courseId: '2001', query: '问题' },
-      {},
-    )).rejects.toMatchObject({ code: 'COURSE_NO_READY_DOCS' })
+    await streamRagQa({ courseId: '2001', query: '初次提问' }, {})
+    await streamRagQa({ courseId: '2001', query: '继续' }, {})
+
+    const streamRequest = fetchMock.mock.calls[3] as [string, RequestInit]
+    const body = streamRequest[1].body
+    if (typeof body !== 'string') {
+      throw new Error('Expected the stream request to send a JSON body')
+    }
+    expect(JSON.parse(body)).toEqual({
+      courseId: '2001',
+      sessionId: '9007199254740993',
+      question: '继续',
+    })
+  })
+
+  it('历史记录读取更新时间最近的课程会话并转换 Java 字段', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([
+        {
+          id: '11',
+          courseId: '2001',
+          userId: '1',
+          title: '旧会话',
+          createTime: '2026-01-01T10:00:00',
+          updateTime: '2026-01-01T10:00:00',
+        },
+        {
+          id: '12',
+          courseId: '2001',
+          userId: '1',
+          title: '最近会话',
+          createTime: '2026-01-02T10:00:00',
+          updateTime: '2026-01-03T10:00:00',
+        },
+        {
+          id: '13',
+          courseId: '2002',
+          userId: '1',
+          title: '其他课程',
+          createTime: '2026-01-04T10:00:00',
+          updateTime: '2026-01-04T10:00:00',
+        },
+      ]))
+      .mockResolvedValueOnce(jsonResponse([
+        {
+          id: '901',
+          sessionId: '12',
+          role: 'user',
+          content: '问题',
+          sourcesJson: null,
+          createTime: '2026-01-03T10:00:00',
+        },
+        {
+          id: '902',
+          sessionId: '12',
+          role: 'assistant',
+          content: '回答',
+          sourcesJson: '[{"documentId":501,"page":4}]',
+          createTime: '2026-01-03T10:00:01',
+        },
+      ]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const page = await listMessages('2001')
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/chat/sessions')
+    expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/chat/sessions/12/messages')
+    expect(page).toMatchObject({
+      next_cursor: null,
+      has_more: false,
+      items: [
+        { message_id: '901', role: 'USER', course_id: null },
+        {
+          message_id: '902',
+          role: 'ASSISTANT',
+          citations: [{ doc_id: '501', page_start: 4 }],
+        },
+      ],
+    })
+  })
+
+  it('清空课程时删除该课程的所有会话和消息', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([
+        { id: '21', courseId: '2001', userId: '1', title: '1', createTime: '', updateTime: '2' },
+        { id: '22', courseId: '2001', userId: '1', title: '2', createTime: '', updateTime: '1' },
+        { id: '23', courseId: '2002', userId: '1', title: '3', createTime: '', updateTime: '3' },
+      ]))
+      .mockResolvedValueOnce(jsonResponse([{ id: 1 }]))
+      .mockResolvedValueOnce(jsonResponse('deleted'))
+      .mockResolvedValueOnce(jsonResponse([{ id: 2 }, { id: 3 }]))
+      .mockResolvedValueOnce(jsonResponse('deleted'))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(clearMessages('2001')).resolves.toEqual({
+      course_id: '2001',
+      deleted_count: 3,
+    })
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/chat/sessions')
+    expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/chat/sessions/21/messages')
+    expect(fetchMock.mock.calls[2]?.[0]).toBe('/api/chat/sessions/21')
+    expect(fetchMock.mock.calls[3]?.[0]).toBe('/api/chat/sessions/22/messages')
+    expect(fetchMock.mock.calls[4]?.[0]).toBe('/api/chat/sessions/22')
+    expect((fetchMock.mock.calls[2]?.[1] as RequestInit).method).toBe('DELETE')
+    expect((fetchMock.mock.calls[4]?.[1] as RequestInit).method).toBe('DELETE')
+  })
+
+  it('流式请求 4xx 信封保留后端错误码', async () => {
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse(null, 400)))
+
+    await expect(streamRagQa({ courseId: '2001', query: '问题' }, {}))
+      .rejects.toMatchObject({ code: '4001' })
   })
 
   it('流内非法 JSON 停止处理', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sseResponse([
-      'event: token\ndata: not-json\n\n',
-    ])))
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(sseResponse(['event: token\ndata: not-json\n\n'])))
 
-    await expect(streamRagQa(
-      { courseId: '2001', query: '问题' },
-      {},
-    )).rejects.toBeInstanceOf(ApiError)
+    await expect(streamRagQa({ courseId: '2001', query: '问题' }, {}))
+      .rejects.toBeInstanceOf(ApiError)
+  })
+
+  it('拒绝以 number 发送的 SSE 会话 ID，避免 BIGINT 精度丢失', async () => {
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(sseResponse([
+        'event: session\ndata: {"sessionId":9007199254740993}\n\n',
+      ])))
+
+    await expect(streamRagQa({ courseId: '2001', query: '问题' }, {}))
+      .rejects.toMatchObject({ code: 'CLIENT_MALFORMED_RESPONSE' })
   })
 })

@@ -1,6 +1,5 @@
 import type {
-  ChatMessage,
-  DonePayload,
+  ChatHistoryMessage,
   RagCitation,
   RejectionNoticePayload,
 } from '@/api/rag'
@@ -51,7 +50,7 @@ export function splitSupplement(content: string): SupplementParts {
   }
 }
 
-export function historyToUiMessages(items: ChatMessage[]): UiMessage[] {
+export function historyToUiMessages(items: ChatHistoryMessage[]): UiMessage[] {
   return items
     .filter((item) => item.role === 'USER' || item.role === 'ASSISTANT')
     .map((item) => {
@@ -130,12 +129,7 @@ export function applyStreamFailure(message: UiMessage, reason: string): void {
   message.errorText = reason
 }
 
-export function applyDone(message: UiMessage, payload: DonePayload): void {
-  message.messageId = payload.assistant_message_id
-  message.isRejected = payload.is_rejected
-  message.traceId = payload.trace_id
-  message.retrievalCostMs = payload.retrieval_cost_ms
-  message.llmFirstTokenMs = payload.llm_first_token_ms
+export function applyDone(message: UiMessage): void {
   message.streaming = false
   message.interrupted = false
 }

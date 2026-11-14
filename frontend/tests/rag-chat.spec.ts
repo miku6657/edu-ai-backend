@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import type { ChatMessage } from '@/api/rag'
+import type { ChatHistoryMessage } from '@/api/rag'
 import {
   applyDone,
   applyInterrupted,
@@ -18,7 +18,7 @@ import {
   SUPPLEMENT_PREFIX,
 } from '@/views/rag/rag-chat'
 
-function historyMessage(overrides: Partial<ChatMessage>): ChatMessage {
+function historyMessage(overrides: Partial<ChatHistoryMessage>): ChatHistoryMessage {
   return {
     message_id: '90001',
     course_id: '2001',
@@ -105,19 +105,22 @@ describe('rag chat presentation', () => {
   it('done 更新 ID/耗时并结束流式状态', () => {
     const message = createLocalMessage('ASSISTANT')
 
-    applyDone(message, {
-      user_message_id: '90001',
-      assistant_message_id: '90002',
-      is_rejected: false,
-      retrieval_cost_ms: 185,
-      llm_first_token_ms: 1120,
-      stripped_citation_count: 1,
-      trace_id: 'tr_0123456789ab',
-    })
+    applyDone(message)
 
-    expect(message.messageId).toBe('90002')
+    expect(message.messageId).toBeNull()
     expect(message.streaming).toBe(false)
-    expect(formatDuration(message.retrievalCostMs)).toBe('185 ms')
+    expect(formatDuration(message.retrievalCostMs)).toBeNull()
+  })
+
+  it('done 结束流状态但保留本地消息标识', () => {
+    const message = createLocalMessage('ASSISTANT')
+    const localId = message.messageId
+
+    applyDone(message)
+
+    expect(message.messageId).toBe(localId)
+    expect(message.traceId).toBeNull()
+    expect(message.streaming).toBe(false)
   })
 
   it('拒答与中断状态可区分', () => {

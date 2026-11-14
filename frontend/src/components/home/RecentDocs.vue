@@ -17,7 +17,7 @@ import {
  * 首页最近学习（P2）。
  *
  * 数据来自当前课程（`courseStore.selectedCourseId`，否则第一门课程）的 `listDocs`，
- * 排除已删除文档，按 `updated_at` 降序取前 5。
+ * 排除已删除文档，按创建时间降序取前 5。
  */
 defineProps<{
   state: ModuleState<KnowledgeDoc[]>
@@ -38,7 +38,15 @@ function toneFor(doc: KnowledgeDoc): Tone {
 }
 
 function selectCourse(doc: KnowledgeDoc): void {
-  courseStore.select(doc.course_id)
+  courseStore.select(doc.courseId)
+}
+
+function fileExtension(filename: string): string {
+  const index = filename.lastIndexOf('.')
+
+  return index >= 0
+    ? filename.slice(index + 1).toUpperCase()
+    : 'FILE'
 }
 
 const fileIcon = FileText
@@ -75,7 +83,7 @@ const fileIcon = FileText
           ? '登录后即可查看当前课程的最近课件与解析状态。'
           : courseName === null
             ? '创建课程并上传课件后，最近的文档会显示在这里。'
-            : '当前课程还没有课件，上传 PDF / MD / TXT 后即可检索。'
+            : '当前课程还没有课件，上传 PDF 课件后即可检索。'
       "
       compact
     >
@@ -92,7 +100,7 @@ const fileIcon = FileText
     </EmptyState>
 
     <ul v-else class="doc-list">
-      <li v-for="doc in state.data" :key="doc.doc_id">
+      <li v-for="doc in state.data" :key="doc.id">
         <router-link
           class="doc-row"
           :to="{ name: 'knowledge' }"
@@ -102,8 +110,12 @@ const fileIcon = FileText
             <component :is="fileIcon" :size="16" :stroke-width="1.7" />
           </span>
           <span class="doc-row__main">
-            <strong>{{ doc.doc_name }}</strong>
-            <small>{{ doc.file_ext }} · {{ relativeTimeLabel(doc.updated_at, nowMs) }}</small>
+            <strong>{{ doc.originalName }}</strong>
+            <small>
+              {{ fileExtension(doc.originalName) }}
+              ·
+              {{ relativeTimeLabel(doc.createTime, nowMs) }}
+            </small>
           </span>
           <TagBadge :label="documentStatusLabel(doc.status)" :tone="toneFor(doc)" />
         </router-link>

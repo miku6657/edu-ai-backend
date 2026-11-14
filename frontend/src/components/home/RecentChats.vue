@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ChevronRight, MessagesSquare } from '@lucide/vue'
 
-import type { ChatMessage } from '@/api/rag'
+import type { ChatHistoryMessage } from '@/api/rag'
 import BaseCard from '@/components/ui/BaseCard.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import type { ChatPair } from '@/views/home/dashboard-data'
@@ -16,7 +16,7 @@ import { splitSupplement } from '@/views/rag/rag-chat'
  * 点击进入 AI 学习页继续对话。
  */
 defineProps<{
-  state: ModuleState<ChatMessage[]>
+  state: ModuleState<ChatHistoryMessage[]>
   pairs: ChatPair[]
   courseName: string | null
   nowMs: number

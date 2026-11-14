@@ -16,19 +16,18 @@ import {
 import { ElMessageBox } from 'element-plus'
 
 import { listCourses } from '@/api/course'
-import type { CourseNamespace } from '@/api/course'
+import type { Course } from '@/api/course'
+import type { BigIntId } from '@/api/types'
 import { ApiError } from '@/api/error'
 import { clearMessages, listMessages, streamRagQa } from '@/api/rag'
 import type {
-  ChatMessage,
+  ChatHistoryMessage,
   CitationPayload,
-  DonePayload,
   RagCitation,
 } from '@/api/rag'
 import BaseCard from '@/components/ui/BaseCard.vue'
 import ComingSoonBadge from '@/components/ui/ComingSoonBadge.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
-import TagBadge from '@/components/ui/TagBadge.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useCourseStore } from '@/stores/course'
 import { notifyError, notifySuccess, notifyWarning } from '@/utils/notify'
@@ -76,10 +75,10 @@ interface FocusableInput {
   focus: () => void
 }
 
-const courses = ref<CourseNamespace[]>([])
-const selectedCourseId = ref<string | null>(courseStore.selectedCourseId)
+const courses = ref<Course[]>([])
+const selectedCourseId = ref<BigIntId | null>(courseStore.selectedCourseId)
 const messages = ref<UiMessage[]>([])
-const historyItems = ref<ChatMessage[]>([])
+const historyItems = ref<ChatHistoryMessage[]>([])
 const query = ref('')
 const loadingCourses = ref(true)
 const loadingHistory = ref(false)
@@ -98,7 +97,9 @@ let historySeq = 0
 let clockTimer: number | null = null
 
 const selectedCourse = computed(
-  () => courses.value.find((course) => course.course_id === selectedCourseId.value) ?? null,
+  () => courses.value.find(
+    (course) => course.id === selectedCourseId.value,
+  ) ?? null,
 )
 const canSend = computed(
   () => selectedCourseId.value !== null && !streaming.value && query.value.trim() !== '',
@@ -126,10 +127,12 @@ async function bootstrap(): Promise<void> {
   try {
     courses.value = await listCourses()
     const exists = courses.value.some(
-      (course) => course.course_id === selectedCourseId.value,
+      (course) => course.id === selectedCourseId.value,
     )
     if (!exists) {
-      selectedCourseId.value = courses.value[0]?.course_id ?? null
+      selectedCourseId.value = courses.value[0]
+        ? courses.value[0].id
+        : null
     }
     courseStore.select(selectedCourseId.value)
     if (selectedCourseId.value !== null) {
@@ -257,20 +260,23 @@ async function send(): Promise<void> {
       },
       {
         onCitation: (payload: CitationPayload) => {
-          userMessage.messageId = payload.user_message_id
+          if (payload.user_message_id) {
+            userMessage.messageId = payload.user_message_id
+          }
           assistantMessage.citations = payload.citations
         },
         onRejectionNotice: (payload) => {
-          userMessage.messageId = payload.user_message_id
+          if (payload.user_message_id) {
+            userMessage.messageId = payload.user_message_id
+          }
           applyRejection(assistantMessage, payload)
         },
         onToken: (payload) => {
           applyToken(assistantMessage, payload.delta, payload.is_general_supplement)
           void scrollToBottom()
         },
-        onDone: (payload: DonePayload) => {
-          userMessage.messageId = payload.user_message_id
-          applyDone(assistantMessage, payload)
+        onDone: () => {
+          applyDone(assistantMessage)
           doneReceived = true
           terminalReceived = true
         },
@@ -347,7 +353,7 @@ async function clearHistory(): Promise<void> {
   }
   try {
     await ElMessageBox.confirm(
-      '确定清空当前课程的全部会话记录？该操作会同时清除 Redis 短期窗口，且不可恢复。',
+      '确定删除当前课程的全部聊天会话及历史消息吗？此操作不可恢复。',
       '清空会话',
       { type: 'warning', confirmButtonText: '清空', cancelButtonText: '取消' },
     )
@@ -448,7 +454,7 @@ function relativeTime(value: string): string {
       <header class="rag-header">
         <div class="rag-header__copy">
           <span class="rag-header__eyebrow">AI LEARNING</span>
-          <h2>{{ selectedCourse?.course_name ?? 'AI 学习' }}</h2>
+          <h2>{{ selectedCourse?.name ?? 'AI 学习' }}</h2>
           <p>基于你的课程知识库与真实引用，提供学习问答、代码解析与学习规划。</p>
         </div>
         <div class="rag-header__controls">
@@ -461,16 +467,11 @@ function relativeTime(value: string): string {
           >
             <el-option
               v-for="course in courses"
-              :key="course.course_id"
-              :label="course.course_name"
-              :value="course.course_id"
+              :key="course.id"
+              :label="course.name"
+              :value="course.id"
             />
           </el-select>
-          <TagBadge
-            v-if="selectedCourse !== null"
-            :label="`${selectedCourse.embedding_model} · ${selectedCourse.embedding_dim} 维`"
-            tone="primary"
-          />
           <el-button
             plain
             type="danger"
@@ -482,14 +483,6 @@ function relativeTime(value: string): string {
           </el-button>
         </div>
         <p v-if="courseError !== ''" class="rag-inline-error">{{ courseError }}</p>
-        <el-alert
-          v-if="selectedCourse?.index_status === 'REBUILDING'"
-          class="rag-rebuild-alert"
-          title="课程正在重建索引；若无 READY 课件，问答会被拒绝。"
-          type="warning"
-          :closable="false"
-          show-icon
-        />
       </header>
 
       <section class="rag-panel">
@@ -605,7 +598,7 @@ function relativeTime(value: string): string {
                   v-if="message.citations !== null && message.citations.length > 0"
                   class="rag-citations"
                 >
-                  <div class="rag-citations-title">引用课件片段</div>
+                  <div class="rag-citations-title">引用文档位置</div>
                   <details
                     v-for="citation in message.citations"
                     :key="citationKey(citation)"
@@ -625,7 +618,7 @@ function relativeTime(value: string): string {
                       <p v-if="citation.section_title" class="rag-citation-section">
                         {{ citation.section_title }}
                       </p>
-                      <p>{{ citation.content }}</p>
+                      <p v-if="citation.content">{{ citation.content }}</p>
                     </div>
                   </details>
                 </div>
@@ -660,7 +653,7 @@ function relativeTime(value: string): string {
             <div class="rag-composer__tools">
               <span class="rag-tool">
                 <BookOpen :size="14" :stroke-width="1.7" />
-                {{ selectedCourse?.course_name ?? '未选择课程' }}
+                {{ selectedCourse?.name ?? '未选择课程' }}
               </span>
               <router-link class="rag-tool" :to="{ name: 'knowledge' }">
                 <Upload :size="14" :stroke-width="1.7" />

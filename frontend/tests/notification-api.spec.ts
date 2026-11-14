@@ -5,11 +5,9 @@ import { listNotifications, markNotificationsRead } from '@/api/notifications'
 
 function envelope<T>(data: T) {
   return {
-    code: 'OK',
-    message: 'OK',
+    code: 200,
+    message: '操作成功',
     data,
-    trace_id: 'tr_notiftest01',
-    timestamp: '2026-10-28T12:00:00+08:00',
   }
 }
 

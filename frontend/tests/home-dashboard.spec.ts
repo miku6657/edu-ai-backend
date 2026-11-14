@@ -1,15 +1,14 @@
 import { describe, expect, it } from 'vitest'
 
-import type { CourseNamespace } from '@/api/course'
+import type { Course } from '@/api/course'
 import type { DdlTask, DdlTaskBoard } from '@/api/ddl'
 import type { KnowledgeDoc } from '@/api/knowledge'
 import type { NotificationItem } from '@/api/notifications'
-import type { ChatMessage } from '@/api/rag'
+import type { ChatHistoryMessage } from '@/api/rag'
 import {
   buildCalendarCells,
   buildMonthGrid,
   compactDeadline,
-  courseReadiness,
   formatDateLabel,
   greetingForHour,
   groupDdlCountByCourse,
@@ -25,22 +24,15 @@ import {
   zonedDateParts,
 } from '@/views/home/dashboard-data'
 
-function course(id: string, overrides: Partial<CourseNamespace> = {}): CourseNamespace {
+function course(id: string, overrides: Partial<Course> = {}): Course {
   return {
-    course_id: id,
-    course_name: `课程 ${id}`,
+    id,
+    name: `课程 ${id}`,
     description: null,
-    is_default: false,
-    embedding_provider: 'OPENAI_COMPATIBLE',
-    embedding_model: 'text-embedding-3-small',
-    embedding_dim: 1536,
-    index_version: 1,
-    index_status: 'ACTIVE',
-    ready_doc_count: 0,
-    parsing_doc_count: 0,
-    failed_doc_count: 0,
-    created_at: '2026-10-01T10:00:00+08:00',
-    updated_at: '2026-10-01T10:00:00+08:00',
+    ownerId: '10001',
+    status: 1,
+    createTime: '2026-10-01T10:00:00+08:00',
+    updateTime: '2026-10-01T10:00:00+08:00',
     ...overrides,
   }
 }
@@ -91,26 +83,14 @@ function board(overrides: Partial<DdlTaskBoard> = {}): DdlTaskBoard {
 
 function doc(id: string, overrides: Partial<KnowledgeDoc> = {}): KnowledgeDoc {
   return {
-    doc_id: id,
-    course_id: 'c1',
-    doc_name: `课件 ${id}.pdf`,
-    file_ext: 'pdf',
-    file_size_bytes: 1024,
+    id,
+    courseId: 'c1',
+    uploaderId: '10001',
+    originalName: `课件 ${id}.pdf`,
+    fileSize: 1024,
     status: 'READY',
-    parse_version: 1,
-    course_index_version: 1,
-    indexed_embedding_model: 'text-embedding-3-small',
-    indexed_embedding_dim: 1536,
-    page_count: 10,
-    chunk_count: 20,
-    retry_count: 0,
-    last_ingest_job_id: null,
-    error_code: null,
-    error_msg: null,
-    enqueued_at: null,
-    ready_at: '2026-10-30T10:00:00+08:00',
-    created_at: '2026-10-29T10:00:00+08:00',
-    updated_at: '2026-10-30T10:00:00+08:00',
+    errorMessage: null,
+    createTime: '2026-10-30T10:00:00+08:00',
     ...overrides,
   }
 }
@@ -136,10 +116,10 @@ function notification(
 
 function message(
   id: string,
-  role: ChatMessage['role'],
+  role: ChatHistoryMessage['role'],
   content: string,
   createdAt = '2026-10-30T10:00:00+08:00',
-): ChatMessage {
+): ChatHistoryMessage {
   return {
     message_id: id,
     course_id: 'c1',
@@ -155,28 +135,6 @@ function message(
     created_at: createdAt,
   }
 }
-
-describe('course readiness', () => {
-  it('没有文档时返回 null，而不是 0%', () => {
-    expect(courseReadiness(course('c1'))).toEqual({ ready: 0, total: 0, percent: null })
-  })
-
-  it('按 READY / 总数计算并四舍五入', () => {
-    const result = courseReadiness(
-      course('c1', { ready_doc_count: 2, parsing_doc_count: 2, failed_doc_count: 1 }),
-    )
-    expect(result).toEqual({ ready: 2, total: 5, percent: 40 })
-  })
-
-  it('全部就绪时为 100%，全部失败时为 0%', () => {
-    expect(
-      courseReadiness(course('c1', { ready_doc_count: 3 })).percent,
-    ).toBe(100)
-    expect(
-      courseReadiness(course('c1', { failed_doc_count: 2 })).percent,
-    ).toBe(0)
-  })
-})
 
 describe('ddl dashboard aggregation', () => {
   it('进行中任务按截止时间升序，缺失截止时间排最后', () => {
@@ -215,14 +173,14 @@ describe('ddl dashboard aggregation', () => {
 })
 
 describe('recent docs and chats', () => {
-  it('排除已删除/删除中文档并按更新时间降序', () => {
+  it('排除已删除/删除中文档并按创建时间降序', () => {
     const docs = recentDocs([
-      doc('1', { updated_at: '2026-10-29T10:00:00+08:00' }),
-      doc('2', { updated_at: '2026-10-31T10:00:00+08:00' }),
+      doc('1', { createTime: '2026-10-29T10:00:00+08:00' }),
+      doc('2', { createTime: '2026-10-31T10:00:00+08:00' }),
       doc('3', { status: 'DELETED' }),
       doc('4', { status: 'DELETING' }),
     ])
-    expect(docs.map((item) => item.doc_id)).toEqual(['2', '1'])
+    expect(docs.map((item) => item.id)).toEqual(['2', '1'])
   })
 
   it('从尾部配对问答，返回最新在前', () => {
@@ -356,9 +314,9 @@ describe('relative time and course pick', () => {
   })
 
   it('优先当前选中课程，否则第一门', () => {
-    const courses = [course('c1'), course('c2')]
-    expect(pickDefaultCourse(courses, 'c2')?.course_id).toBe('c2')
-    expect(pickDefaultCourse(courses, 'missing')?.course_id).toBe('c1')
-    expect(pickDefaultCourse([], 'c1')).toBeNull()
+    const courses = [course('1'), course('2')]
+    expect(pickDefaultCourse(courses, '2')?.id).toBe('2')
+    expect(pickDefaultCourse(courses, 'missing')?.id).toBe('1')
+    expect(pickDefaultCourse([], '1')).toBeNull()
   })
 })

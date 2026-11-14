@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
-import type { CourseNamespace } from '@/api/course'
+import type { Course } from '@/api/course'
 import {
   MAX_COURSE_NAME,
   MAX_OPTIONAL_TEXT,
@@ -23,7 +23,7 @@ import {
 const form = defineModel<DdlTaskFormState>({ required: true })
 
 const props = defineProps<{
-  courses: CourseNamespace[]
+  courses: Course[]
   /** 编辑态用于提示“补充时间后会自动激活”。 */
   activateHint?: string
   /** 编辑态：原任务的时间语义快照；保存原字段不会改变截止时间/时区。 */
@@ -62,14 +62,14 @@ const dueTime = computed<string>({
 function onCourseChange(value: string | null | undefined): void {
   const selected = asText(value)
   if (selected === '') {
-    form.value = { ...form.value, courseId: '', courseName: form.value.courseName }
+    form.value = { ...form.value, courseId: '' }
     return
   }
-  const course = props.courses.find((item) => item.course_id === selected)
+  const course = props.courses.find((item) => item.id === selected)
   form.value = {
     ...form.value,
     courseId: selected,
-    courseName: course === undefined ? form.value.courseName : course.course_name,
+    courseName: course?.name ?? form.value.courseName,
   }
 }
 </script>
@@ -122,9 +122,9 @@ function onCourseChange(value: string | null | undefined): void {
       >
         <el-option
           v-for="course in courses"
-          :key="course.course_id"
-          :label="course.course_name"
-          :value="course.course_id"
+          :key="course.id"
+          :label="course.name"
+          :value="course.id"
         />
       </el-select>
     </el-form-item>

@@ -25,11 +25,9 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 function envelope<T>(data: T): Record<string, unknown> {
   return {
-    code: 'OK',
+    code: 200,
     message: '操作成功',
     data,
-    trace_id: 'tr_0123456789ab',
-    timestamp: '2026-10-20T00:00:00.000+08:00',
   }
 }
 
@@ -167,7 +165,7 @@ describe('user config api', () => {
 
   it('注销账号使用 POST，password 与 confirm_text 放在请求体', async () => {
     const fetchMock = vi.fn().mockImplementation(() =>
-      Promise.resolve(jsonResponse({ code: 'OK', message: 'ok', data: null, trace_id: 'tr_1', timestamp: '2026-10-31T13:00:00+08:00' })),
+      Promise.resolve(      jsonResponse({ code: 200, message: '操作成功', data: null })),
     )
     vi.stubGlobal('fetch', fetchMock)
 

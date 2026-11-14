@@ -1,6 +1,6 @@
 import { ApiError, CLIENT_ERROR_CODES } from '@/api/error'
 import type { ApiResult } from '@/api/types'
-import { SUCCESS_CODE } from '@/api/types'
+import { SUCCESS_CODES } from '@/api/types'
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 
@@ -96,11 +96,12 @@ export async function apiRequest<T>(
 
   const result = await parseEnvelope<T>(response)
 
-  if (!response.ok || result.code !== SUCCESS_CODE) {
+  if (!response.ok || !SUCCESS_CODES.has(result.code)) {
     throw new ApiError({
       code: String(result.code),
       message: result.message || '请求失败',
       httpStatus: response.status,
+      traceId: result.trace_id ?? null,
     })
   }
 
@@ -158,6 +159,7 @@ export async function apiStream(
       code: String(result.code),
       message: result.message || '流式请求失败',
       httpStatus: response.status,
+      traceId: result.trace_id ?? null,
     })
   }
 
@@ -216,7 +218,7 @@ function isApiResult<T>(value: unknown): value is ApiResult<T> {
   const candidate = value as Record<string, unknown>
 
   return (
-    typeof candidate.code === 'number' &&
+    (typeof candidate.code === 'number' || typeof candidate.code === 'string') &&
     typeof candidate.message === 'string' &&
     'data' in candidate
   )

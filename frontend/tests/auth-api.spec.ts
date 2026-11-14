@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 
-import { getCurrentUser, login, logout, register, toAuthSession } from '@/api/auth'
+import {
+  getCurrentUser,
+  login,
+  logout,
+  register,
+  toAuthSession,
+} from '@/api/auth'
+import type { AuthResponse } from '@/api/auth'
 import { resetApiClient } from '@/api/client'
 
 function jsonResponse(body: unknown): Response {
@@ -26,9 +33,9 @@ function captured(fetchMock: Mock, index = 0): { url: string; method?: string; b
 const AUTH_RESPONSE = {
   token: 'jwt-token-value',
   tokenType: 'Bearer',
-  userId: 10001,
+  userId: '10001',
   username: 'zhangsan_cs',
-  role: 'STUDENT' as const,
+  role: 'USER' as const,
 }
 
 describe('auth api', () => {
@@ -57,10 +64,10 @@ describe('auth api', () => {
 
   it('获取当前用户使用 GET /api/auth/me', async () => {
     const currentUser = {
-      id: 10001,
+      id: '10001',
       username: 'zhangsan_cs',
       nickname: '张三',
-      role: 'STUDENT',
+      role: 'USER',
     }
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(result(currentUser)))
     vi.stubGlobal('fetch', fetchMock)
@@ -71,15 +78,18 @@ describe('auth api', () => {
     expect(captured(fetchMock).method).toBe('GET')
   })
 
-  it('注册暂未开放且不会发起请求', async () => {
-    const fetchMock = vi.fn()
+  it('注册使用 POST /api/auth/register 并解析完整登录响应', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(result(AUTH_RESPONSE)))
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(register({ username: 'zhangsan_cs', password: 'Passw0rd!' })).rejects.toMatchObject({
-      code: 'CLIENT_MALFORMED_RESPONSE',
-      message: '注册功能暂未开放，请先使用已有账号登录。',
+    const response = await register({ username: 'zhangsan_cs', password: 'Passw0rd!' })
+
+    expect(captured(fetchMock)).toEqual({
+      url: '/api/auth/register',
+      method: 'POST',
+      body: JSON.stringify({ username: 'zhangsan_cs', password: 'Passw0rd!' }),
     })
-    expect(fetchMock).not.toHaveBeenCalled()
+    expect(response).toEqual(AUTH_RESPONSE)
   })
 
   it('登出暂时仅由前端清理会话，不发起请求', async () => {
@@ -98,8 +108,19 @@ describe('auth api', () => {
         user_id: '10001',
         username: 'zhangsan_cs',
         nickname: 'zhangsan_cs',
-        role: 'STUDENT',
+        role: 'USER',
       },
     })
+  })
+
+  it('toAuthSession rejects roles outside the Java role contract', () => {
+    const invalidResponse = {
+      ...AUTH_RESPONSE,
+      role: 'OWNER',
+    } as unknown as AuthResponse
+
+    expect(() =>
+      toAuthSession(invalidResponse),
+    ).toThrow('认证失败：服务端返回了未知用户角色')
   })
 })

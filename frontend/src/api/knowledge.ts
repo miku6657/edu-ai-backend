@@ -1,6 +1,6 @@
 
 import { apiRequest } from '@/api/client'
-import type { Course } from '@/api/course'
+import type { BigIntId } from '@/api/types'
 
 export type DocumentStatus =
   | 'UPLOADED'
@@ -12,9 +12,9 @@ export type DocumentStatus =
   | 'DELETED'
 
 export interface KnowledgeDoc {
-  id: number
-  courseId: number
-  uploaderId: number
+  id: BigIntId
+  courseId: BigIntId
+  uploaderId: BigIntId
   originalName: string
   fileSize: number
   status: DocumentStatus
@@ -23,7 +23,7 @@ export interface KnowledgeDoc {
 }
 
 export function listDocs(
-  courseId: number,
+  courseId: BigIntId,
 ): Promise<KnowledgeDoc[]> {
   return apiRequest<KnowledgeDoc[]>(
     `/documents/course/${encodeURIComponent(courseId)}`,
@@ -31,7 +31,7 @@ export function listDocs(
 }
 
 export function uploadDoc(
-  courseId: number,
+  courseId: BigIntId,
   file: File,
 ): Promise<KnowledgeDoc> {
   const form = new FormData()
@@ -46,14 +46,10 @@ export function uploadDoc(
   )
 }
 
-export interface DeleteDocResult {
-  message?: string
-}
-
 export function deleteDoc(
-  docId: number,
-): Promise<DeleteDocResult> {
-  return apiRequest<DeleteDocResult>(
+  docId: BigIntId,
+): Promise<string> {
+  return apiRequest<string>(
     `/documents/${encodeURIComponent(docId)}`,
     {
       method: 'DELETE',
@@ -62,7 +58,7 @@ export function deleteDoc(
 }
 
 export function retryDoc(
-  docId: number,
+  docId: BigIntId,
 ): Promise<string> {
   return apiRequest<string>(
     `/documents/${encodeURIComponent(docId)}/retry`,
@@ -73,7 +69,7 @@ export function retryDoc(
 }
 
 export function downloadDoc(
-  docId: number,
+  docId: BigIntId,
 ): string {
   return `/api/documents/${encodeURIComponent(docId)}/download`
 }

@@ -1,15 +1,16 @@
 
 import { apiRequest } from '@/api/client'
+import type { BigIntId } from '@/api/types'
 
 /**
- * EDU-05 课程实体
+ * 个人课程空间
  * 对应 Java 后端 Course.java
  */
 export interface Course {
-  id: number
+  id: BigIntId
   name: string
   description: string | null
-  ownerId: number
+  ownerId: BigIntId
   status: number
   createTime: string
   updateTime: string
@@ -54,7 +55,7 @@ export function createCourse(
  * 查看课程详情
  */
 export function getCourseDetail(
-  courseId: number,
+  courseId: BigIntId,
 ): Promise<Course> {
   return apiRequest<Course>(
     `/courses/${encodeURIComponent(courseId)}`,
@@ -65,7 +66,7 @@ export function getCourseDetail(
  * 修改课程
  */
 export function updateCourse(
-  courseId: number,
+  courseId: BigIntId,
   request: UpdateCourseRequest,
 ): Promise<void> {
   return apiRequest<void>(
@@ -81,7 +82,7 @@ export function updateCourse(
  * 停用课程
  */
 export function deleteCourse(
-  courseId: number,
+  courseId: BigIntId,
 ): Promise<void> {
   return apiRequest<void>(
     `/courses/${encodeURIComponent(courseId)}`,

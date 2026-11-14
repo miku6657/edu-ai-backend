@@ -23,8 +23,6 @@ function envelope<T>(data: T, overrides: Partial<Record<string, unknown>> = {}):
     code: SUCCESS_CODE,
     message: '操作成功',
     data,
-    trace_id: 'tr_0123456789ab',
-    timestamp: '2026-10-18T01:00:00.000+08:00',
     ...overrides,
   }
 }
@@ -83,20 +81,17 @@ describe('apiRequest', () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/courses')
   })
 
-  it('业务失败时抛出携带服务端错误码与追踪号的 ApiError', async () => {
+  it('业务失败时将 Java 数字错误码转成字符串且不要求追踪号', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(
-        jsonResponse(
-          envelope(null, { code: 'E-SYS-02', message: '该自定义 Base URL 未通过安全校验。' }),
-          400,
-        ),
+        jsonResponse(envelope(null, { code: 400, message: '请求参数不合法' }), 400),
       ),
     )
 
-    await expect(apiRequest('/v1/user/config')).rejects.toMatchObject({
-      code: 'E-SYS-02',
-      traceId: 'tr_0123456789ab',
+    await expect(apiRequest('/user/config')).rejects.toMatchObject({
+      code: '400',
+      traceId: null,
       httpStatus: 400,
     })
   })
@@ -143,7 +138,7 @@ describe('apiRequest', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(
-        jsonResponse(envelope(null, { code: 'AUTH_TOKEN_REVOKED', message: '当前登录凭证已注销。' }), 401),
+        jsonResponse(envelope(null, { code: 401, message: '当前登录凭证已注销。' }), 401),
       ),
     )
 
