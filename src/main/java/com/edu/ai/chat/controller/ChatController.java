@@ -10,7 +10,6 @@ import com.edu.ai.common.BusinessException;
 import com.edu.ai.common.Result;
 
 import org.springframework.http.MediaType;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -19,7 +18,6 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/chat")
-@PreAuthorize("hasAnyRole('STUDENT', 'OWNER')")
 public class ChatController {
 
     private final ChatService chatService;
@@ -44,25 +42,23 @@ public class ChatController {
 
         return chatService.stream(
                 request,
-                getUserId(authentication),
-                getRole(authentication)
+                getUserId(authentication)
         );
     }
 
-    // 我的历史会话
+    // 查询当前用户的历史会话
     @GetMapping("/sessions")
     public Result<List<ChatSession>> sessions(
             Authentication authentication) {
 
         return Result.success(
                 chatService.listSessions(
-                        getUserId(authentication),
-                        getRole(authentication)
+                        getUserId(authentication)
                 )
         );
     }
 
-    // 会话历史消息
+    // 查询会话历史消息
     @GetMapping("/sessions/{sessionId}/messages")
     public Result<List<ChatMessage>> messages(
             @PathVariable Long sessionId,
@@ -71,8 +67,7 @@ public class ChatController {
         return Result.success(
                 chatService.listMessages(
                         sessionId,
-                        getUserId(authentication),
-                        getRole(authentication)
+                        getUserId(authentication)
                 )
         );
     }
@@ -121,8 +116,8 @@ public class ChatController {
         return Result.success("已请求停止生成");
     }
 
-    private Long getUserId(
-            Authentication authentication) {
+    // 从 JWT 认证信息中获取用户 ID
+    private Long getUserId(Authentication authentication) {
 
         if (authentication == null
                 || !(authentication.getPrincipal()
@@ -133,24 +128,5 @@ public class ChatController {
         }
 
         return userId;
-    }
-
-    private String getRole(
-            Authentication authentication) {
-
-        if (authentication.getAuthorities().stream()
-                .anyMatch(a ->
-                        a.getAuthority().equals("ROLE_STUDENT"))) {
-            return "STUDENT";
-        }
-
-        if (authentication.getAuthorities().stream()
-                .anyMatch(a ->
-                        a.getAuthority().equals("ROLE_OWNER"))) {
-            return "OWNER";
-        }
-
-        throw new BusinessException(
-                403, "无权使用课程问答");
     }
 }

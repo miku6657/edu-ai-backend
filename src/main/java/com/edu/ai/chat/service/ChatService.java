@@ -83,9 +83,14 @@ ChatService {
                 .build();
     }
 
-    // 校验课程访问权限
-    private void checkAccess(
-            Long courseId, Long userId, String role) {
+    /**
+     * 检查当前用户是否有权访问课程知识库。
+     *
+     * 不再区分 OWNER 和 STUDENT：
+     * 1. 课程创建者可以访问。
+     * 2. 已加入课程的用户可以访问开放课程。
+     */
+    private void checkAccess(Long courseId, Long userId) {
 
         Course course = courseMapper.selectById(courseId);
 
@@ -93,30 +98,26 @@ ChatService {
             throw new BusinessException(404, "课程不存在");
         }
 
-        if ("OWNER".equals(role)
-                && userId.equals(course.getOwnerId())) {
+        // 课程创建者可以访问自己的课程
+        if (userId.equals(course.getOwnerId())) {
             return;
         }
 
-        if ("STUDENT".equals(role)
-                && Integer.valueOf(1).equals(
-                        course.getStatus())) {
-
-            Long count = studentMapper.selectCount(
-                    new LambdaQueryWrapper<CourseStudent>()
-                            .eq(CourseStudent::getCourseId,
-                                    courseId)
-                            .eq(CourseStudent::getStudentId,
-                                    userId)
-            );
-
-            if (count > 0) {
-                return;
-            }
+        // 其他用户必须加入课程，并且课程处于开放状态
+        if (!Integer.valueOf(1).equals(course.getStatus())) {
+            throw new BusinessException(403, "课程暂不可访问");
         }
 
-        throw new BusinessException(
-                403, "无权访问该课程知识库");
+        Long count = studentMapper.selectCount(
+                new LambdaQueryWrapper<CourseStudent>()
+                        .eq(CourseStudent::getCourseId, courseId)
+                        .eq(CourseStudent::getStudentId, userId)
+        );
+
+        if (count == 0) {
+            throw new BusinessException(
+                    403, "请先加入该课程");
+        }
     }
 
     // 获取或新建会话
@@ -209,8 +210,7 @@ ChatService {
     // 开始流式聊天
     public SseEmitter stream(
             ChatRequest request,
-            Long userId,
-            String role) {
+            Long userId) {
 
         if (request == null
                 || request.getCourseId() == null
@@ -232,8 +232,7 @@ ChatService {
         // 校验当前用户是否有课程访问权限
         checkAccess(
                 request.getCourseId(),
-                userId,
-                role
+                userId
         );
 
         ChatSession session =
@@ -516,38 +515,41 @@ ChatService {
         );
     }
 
-    // 查询用户当前仍有权限访问的历史会话
-    public List<ChatSession> listSessions(
-            Long userId,
-            String role) {
+    /**
+     * 查询当前用户的历史会话。
+     * 只返回当前用户有权访问的课程会话。
+     */
+    public List<ChatSession> listSessions(Long userId) {
 
         List<ChatSession> sessions =
                 sessionMapper.selectList(
                         new LambdaQueryWrapper<ChatSession>()
                                 .eq(ChatSession::getUserId, userId)
-                                .orderByDesc(
-                                        ChatSession::getUpdateTime)
+                                .orderByDesc(ChatSession::getUpdateTime)
                 );
 
-        return sessions.stream().filter(session -> {
-            try {
-                checkAccess(
-                        session.getCourseId(),
-                        userId,
-                        role
-                );
-                return true;
-            } catch (BusinessException e) {
-                return false;
-            }
-        }).toList();
+        return sessions.stream()
+                .filter(session -> {
+                    try {
+                        checkAccess(
+                                session.getCourseId(),
+                                userId
+                        );
+                        return true;
+                    } catch (BusinessException e) {
+                        return false;
+                    }
+                })
+                .toList();
     }
 
-    // 查询历史消息
+    /**
+     * 查询会话历史消息。
+     * 只能查询当前用户自己的会话。
+     */
     public List<ChatMessage> listMessages(
             Long sessionId,
-            Long userId,
-            String role) {
+            Long userId) {
 
         ChatSession session =
                 sessionMapper.selectById(sessionId);
@@ -557,16 +559,16 @@ ChatService {
                     404, "会话不存在");
         }
 
+        // 验证会话归属
         if (!userId.equals(session.getUserId())) {
             throw new BusinessException(
                     403, "无权访问该会话");
         }
 
-        // 再次检查当前课程的实际访问权限
+        // 验证课程访问权限
         checkAccess(
                 session.getCourseId(),
-                userId,
-                role
+                userId
         );
 
         return messageMapper.selectList(

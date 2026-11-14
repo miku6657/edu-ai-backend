@@ -8,7 +8,6 @@ import com.edu.ai.task.dto.StudentTaskVO;
 import com.edu.ai.task.entity.LearningTask;
 import com.edu.ai.task.service.LearningTaskService;
 
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
@@ -23,13 +22,11 @@ public class LearningTaskController {
 
     public LearningTaskController(
             LearningTaskService taskService) {
-
         this.taskService = taskService;
     }
 
-    // 负责人创建任务
+    // 创建课程任务
     @PostMapping("/course/{courseId}")
-    @PreAuthorize("hasRole('OWNER')")
     public Result<LearningTask> create(
             @PathVariable Long courseId,
             @RequestBody LearningTaskRequest request,
@@ -44,9 +41,8 @@ public class LearningTaskController {
         );
     }
 
-    // 负责人修改任务
+    // 修改任务
     @PutMapping("/{taskId}")
-    @PreAuthorize("hasRole('OWNER')")
     public Result<String> update(
             @PathVariable Long taskId,
             @RequestBody LearningTaskRequest request,
@@ -61,9 +57,8 @@ public class LearningTaskController {
         return Result.success("修改成功");
     }
 
-    // 负责人取消任务
+    // 取消任务
     @DeleteMapping("/{taskId}")
-    @PreAuthorize("hasRole('OWNER')")
     public Result<String> cancel(
             @PathVariable Long taskId,
             Authentication authentication) {
@@ -76,39 +71,22 @@ public class LearningTaskController {
         return Result.success("任务已取消");
     }
 
-    // 负责人查看课程任务列表
-    @GetMapping("/course/{courseId}/owner")
-    @PreAuthorize("hasRole('OWNER')")
-    public Result<List<LearningTask>> ownerTasks(
+    // 查询课程任务及当前用户的完成状态
+    @GetMapping("/course/{courseId}")
+    public Result<List<StudentTaskVO>> list(
             @PathVariable Long courseId,
             Authentication authentication) {
 
         return Result.success(
-                taskService.listForOwner(
+                taskService.listForUser(
                         courseId,
                         getUserId(authentication)
                 )
         );
     }
 
-    // 学生查看自己课程的任务
-    @GetMapping("/course/{courseId}/student")
-    @PreAuthorize("hasRole('STUDENT')")
-    public Result<List<StudentTaskVO>> studentTasks(
-            @PathVariable Long courseId,
-            Authentication authentication) {
-
-        return Result.success(
-                taskService.listForStudent(
-                        courseId,
-                        getUserId(authentication)
-                )
-        );
-    }
-
-    // 学生标记任务完成
+    // 标记任务完成
     @PutMapping("/{taskId}/complete")
-    @PreAuthorize("hasRole('STUDENT')")
     public Result<String> complete(
             @PathVariable Long taskId,
             Authentication authentication) {
@@ -122,9 +100,8 @@ public class LearningTaskController {
         return Result.success("任务已完成");
     }
 
-    // 学生撤销完成状态
+    // 撤销完成状态
     @PutMapping("/{taskId}/uncomplete")
-    @PreAuthorize("hasRole('STUDENT')")
     public Result<String> uncomplete(
             @PathVariable Long taskId,
             Authentication authentication) {
@@ -138,9 +115,9 @@ public class LearningTaskController {
         return Result.success("已恢复为未完成");
     }
 
-    // 负责人查看完成统计
+    // 查看任务完成统计
+    // 仍然要求当前用户是课程创建者
     @GetMapping("/{taskId}/progress")
-    @PreAuthorize("hasRole('OWNER')")
     public Result<Map<String, Object>> progress(
             @PathVariable Long taskId,
             Authentication authentication) {
@@ -157,7 +134,7 @@ public class LearningTaskController {
 
         if (authentication == null
                 || !(authentication.getPrincipal()
-                        instanceof Long userId)) {
+                instanceof Long userId)) {
 
             throw new BusinessException(
                     401, "登录状态无效");

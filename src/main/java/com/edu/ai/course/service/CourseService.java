@@ -1,3 +1,4 @@
+
 package com.edu.ai.course.service;
 
 import com.edu.ai.course.dto.CourseDTO;
@@ -7,24 +8,18 @@ import java.util.List;
 
 public interface CourseService {
 
+    // 创建课程
     Course createCourse(CourseDTO dto, Long userId);
 
+    // 修改自己创建的课程
     void updateCourse(Long courseId, CourseDTO dto, Long userId);
 
+    // 停用自己创建的课程
     void disableCourse(Long courseId, Long userId);
 
-    // 当前用户创建或加入的课程
-    List<Course> getUserCourses(Long userId);
+    // 查询当前用户创建的课程
+    List<Course> getMyCourses(Long userId);
 
-    // 当前用户可以加入的课程
-    List<Course> getAvailableCourses(Long userId);
-
-    // 课程详情
+    // 查看课程详情
     Course getCourseDetail(Long courseId, Long userId);
-
-    // 加入课程
-    void joinCourse(Long courseId, Long userId);
-
-    // 退出课程
-    void leaveCourse(Long courseId, Long userId);
 }

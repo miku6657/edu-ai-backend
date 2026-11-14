@@ -46,14 +46,14 @@ public class LearningTaskService {
         this.courseStudentMapper = courseStudentMapper;
     }
 
-    // 负责人创建任务
+    // 创建课程任务
     @Transactional(rollbackFor = Exception.class)
     public LearningTask create(
             Long courseId,
-            Long ownerId,
+            Long userId,
             LearningTaskRequest request) {
 
-        requireOwner(courseId, ownerId);
+        requireCourseOwner(courseId, userId);
         validateRequest(request);
 
         LocalDateTime now = LocalDateTime.now();
@@ -76,11 +76,11 @@ public class LearningTaskService {
     @Transactional(rollbackFor = Exception.class)
     public void update(
             Long taskId,
-            Long ownerId,
+            Long userId,
             LearningTaskRequest request) {
 
         LearningTask task = requireTask(taskId);
-        requireOwner(task.getCourseId(), ownerId);
+        requireCourseOwner(task.getCourseId(), userId);
         requireActiveTask(task);
         validateRequest(request);
 
@@ -94,10 +94,10 @@ public class LearningTaskService {
 
     // 取消任务
     @Transactional(rollbackFor = Exception.class)
-    public void cancel(Long taskId, Long ownerId) {
+    public void cancel(Long taskId, Long userId) {
 
         LearningTask task = requireTask(taskId);
-        requireOwner(task.getCourseId(), ownerId);
+        requireCourseOwner(task.getCourseId(), userId);
 
         taskMapper.update(
                 null,
@@ -111,26 +111,15 @@ public class LearningTaskService {
         );
     }
 
-    // 负责人查看课程全部任务
-    public List<LearningTask> listForOwner(
+    /**
+     * 查询当前用户有权访问的课程任务，
+     * 同时返回当前用户自己的完成状态。
+     */
+    public List<StudentTaskVO> listForUser(
             Long courseId,
-            Long ownerId) {
+            Long userId) {
 
-        requireOwner(courseId, ownerId);
-
-        return taskMapper.selectList(
-                new LambdaQueryWrapper<LearningTask>()
-                        .eq(LearningTask::getCourseId, courseId)
-                        .orderByAsc(LearningTask::getDeadline)
-        );
-    }
-
-    // 学生查看自己的课程任务及完成状态
-    public List<StudentTaskVO> listForStudent(
-            Long courseId,
-            Long studentId) {
-
-        requireStudent(courseId, studentId);
+        requireCourseAccess(courseId, userId);
 
         List<LearningTask> tasks = taskMapper.selectList(
                 new LambdaQueryWrapper<LearningTask>()
@@ -147,10 +136,11 @@ public class LearningTaskService {
                 .map(LearningTask::getId)
                 .toList();
 
+        // 查询当前用户的完成记录
         List<TaskStudent> records =
                 taskStudentMapper.selectList(
                         new LambdaQueryWrapper<TaskStudent>()
-                                .eq(TaskStudent::getStudentId, studentId)
+                                .eq(TaskStudent::getStudentId, userId)
                                 .in(TaskStudent::getTaskId, taskIds)
                 );
 
@@ -180,33 +170,35 @@ public class LearningTaskService {
         }).toList();
     }
 
-    // 学生修改任务完成状态
+    // 修改任务完成状态
     @Transactional(rollbackFor = Exception.class)
     public void setCompleted(
             Long taskId,
-            Long studentId,
+            Long userId,
             boolean completed) {
 
         LearningTask task = requireTask(taskId);
         requireActiveTask(task);
-        requireStudent(task.getCourseId(), studentId);
+
+        // 课程创建者或已加入课程的用户均可操作
+        requireCourseAccess(task.getCourseId(), userId);
 
         // 使用 MySQL 原子 upsert，避免并发产生重复记录
         taskStudentMapper.upsertCompletion(
                 taskId,
-                studentId,
+                userId,
                 completed ? 1 : 0,
                 completed ? LocalDateTime.now() : null
         );
     }
 
-    // 负责人查看任务完成统计
+    // 查看任务完成统计（仅课程创建者）
     public Map<String, Object> progress(
             Long taskId,
-            Long ownerId) {
+            Long userId) {
 
         LearningTask task = requireTask(taskId);
-        requireOwner(task.getCourseId(), ownerId);
+        requireCourseOwner(task.getCourseId(), userId);
 
         List<CourseStudent> members =
                 courseStudentMapper.selectList(
@@ -278,31 +270,42 @@ public class LearningTaskService {
         }
     }
 
-    private void requireOwner(Long courseId, Long ownerId) {
+    private void requireCourseOwner(
+            Long courseId,
+            Long userId) {
 
         Course course = requireCourse(courseId);
 
-        if (!ownerId.equals(course.getOwnerId())) {
+        if (!userId.equals(course.getOwnerId())) {
             throw new BusinessException(
-                    403, "只能管理自己负责的课程");
+                    403, "只有课程创建者可以管理任务");
         }
     }
 
-    private void requireStudent(
+    /**
+     * 课程创建者或已经加入课程的用户可以访问。
+     */
+    private void requireCourseAccess(
             Long courseId,
-            Long studentId) {
+            Long userId) {
 
-        requireCourse(courseId);
+        Course course = requireCourse(courseId);
 
+        // 创建者直接放行
+        if (userId.equals(course.getOwnerId())) {
+            return;
+        }
+
+        // 检查当前用户是否加入课程
         Long count = courseStudentMapper.selectCount(
                 new LambdaQueryWrapper<CourseStudent>()
                         .eq(CourseStudent::getCourseId, courseId)
-                        .eq(CourseStudent::getStudentId, studentId)
+                        .eq(CourseStudent::getStudentId, userId)
         );
 
         if (count == 0) {
             throw new BusinessException(
-                    403, "你尚未加入该课程");
+                    403, "无权访问该课程任务");
         }
     }
 

@@ -41,7 +41,7 @@ public class TaskReminderService {
         this.taskStudentMapper = taskStudentMapper;
     }
 
-    public TaskReminderSummaryVO getReminders(Long studentId) {
+    public TaskReminderSummaryVO getReminders(Long userId) {
 
         TaskReminderSummaryVO summary =
                 new TaskReminderSummaryVO();
@@ -51,24 +51,33 @@ public class TaskReminderService {
         summary.setOverdueCount(0);
         summary.setReminders(List.of());
 
-        // 1. 查询学生已加入的课程
+        // 1. 查询当前用户加入的课程
         List<CourseStudent> enrollments =
                 courseStudentMapper.selectList(
                         new LambdaQueryWrapper<CourseStudent>()
-                                .eq(CourseStudent::getStudentId,
-                                        studentId)
+                                .eq(CourseStudent::getStudentId, userId)
                 );
 
-        if (enrollments.isEmpty()) {
+        Set<Long> courseIds = enrollments.stream()
+                .map(CourseStudent::getCourseId)
+                .collect(Collectors.toSet());
+
+        // 2. 查询当前用户创建的课程
+        List<Course> ownedCourses = courseMapper.selectList(
+                new LambdaQueryWrapper<Course>()
+                        .eq(Course::getOwnerId, userId)
+                        .eq(Course::getStatus, 1)
+        );
+
+        ownedCourses.stream()
+                .map(Course::getId)
+                .forEach(courseIds::add);
+
+        if (courseIds.isEmpty()) {
             return summary;
         }
 
-        List<Long> courseIds = enrollments.stream()
-                .map(CourseStudent::getCourseId)
-                .distinct()
-                .toList();
-
-        // 2. 只查询仍然开放的课程
+        // 3. 查询用户有权访问的开放课程
         List<Course> courses = courseMapper.selectList(
                 new LambdaQueryWrapper<Course>()
                         .in(Course::getId, courseIds)
@@ -85,7 +94,7 @@ public class TaskReminderService {
                         Course::getName
                 ));
 
-        // 3. 查询这些课程中的有效任务
+        // 4. 查询这些课程中的有效任务
         List<LearningTask> tasks = taskMapper.selectList(
                 new LambdaQueryWrapper<LearningTask>()
                         .in(LearningTask::getCourseId,
@@ -102,15 +111,13 @@ public class TaskReminderService {
                 .map(LearningTask::getId)
                 .toList();
 
-        // 4. 查询该学生已完成的任务 ID
+        // 5. 查询当前用户已经完成的任务
         List<TaskStudent> completedRecords =
                 taskStudentMapper.selectList(
                         new LambdaQueryWrapper<TaskStudent>()
-                                .eq(TaskStudent::getStudentId,
-                                        studentId)
+                                .eq(TaskStudent::getStudentId, userId)
                                 .eq(TaskStudent::getCompleted, 1)
-                                .in(TaskStudent::getTaskId,
-                                        taskIds)
+                                .in(TaskStudent::getTaskId, taskIds)
                 );
 
         Set<Long> completedTaskIds =
@@ -118,7 +125,7 @@ public class TaskReminderService {
                         .map(TaskStudent::getTaskId)
                         .collect(Collectors.toSet());
 
-        // 5. 按截止时间实时计算提醒
+        // 6. 根据截止时间计算提醒
         LocalDateTime now = LocalDateTime.now();
 
         int dueSoonCount = 0;
@@ -140,9 +147,7 @@ public class TaskReminderService {
 
             vo.setTaskId(task.getId());
             vo.setCourseId(task.getCourseId());
-            vo.setCourseName(
-                    courseNames.get(task.getCourseId())
-            );
+            vo.setCourseName(courseNames.get(task.getCourseId()));
             vo.setTitle(task.getTitle());
             vo.setDescription(task.getDescription());
             vo.setDeadline(task.getDeadline());
@@ -173,7 +178,7 @@ public class TaskReminderService {
             reminders.add(vo);
         }
 
-        // 6. 逾期任务优先，其次临近截止
+        // 7. 逾期任务优先，其次临近截止
         Map<String, Integer> priority = Map.of(
                 "OVERDUE", 0,
                 "DUE_SOON", 1,
