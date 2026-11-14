@@ -32,6 +32,7 @@ public class DdlTaskExtractService {
     private final DdlRequestHashService hashService;
     private final ObjectMapper objectMapper;
     private final TransactionTemplate transactionTemplate;
+    private final DdlDisplayCodeGenerator displayCodeGenerator;
 
     public DdlTaskExtractService(
             DdlTaskExtractGateway extractGateway,
@@ -42,7 +43,8 @@ public class DdlTaskExtractService {
             DdlExtractIdempotencyService idempotencyService,
             DdlRequestHashService hashService,
             ObjectMapper objectMapper,
-            TransactionTemplate transactionTemplate) {
+            TransactionTemplate transactionTemplate,
+            DdlDisplayCodeGenerator displayCodeGenerator) {
 
         this.extractGateway = extractGateway;
         this.duplicateService = duplicateService;
@@ -53,6 +55,7 @@ public class DdlTaskExtractService {
         this.hashService = hashService;
         this.objectMapper = objectMapper;
         this.transactionTemplate = transactionTemplate;
+        this.displayCodeGenerator = displayCodeGenerator;
     }
 
     /**
@@ -336,6 +339,10 @@ public class DdlTaskExtractService {
         DdlTask task = new DdlTask();
 
         task.setUserId(userId);
+
+        task.setDisplayCode(
+                displayCodeGenerator.generate()
+        );
 
         task.setCourseId(request.getCourseId());
 

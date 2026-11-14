@@ -64,10 +64,6 @@ public class DdlTaskController {
     @GetMapping
     public Result<DdlTaskBoardVO> list(
             @RequestParam(
-                    name = "status_group",
-                    defaultValue = "ALL"
-            ) String statusGroup,
-            @RequestParam(
                     name = "course_id",
                     required = false
             ) Long courseId,
@@ -76,8 +72,7 @@ public class DdlTaskController {
         return Result.success(
                 ddlTaskService.getBoard(
                         getUserId(authentication),
-                        courseId,
-                        statusGroup
+                        courseId
                 )
         );
     }

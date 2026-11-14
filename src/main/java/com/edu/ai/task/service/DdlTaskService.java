@@ -22,9 +22,17 @@ import java.util.List;
 public class DdlTaskService {
 
     private final DdlTaskMapper taskMapper;
+    private final TaskChangeDraftService draftService;
+    private final DdlDisplayCodeGenerator displayCodeGenerator;
 
-    public DdlTaskService(DdlTaskMapper taskMapper) {
+    public DdlTaskService(
+            DdlTaskMapper taskMapper,
+            TaskChangeDraftService draftService,
+            DdlDisplayCodeGenerator displayCodeGenerator) {
+
         this.taskMapper = taskMapper;
+        this.draftService = draftService;
+        this.displayCodeGenerator = displayCodeGenerator;
     }
 
     /**
@@ -83,6 +91,12 @@ public class DdlTaskService {
         DdlTask task = new DdlTask();
 
         task.setUserId(userId);
+
+        // 生成个人任务编号
+        task.setDisplayCode(
+                displayCodeGenerator.generate()
+        );
+
         task.setCourseId(request.getCourseId());
         task.setCourseName(request.getCourseName().trim());
         task.setTaskTitle(request.getTaskTitle().trim());
@@ -248,18 +262,18 @@ public class DdlTaskService {
     }
 
     /**
-     * 任务看板
+     * 任务看板。
      */
     public DdlTaskBoardVO getBoard(
             Long userId,
-            Long courseId,
-            String statusGroup) {
+            Long courseId) {
 
         List<DdlTask> tasks =
-                listTasks(userId, statusGroup, courseId);
+                listTasks(userId, "ALL", courseId);
 
         DdlTaskBoardVO board = new DdlTaskBoardVO();
 
+        // 待处理任务
         board.setPendingInboxTasks(
                 tasks.stream()
                         .filter(t ->
@@ -269,6 +283,7 @@ public class DdlTaskService {
                         .toList()
         );
 
+        // 进行中任务
         board.setActiveTasks(
                 tasks.stream()
                         .filter(t ->
@@ -278,6 +293,7 @@ public class DdlTaskService {
                         .toList()
         );
 
+        // 已完成任务
         board.setCompletedTasks(
                 tasks.stream()
                         .filter(t ->
@@ -286,8 +302,10 @@ public class DdlTaskService {
                         .toList()
         );
 
-        // 变更草案暂时由后续的草案查询接口接入
-        board.setPendingChangeDrafts(List.of());
+        // 待确认的任务变更草案
+        board.setPendingChangeDrafts(
+                draftService.listPending(userId, courseId)
+        );
 
         return board;
     }

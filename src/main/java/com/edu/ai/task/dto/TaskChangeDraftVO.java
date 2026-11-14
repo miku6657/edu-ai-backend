@@ -1,6 +1,6 @@
 package com.edu.ai.task.dto;
 
-import com.edu.ai.task.entity.DdlTaskChangeDraft;
+import com.edu.ai.task.entity.TaskChangeDraft;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Data;
 
@@ -54,7 +54,7 @@ public class TaskChangeDraftVO {
     private LocalDateTime expiresAt;
 
     public static TaskChangeDraftVO from(
-            DdlTaskChangeDraft draft) {
+            TaskChangeDraft draft) {
 
         TaskChangeDraftVO vo = new TaskChangeDraftVO();
 

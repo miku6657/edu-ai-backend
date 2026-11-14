@@ -28,13 +28,16 @@ public class TaskChangeDraftService {
 
     private final DdlTaskMapper taskMapper;
     private final TaskChangeDraftMapper draftMapper;
+    private final DdlDisplayCodeGenerator displayCodeGenerator;
 
     public TaskChangeDraftService(
             DdlTaskMapper taskMapper,
-            TaskChangeDraftMapper draftMapper) {
+            TaskChangeDraftMapper draftMapper,
+            DdlDisplayCodeGenerator displayCodeGenerator) {
 
         this.taskMapper = taskMapper;
         this.draftMapper = draftMapper;
+        this.displayCodeGenerator = displayCodeGenerator;
     }
 
     /**
@@ -137,27 +140,72 @@ public class TaskChangeDraftService {
 
         draftMapper.insert(draft);
 
-        return toVO(draft);
+        return TaskChangeDraftVO.from(draft);
     }
 
     /**
      * 查询当前用户所有待确认的变更草案。
      */
     public List<TaskChangeDraftVO> listPending(Long userId) {
+        return listPending(userId, null);
+    }
 
-        List<TaskChangeDraft> drafts = draftMapper.selectList(
-                new LambdaQueryWrapper<TaskChangeDraft>()
-                        .eq(TaskChangeDraft::getUserId, userId)
-                        .eq(TaskChangeDraft::getStatus, "PENDING")
-                        .orderByAsc(TaskChangeDraft::getExpiresAt)
-        );
+    /**
+     * 根据用户和课程查询待确认的变更草案。
+     *
+     * courseId 为 null 时查询用户全部课程。
+     */
+    public List<TaskChangeDraftVO> listPending(
+            Long userId,
+            Long courseId) {
 
         LocalDateTime now = LocalDateTime.now();
 
+        // 先把过期草案更新为 EXPIRED
+        draftMapper.update(
+                null,
+                new LambdaUpdateWrapper<TaskChangeDraft>()
+                        .eq(TaskChangeDraft::getUserId, userId)
+                        .eq(TaskChangeDraft::getStatus, "PENDING")
+                        .le(TaskChangeDraft::getExpiresAt, now)
+                        .set(TaskChangeDraft::getStatus, "EXPIRED")
+                        .set(TaskChangeDraft::getUpdateTime, now)
+        );
+
+        LambdaQueryWrapper<TaskChangeDraft> wrapper =
+                new LambdaQueryWrapper<TaskChangeDraft>()
+                        .eq(TaskChangeDraft::getUserId, userId)
+                        .eq(TaskChangeDraft::getStatus, "PENDING")
+                        .gt(TaskChangeDraft::getExpiresAt, now)
+                        .orderByAsc(TaskChangeDraft::getExpiresAt);
+
+        List<TaskChangeDraft> drafts =
+                draftMapper.selectList(wrapper);
+
+        if (courseId == null || drafts.isEmpty()) {
+            return drafts.stream()
+                    .map(TaskChangeDraftVO::from)
+                    .toList();
+        }
+
+        // 查询当前用户在指定课程下的任务 ID
+        List<Long> taskIds = taskMapper.selectList(
+                new LambdaQueryWrapper<DdlTask>()
+                        .select(DdlTask::getId)
+                        .eq(DdlTask::getUserId, userId)
+                        .eq(DdlTask::getCourseId, courseId)
+        ).stream()
+                .map(DdlTask::getId)
+                .toList();
+
+        if (taskIds.isEmpty()) {
+            return List.of();
+        }
+
         return drafts.stream()
                 .filter(draft ->
-                        draft.getExpiresAt().isAfter(now))
-                .map(this::toVO)
+                        taskIds.contains(draft.getTargetTaskId()))
+                .map(TaskChangeDraftVO::from)
                 .toList();
     }
 
@@ -281,6 +329,10 @@ public class TaskChangeDraftService {
             case "CREATE_NEW" -> {
 
                 DdlTask newTask = new DdlTask();
+
+                newTask.setDisplayCode(
+                        displayCodeGenerator.generate()
+                );
 
                 copyDraftToNewTask(
                         newTask,
@@ -485,44 +537,4 @@ public class TaskChangeDraftService {
         return task;
     }
 
-    /**
-     * Entity 转 VO。
-     */
-    private TaskChangeDraftVO toVO(
-            TaskChangeDraft draft) {
-
-        TaskChangeDraftVO vo = new TaskChangeDraftVO();
-
-        vo.setTargetTaskId(draft.getTargetTaskId());
-        vo.setNewTaskTitle(draft.getNewTaskTitle());
-
-        vo.setNewTimePrecision(
-                draft.getNewTimePrecision()
-        );
-
-        vo.setNewDueDate(draft.getNewDueDate());
-        vo.setNewDueTime(draft.getNewDueTime());
-        vo.setNewDueAt(draft.getNewDueAt());
-
-        vo.setNewTimeInferred(draft.getNewTimeInferred());
-
-        vo.setNewTimeAmbiguityReason(
-                draft.getNewTimeAmbiguityReason()
-        );
-
-        vo.setNewDeliverableFormat(
-                draft.getNewDeliverableFormat()
-        );
-
-        vo.setNewSubmissionChannel(
-                draft.getNewSubmissionChannel()
-        );
-
-        vo.setRawSourceText(draft.getRawSourceText());
-        vo.setRawTimeText(draft.getRawTimeText());
-        vo.setUserTimezone(draft.getUserTimezone());
-        vo.setExpiresAt(draft.getExpiresAt());
-
-        return vo;
-    }
 }
