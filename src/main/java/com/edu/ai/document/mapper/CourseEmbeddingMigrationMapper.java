@@ -16,7 +16,8 @@ public interface CourseEmbeddingMigrationMapper
     /**
      * 恢复过期任务。
      *
-     * 达到最大执行次数的任务直接标记 FAILED。
+     * 未达到最大尝试次数：重新进入 PENDING。
+     * 达到最大尝试次数：直接 FAILED。
      */
     @Update("""
         UPDATE course_embedding_migration
@@ -24,18 +25,30 @@ public interface CourseEmbeddingMigrationMapper
                 WHEN attempt_count >= 3 THEN 'FAILED'
                 ELSE 'PENDING'
             END,
+
             processing_token = NULL,
+
             lease_until = NULL,
+
             next_retry_at = CASE
                 WHEN attempt_count >= 3 THEN NULL
                 ELSE #{nextRetryAt}
             END,
+
             finished_at = CASE
                 WHEN attempt_count >= 3 THEN #{now}
                 ELSE finished_at
             END,
+
+            failed_documents = CASE
+                WHEN attempt_count >= 3 THEN total_documents
+                ELSE failed_documents
+            END,
+
             error_message = 'Worker租约过期，任务已恢复',
+
             update_time = #{now}
+
         WHERE status = 'RUNNING'
           AND lease_until IS NOT NULL
           AND lease_until < #{now}

@@ -110,4 +110,33 @@ public class CourseIndexLockService {
 
         mapper.release(courseId, token);
     }
+
+    /**
+     * 在当前事务中锁定课程锁记录并校验所有权。
+     *
+     * 用于 Embedding 迁移最终提交前。
+     * 必须在事务中调用。
+     */
+    public void assertOwnedForUpdate(
+            Long courseId,
+            String token) {
+
+        if (courseId == null
+                || token == null
+                || token.isBlank()) {
+
+            throw new IllegalArgumentException(
+                    "课程锁参数不合法"
+            );
+        }
+
+        String currentToken =
+                mapper.selectTokenForUpdate(courseId);
+
+        if (!token.equals(currentToken)) {
+            throw new IllegalStateException(
+                    "课程索引锁已经失效，禁止提交迁移"
+            );
+        }
+    }
 }

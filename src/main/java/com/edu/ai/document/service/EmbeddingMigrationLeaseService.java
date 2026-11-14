@@ -35,9 +35,18 @@ public class EmbeddingMigrationLeaseService {
         int updated = mapper.update(
                 null,
                 new LambdaUpdateWrapper<CourseEmbeddingMigration>()
-                        .eq(CourseEmbeddingMigration::getId, migrationId)
-                        .eq(CourseEmbeddingMigration::getStatus, "RUNNING")
-                        .eq(CourseEmbeddingMigration::getProcessingToken, token)
+                        .eq(
+                                CourseEmbeddingMigration::getId,
+                                migrationId
+                        )
+                        .eq(
+                                CourseEmbeddingMigration::getStatus,
+                                "RUNNING"
+                        )
+                        .eq(
+                                CourseEmbeddingMigration::getProcessingToken,
+                                token
+                        )
                         .set(
                                 CourseEmbeddingMigration::getLeaseUntil,
                                 now.plusMinutes(LEASE_MINUTES)
@@ -53,6 +62,8 @@ public class EmbeddingMigrationLeaseService {
 
     /**
      * 续租。
+     *
+     * 已经过期的执行者不能重新续租。
      */
     @Transactional(rollbackFor = Exception.class)
     public boolean renew(
@@ -64,10 +75,22 @@ public class EmbeddingMigrationLeaseService {
         int updated = mapper.update(
                 null,
                 new LambdaUpdateWrapper<CourseEmbeddingMigration>()
-                        .eq(CourseEmbeddingMigration::getId, migrationId)
-                        .eq(CourseEmbeddingMigration::getStatus, "RUNNING")
-                        .eq(CourseEmbeddingMigration::getProcessingToken, token)
-                        .gt(CourseEmbeddingMigration::getLeaseUntil, now)
+                        .eq(
+                                CourseEmbeddingMigration::getId,
+                                migrationId
+                        )
+                        .eq(
+                                CourseEmbeddingMigration::getStatus,
+                                "RUNNING"
+                        )
+                        .eq(
+                                CourseEmbeddingMigration::getProcessingToken,
+                                token
+                        )
+                        .gt(
+                                CourseEmbeddingMigration::getLeaseUntil,
+                                now
+                        )
                         .set(
                                 CourseEmbeddingMigration::getLeaseUntil,
                                 now.plusMinutes(LEASE_MINUTES)
@@ -82,7 +105,7 @@ public class EmbeddingMigrationLeaseService {
     }
 
     /**
-     * 恢复过期任务。
+     * 恢复租约过期的任务。
      */
     @Transactional(rollbackFor = Exception.class)
     public int recoverExpired() {
@@ -96,24 +119,56 @@ public class EmbeddingMigrationLeaseService {
     }
 
     /**
-     * 释放租约。
+     * 主动放回任务队列。
+     *
+     * 只允许仍然有效的当前执行者释放。
+     * 不允许把已经过期的 RUNNING 任务清空租约。
      */
     @Transactional(rollbackFor = Exception.class)
     public boolean release(
             Long migrationId,
             String token) {
 
+        LocalDateTime now = LocalDateTime.now();
+
         int updated = mapper.update(
                 null,
                 new LambdaUpdateWrapper<CourseEmbeddingMigration>()
-                        .eq(CourseEmbeddingMigration::getId, migrationId)
-                        .eq(CourseEmbeddingMigration::getStatus, "RUNNING")
-                        .eq(CourseEmbeddingMigration::getProcessingToken, token)
-                        .set(CourseEmbeddingMigration::getLeaseUntil, null)
-                        .set(CourseEmbeddingMigration::getProcessingToken, null)
+                        .eq(
+                                CourseEmbeddingMigration::getId,
+                                migrationId
+                        )
+                        .eq(
+                                CourseEmbeddingMigration::getStatus,
+                                "RUNNING"
+                        )
+                        .eq(
+                                CourseEmbeddingMigration::getProcessingToken,
+                                token
+                        )
+                        .gt(
+                                CourseEmbeddingMigration::getLeaseUntil,
+                                now
+                        )
+                        .set(
+                                CourseEmbeddingMigration::getStatus,
+                                "PENDING"
+                        )
+                        .set(
+                                CourseEmbeddingMigration::getProcessingToken,
+                                null
+                        )
+                        .set(
+                                CourseEmbeddingMigration::getLeaseUntil,
+                                null
+                        )
+                        .set(
+                                CourseEmbeddingMigration::getNextRetryAt,
+                                now.plusMinutes(1)
+                        )
                         .set(
                                 CourseEmbeddingMigration::getUpdateTime,
-                                LocalDateTime.now()
+                                now
                         )
         );
 

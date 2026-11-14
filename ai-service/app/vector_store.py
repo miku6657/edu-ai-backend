@@ -1,5 +1,6 @@
 import chromadb
 import hashlib
+import time
 
 from openai import OpenAI
 
@@ -88,6 +89,7 @@ def create_migration_collection(
             "course_id": str(course_id),
             "execution_token_hash": token_hash,
             "status": "STAGED",
+            "created_at": str(time.time()),
         },
         configuration={
             "hnsw": {"space": "cosine"}
@@ -95,6 +97,78 @@ def create_migration_collection(
     )
 
     return name, collection
+
+
+def get_or_create_index_collection(name: str):
+    """按 Profile 中的 Collection 名称获取或创建正式索引集合。"""
+    if not name or len(name) > 63:
+        raise ValueError("Collection 名称不合法")
+    return client.get_or_create_collection(
+        name=name,
+        embedding_function=None,
+        configuration={
+            "hnsw": {"space": "cosine"}
+        },
+    )
+
+
+def cleanup_orphan_migration_collections(
+    keep_collection_names: list[str],
+    min_age_hours: int,
+) -> dict:
+    """清理未被引用且超过保护期的孤立迁移 Collection。"""
+    keep = set(keep_collection_names or [])
+    now = time.time()
+    min_age_seconds = min_age_hours * 3600
+
+    deleted = []
+    skipped = []
+
+    for item in client.list_collections():
+        name = (
+            item.name
+            if hasattr(item, "name")
+            else str(item)
+        )
+
+        if not name.startswith("mig_"):
+            continue
+        if name in keep:
+            continue
+
+        try:
+            collection = client.get_collection(
+                name=name,
+                embedding_function=None,
+            )
+        except chromadb.errors.NotFoundError:
+            continue
+
+        metadata = collection.metadata or {}
+        created_at = metadata.get("created_at")
+
+        # 没有 created_at 的旧临时集合不自动删除。
+        if created_at is None:
+            skipped.append(name)
+            continue
+
+        try:
+            created_ts = float(created_at)
+        except (TypeError, ValueError):
+            skipped.append(name)
+            continue
+
+        if now - created_ts < min_age_seconds:
+            skipped.append(name)
+            continue
+
+        client.delete_collection(name=name)
+        deleted.append(name)
+
+    return {
+        "deleted_collections": deleted,
+        "skipped_collections": skipped,
+    }
 
 
 def index_document_into_collection(

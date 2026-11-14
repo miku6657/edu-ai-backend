@@ -13,8 +13,9 @@ from .embedding_service import create_embedding_client, embed_texts
 from .pdf_parser import parse_pdf
 from .rag_service import rag_stream
 from .vector_store import (
+    cleanup_orphan_migration_collections,
     delete_document_vectors_all_versions,
-    get_collection_by_name,
+    get_or_create_index_collection,
     index_document_into_collection,
     search_course,
 )
@@ -161,7 +162,7 @@ def internal_index(req: IndexRequest, _: None = Depends(require_internal)):
             base_url=req.embedding_base_url,
         )
 
-        collection = get_collection_by_name(req.collection_name)
+        collection = get_or_create_index_collection(req.collection_name)
 
         # 维度校验：取第一个切片作为样本。
         sample = embed_texts(
@@ -331,4 +332,29 @@ def delete_document_api(request: DeleteDocumentRequest):
         raise HTTPException(
             status_code=500,
             detail="删除向量失败",
+        )
+
+
+class CleanupRequest(BaseModel):
+    keep_collection_names: list[str] = Field(default_factory=list)
+    min_age_hours: int = Field(default=48, gt=0)
+
+
+@app.post(
+    "/internal/embedding/collections/cleanup",
+    dependencies=[Depends(require_internal)],
+)
+def internal_cleanup_collections(request: CleanupRequest):
+    try:
+        with index_lock:
+            result = cleanup_orphan_migration_collections(
+                keep_collection_names=request.keep_collection_names,
+                min_age_hours=request.min_age_hours,
+            )
+        return result
+    except Exception:
+        logger.exception("Collection cleanup failed")
+        raise HTTPException(
+            status_code=500,
+            detail="Collection清理失败",
         )

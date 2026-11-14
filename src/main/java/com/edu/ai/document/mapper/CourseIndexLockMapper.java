@@ -84,4 +84,21 @@ public interface CourseIndexLockMapper {
             @Param("courseId") Long courseId,
             @Param("token") String token
     );
+
+    /**
+     * 事务内锁定当前课程锁记录。
+     *
+     * 必须在事务中调用。
+     * 返回 null 代表锁已经失效或不属于当前执行者。
+     */
+    @Select("""
+        SELECT lock_token
+        FROM course_index_lock
+        WHERE course_id = #{courseId}
+          AND lease_until > NOW()
+        FOR UPDATE
+        """)
+    String selectTokenForUpdate(
+            @Param("courseId") Long courseId
+    );
 }

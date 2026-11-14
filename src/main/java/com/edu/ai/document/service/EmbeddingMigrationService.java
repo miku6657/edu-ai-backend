@@ -136,6 +136,20 @@ public class EmbeddingMigrationService {
                     409, "课程没有可迁移的已完成索引文档");
         }
 
+        if (totalDocuments > 500) {
+            throw new BusinessException(
+                    400,
+                    "当前版本单次最多迁移500篇文档，请先调整迁移批次限制"
+            );
+        }
+
+        if (config.getEmbeddingDim() <= 0) {
+            throw new BusinessException(
+                    400,
+                    "目标Embedding维度不合法"
+            );
+        }
+
         LocalDateTime now = LocalDateTime.now();
 
         CourseEmbeddingMigration migration =

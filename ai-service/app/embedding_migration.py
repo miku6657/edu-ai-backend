@@ -33,17 +33,43 @@ def migrate_course(
     documents 结构：
         [{"document_id": 1, "storage_name": "xxx.pdf"}, ...]
 
-    返回 STAGED 状态；只有 Java 验证通过后才允许提交新版本。
-    Python 负责构建，Java 负责决定是否提交。
+    先校验全部 PDF，再创建 Collection；
+    返回 STAGED 状态，由 Java 决定是否提交。
     """
     if migration_id <= 0:
         raise ValueError("migration_id 不合法")
+    if course_id <= 0:
+        raise ValueError("course_id 不合法")
     if not execution_token:
         raise ValueError("执行令牌不能为空")
     if target_version <= source_version:
         raise ValueError("目标版本必须大于源版本")
     if target_version < 2:
         raise ValueError("目标版本必须使用带版本号的Collection")
+
+    # 先校验全部 PDF，全部通过后才创建 Collection。
+    parsed_documents = []
+    for item in documents:
+        document_id = item["document_id"]
+        storage_name = item["storage_name"]
+
+        pdf_path = (pdf_storage_dir / storage_name).resolve()
+
+        if not pdf_path.is_relative_to(pdf_storage_dir):
+            raise ValueError(f"非法文件名: {storage_name}")
+        if not pdf_path.is_file():
+            raise FileNotFoundError(f"PDF 文件不存在: {storage_name}")
+
+        chunks = parse_pdf(pdf_path)
+        if not chunks:
+            raise ValueError(
+                f"文档 {document_id} 没有可迁移的文本"
+            )
+
+        parsed_documents.append((document_id, chunks))
+
+    if not parsed_documents:
+        raise ValueError("没有可迁移的文档")
 
     collection_name, collection = create_migration_collection(
         migration_id,
@@ -57,26 +83,8 @@ def migrate_course(
     total_chunks = 0
     dimension = None
 
-    for item in documents:
-        document_id = item["document_id"]
-        storage_name = item["storage_name"]
-
-        pdf_path = (pdf_storage_dir / storage_name).resolve()
-
-        # 防止路径穿越
-        if not pdf_path.is_relative_to(pdf_storage_dir):
-            raise ValueError(f"非法文件名: {storage_name}")
-
-        if not pdf_path.is_file():
-            raise FileNotFoundError(f"PDF 文件不存在: {storage_name}")
-
-        chunks = parse_pdf(pdf_path)
-        if not chunks:
-            raise ValueError(
-                f"文档 {document_id} 没有可迁移的文本"
-            )
-
-        # 维度校验：取第一个切片作为样本
+    for document_id, chunks in parsed_documents:
+        # 每篇文档都校验维度。
         if dimension is None:
             sample = embed_texts(
                 [chunks[0]["text"]],
@@ -98,17 +106,21 @@ def migrate_course(
             embedding_client=client,
             active="1",
         )
-
         total_documents += 1
         total_chunks += indexed
-
-    if total_documents == 0:
-        raise ValueError("没有可迁移的文档")
 
     if dimension != expected_dimension:
         raise ValueError(
             f"Embedding维度不匹配: 期望{expected_dimension}, "
             f"实际{dimension}"
+        )
+
+    # 验证 Collection 实际向量数量。
+    actual_count = collection.count()
+    if actual_count != total_chunks:
+        raise ValueError(
+            f"Collection向量数量不匹配: 期望{total_chunks}, "
+            f"实际{actual_count}"
         )
 
     return {

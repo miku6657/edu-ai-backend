@@ -445,15 +445,9 @@ public class EmbeddingMigrationWorker {
 
             leaseLost.remove(migrationId);
 
-            // 这里不额外释放课程锁。
-            // try-with-resources 已通过 Handle.close() 释放。
-
-            if (!lost.get()) {
-                leaseService.release(
-                        migrationId,
-                        token
-                );
-            }
+            // 不主动清除 RUNNING 任务租约。
+            // 成功提交和失败恢复都会负责清除。
+            // 意外中断则保留租约，等待 recoverExpiredTasks 处理。
         }
     }
 
@@ -586,15 +580,11 @@ public class EmbeddingMigrationWorker {
                 );
             }
 
-            // 切换版本前再次确认课程锁仍有效。
-            if (!indexLockService.isOwned(
+            // 切换版本前，事务内锁定课程锁记录并校验所有权。
+            indexLockService.assertOwnedForUpdate(
                     migration.getCourseId(),
-                    courseLockToken)) {
-
-                throw new IllegalStateException(
-                        "课程索引锁失效，禁止切换版本"
-                );
-            }
+                    courseLockToken
+            );
 
             Course course = courseMapper.selectOne(
                     new LambdaQueryWrapper<Course>()
@@ -726,6 +716,10 @@ public class EmbeddingMigrationWorker {
                                     .eq(
                                             CourseEmbeddingMigration::getProcessingToken,
                                             token
+                                    )
+                                    .gt(
+                                            CourseEmbeddingMigration::getLeaseUntil,
+                                            LocalDateTime.now()
                                     )
                                     .last("LIMIT 1 FOR UPDATE")
                     );
