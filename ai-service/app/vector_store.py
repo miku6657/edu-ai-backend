@@ -86,6 +86,63 @@ def index_document(
     return len(ids)
 
 
+def index_document_for_migration(
+    course_id: int,
+    document_id: int,
+    chunks: list[dict],
+    version: int,
+    model: str,
+    embedding_client,
+) -> int:
+    """迁移专用写入：只写未激活状态，不立即激活。
+
+    与 index_document 的区别：写入后不会马上 active=1，
+    而是等待整个课程迁移完成并验证通过后统一激活。
+    """
+    if not chunks:
+        raise ValueError(
+            f"文档 {document_id} 没有有效切片"
+        )
+
+    collection = get_collection(course_id, version)
+
+    texts = [item["text"] for item in chunks]
+    embeddings = embed_texts(
+        texts,
+        model=model,
+        client=embedding_client,
+    )
+
+    if len(embeddings) != len(chunks):
+        raise RuntimeError("向量数量不匹配")
+
+    ids = []
+    documents = []
+    metadatas = []
+
+    for chunk in chunks:
+        chunk_id = (
+            f"{document_id}:{chunk['page']}:{chunk['chunk_index']}"
+        )
+        ids.append(chunk_id)
+        documents.append(chunk["text"])
+        metadatas.append({
+            "document_id": str(document_id),
+            "page": chunk["page"],
+            "chunk_index": chunk["chunk_index"],
+            "active": "0",
+        })
+
+    collection.upsert(
+        ids=ids,
+        embeddings=embeddings,
+        documents=documents,
+        metadatas=metadatas,
+    )
+
+    return len(ids)
+
+
 def search_course(
     course_id: int,
     query: str,
@@ -132,6 +189,41 @@ def search_course(
         })
 
     return hits
+
+
+def activate_collection(
+    course_id: int,
+    version: int,
+) -> int:
+    """将目标 Collection 中所有未激活向量统一激活。
+
+    只在新版本构建完成并验证通过后调用。
+    """
+    collection = get_collection(course_id, version)
+
+    result = collection.get(
+        where={"active": "0"},
+        include=["metadatas"],
+    )
+
+    ids = result.get("ids") or []
+    metadatas = result.get("metadatas") or []
+
+    if not ids:
+        return 0
+
+    active_metadatas = [
+        dict(m, active="1") for m in metadatas
+    ]
+
+    all_ids = list(ids)
+    for start in range(0, len(all_ids), 100):
+        collection.update(
+            ids=all_ids[start:start + 100],
+            metadatas=active_metadatas[start:start + 100],
+        )
+
+    return len(all_ids)
 
 
 def delete_document_vectors(

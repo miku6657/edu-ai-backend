@@ -4,9 +4,10 @@ from pathlib import Path
 from .pdf_parser import parse_pdf
 from .embedding_service import create_embedding_client, embed_texts
 from .vector_store import (
-    index_document,
+    index_document_for_migration,
     get_collection,
     collection_name,
+    activate_collection,
 )
 
 logger = logging.getLogger(__name__)
@@ -29,8 +30,9 @@ def migrate_course(
     documents 结构：
         [{"document_id": 1, "storage_name": "xxx.pdf"}, ...]
 
-    全部文档写入成功后才为目标 Collection 打元数据；
-    失败时只留下（部分）目标 Collection，绝不修改旧 Collection。
+    迁移阶段向量只写入未激活状态，全部文档完成并验证通过后
+    统一激活，最后为目标 Collection 打元数据。
+    失败时绝不修改旧 Collection。
     """
     if target_version <= source_version:
         raise ValueError("目标版本必须大于源版本")
@@ -60,7 +62,9 @@ def migrate_course(
 
         chunks = parse_pdf(pdf_path)
         if not chunks:
-            continue
+            raise ValueError(
+                f"文档 {document_id} 没有可迁移的文本"
+            )
 
         # 维度校验：取第一个切片作为样本
         if dimension is None:
@@ -76,13 +80,13 @@ def migrate_course(
                     f"实际{dimension}"
                 )
 
-        indexed = index_document(
-            course_id,
-            document_id,
-            chunks,
+        indexed = index_document_for_migration(
+            course_id=course_id,
+            document_id=document_id,
+            chunks=chunks,
             version=target_version,
             model=model,
-            client=client,
+            embedding_client=client,
         )
 
         total_documents += 1
@@ -91,7 +95,16 @@ def migrate_course(
     if total_documents == 0:
         raise ValueError("没有可迁移的文档")
 
-    # 全部完成后才写入元数据
+    if dimension != expected_dimension:
+        raise ValueError(
+            f"Embedding维度不匹配: 期望{expected_dimension}, "
+            f"实际{dimension}"
+        )
+
+    # 全部文档写入并验证通过后，统一激活目标 Collection。
+    activate_collection(course_id, target_version)
+
+    # 最后为目标 Collection 打元数据。
     target_collection.modify(metadata={
         "course_id": str(course_id),
         "version": str(target_version),

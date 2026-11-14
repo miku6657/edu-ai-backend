@@ -46,6 +46,9 @@ def rag_stream(
     embedding_model: str | None = None,
     embedding_api_key: str | None = None,
     embedding_base_url: str | None = None,
+    chat_model: str | None = None,
+    chat_api_key: str | None = None,
+    chat_base_url: str | None = None,
 ):
     """查询课程知识库、构建 Prompt，并以 SSE 流式返回答案。
 
@@ -54,8 +57,8 @@ def rag_stream(
         event: token    -> 逐段返回模型输出
         event: done     -> 结束
 
-    课程当前生效的 Embedding 版本与模型，必须由 Java 通过
-    可信的内部请求传入，不能直接信任前端参数。
+    课程当前生效的 Embedding 版本与模型，以及用户自己的 Chat 模型，
+    都由 Java 通过可信的内部请求传入，不能直接信任前端参数。
     """
     # 1. 检索课程知识库，只取当前课程的资料
     sources = search_course(
@@ -84,8 +87,13 @@ def rag_stream(
         {"role": "user", "content": question},
     ]
 
-    # 4. 调用 DeepSeek 并逐段输出
-    for token in chat_stream(messages):
+    # 4. 调用用户自己的 Chat 模型并逐段输出
+    for token in chat_stream(
+        messages,
+        model=chat_model,
+        api_key=chat_api_key,
+        base_url=chat_base_url,
+    ):
         yield sse_event("token", {"content": token})
 
     # 5. 结束事件

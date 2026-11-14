@@ -74,6 +74,31 @@ class ChatRequest(BaseModel):
         default_factory=list,
         max_length=10,
     )
+    embedding_version: int = Field(ge=1)
+    chat_model: str = Field(
+        min_length=1,
+        max_length=100,
+    )
+    chat_api_key: str = Field(
+        default="",
+        max_length=1000,
+    )
+    chat_base_url: str = Field(
+        min_length=1,
+        max_length=500,
+    )
+    embedding_model: str = Field(
+        min_length=1,
+        max_length=100,
+    )
+    embedding_api_key: str = Field(
+        default="",
+        max_length=1000,
+    )
+    embedding_base_url: str = Field(
+        min_length=1,
+        max_length=500,
+    )
 
 
 @app.get("/health")
@@ -139,6 +164,13 @@ def chat_stream_api(request: ChatRequest):
             course_id=request.course_id,
             question=request.question.strip(),
             history=history,
+            embedding_version=request.embedding_version,
+            chat_model=request.chat_model,
+            chat_api_key=request.chat_api_key,
+            chat_base_url=request.chat_base_url,
+            embedding_model=request.embedding_model,
+            embedding_api_key=request.embedding_api_key,
+            embedding_base_url=request.embedding_base_url,
         ),
         media_type="text/event-stream",
         headers={

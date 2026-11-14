@@ -9,6 +9,7 @@ import com.edu.ai.chat.mapper.ChatSessionMapper;
 import com.edu.ai.common.BusinessException;
 import com.edu.ai.course.entity.Course;
 import com.edu.ai.course.mapper.CourseMapper;
+import com.edu.ai.system.service.UserModelResolver;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -45,6 +46,7 @@ ChatService {
     private final ChatSessionMapper sessionMapper;
     private final ChatMessageMapper messageMapper;
     private final CourseMapper courseMapper;
+    private final UserModelResolver userModelResolver;
     private final ThreadPoolTaskExecutor executor;
     private final ObjectMapper objectMapper;
     private final ChatStreamRegistry streamRegistry;
@@ -57,6 +59,7 @@ ChatService {
             ChatSessionMapper sessionMapper,
             ChatMessageMapper messageMapper,
             CourseMapper courseMapper,
+            UserModelResolver userModelResolver,
             @Qualifier("chatStreamExecutor")
             ThreadPoolTaskExecutor executor,
             ObjectMapper objectMapper,
@@ -67,6 +70,7 @@ ChatService {
         this.sessionMapper = sessionMapper;
         this.messageMapper = messageMapper;
         this.courseMapper = courseMapper;
+        this.userModelResolver = userModelResolver;
         this.executor = executor;
         this.objectMapper = objectMapper;
         this.streamRegistry = streamRegistry;
@@ -225,6 +229,24 @@ ChatService {
                 userId
         );
 
+        // 在请求开始时固定本次使用的模型配置。
+        // 不将模型配置放入全局变量。
+        UserModelResolver.UserModelConfig modelConfig =
+                userModelResolver.resolve(userId);
+
+        Course course = courseMapper.selectById(
+                request.getCourseId()
+        );
+
+        if (course == null) {
+            throw new BusinessException(404, "课程不存在");
+        }
+
+        int embeddingVersion =
+                course.getEmbeddingVersion() == null
+                        ? 1
+                        : course.getEmbeddingVersion();
+
         ChatSession session =
                 resolveSession(request, userId);
 
@@ -275,7 +297,9 @@ ChatService {
                             session,
                             question,
                             history,
-                            running
+                            running,
+                            modelConfig,
+                            embeddingVersion
                     );
 
                 } finally {
@@ -301,7 +325,9 @@ ChatService {
             ChatSession session,
             String question,
             List<ChatMessage> history,
-            RunningStream running) {
+            RunningStream running,
+            UserModelResolver.UserModelConfig modelConfig,
+            int embeddingVersion) {
 
         StringBuilder answer = new StringBuilder();
         String sourcesJson = "[]";
@@ -313,6 +339,41 @@ ChatService {
 
             body.put("course_id", session.getCourseId());
             body.put("question", question);
+
+            body.put(
+                    "embedding_version",
+                    embeddingVersion
+            );
+
+            body.put(
+                    "chat_model",
+                    modelConfig.chatModel()
+            );
+
+            body.put(
+                    "chat_api_key",
+                    modelConfig.chatApiKey()
+            );
+
+            body.put(
+                    "chat_base_url",
+                    modelConfig.chatBaseUrl()
+            );
+
+            body.put(
+                    "embedding_model",
+                    modelConfig.embeddingModel()
+            );
+
+            body.put(
+                    "embedding_api_key",
+                    modelConfig.embeddingApiKey()
+            );
+
+            body.put(
+                    "embedding_base_url",
+                    modelConfig.embeddingBaseUrl()
+            );
 
             ArrayNode messages = body.putArray("history");
 

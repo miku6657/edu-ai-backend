@@ -15,6 +15,7 @@ import com.edu.ai.document.mapper.CourseEmbeddingMigrationMapper;
 
 import com.edu.ai.system.entity.UserConfig;
 import com.edu.ai.system.mapper.UserConfigMapper;
+import com.edu.ai.system.security.ConfigCryptoService;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -33,17 +34,23 @@ public class EmbeddingMigrationService {
     private final CourseDocumentMapper documentMapper;
     private final CourseEmbeddingMigrationMapper migrationMapper;
     private final UserConfigMapper userConfigMapper;
+    private final ConfigCryptoService cryptoService;
+    private final EmbeddingConfigFingerprint configFingerprint;
 
     public EmbeddingMigrationService(
             CourseMapper courseMapper,
             CourseDocumentMapper documentMapper,
             CourseEmbeddingMigrationMapper migrationMapper,
-            UserConfigMapper userConfigMapper) {
+            UserConfigMapper userConfigMapper,
+            ConfigCryptoService cryptoService,
+            EmbeddingConfigFingerprint configFingerprint) {
 
         this.courseMapper = courseMapper;
         this.documentMapper = documentMapper;
         this.migrationMapper = migrationMapper;
         this.userConfigMapper = userConfigMapper;
+        this.cryptoService = cryptoService;
+        this.configFingerprint = configFingerprint;
     }
 
     /**
@@ -151,6 +158,37 @@ public class EmbeddingMigrationService {
 
         migration.setTargetDimension(
                 config.getEmbeddingDim());
+
+        // 解密当前用户保存的 Embedding Key。
+        String embeddingApiKey =
+                config.getEmbeddingApiKeyCiphertext() == null
+                        ? ""
+                        : cryptoService.decrypt(
+                                config.getEmbeddingApiKeyCiphertext()
+                        );
+
+        // 保存加密快照，供异步 Worker 使用。
+        migration.setTargetApiKeyCiphertext(
+                embeddingApiKey.isBlank()
+                        ? null
+                        : cryptoService.encrypt(embeddingApiKey)
+        );
+
+        migration.setTargetApiKeyFingerprint(
+                cryptoService.fingerprint(embeddingApiKey)
+        );
+
+        // 保存完整模型配置指纹。
+        migration.setTargetConfigFingerprint(
+                configFingerprint.calculate(
+                        config.getEmbeddingProvider(),
+                        config.getEmbeddingBaseUrl(),
+                        config.getEmbeddingModel(),
+                        embeddingApiKey
+                )
+        );
+
+        migration.setAttemptCount(0);
 
         migration.setStatus("PENDING");
 
