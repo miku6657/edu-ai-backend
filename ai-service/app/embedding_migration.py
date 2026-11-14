@@ -7,8 +7,7 @@ from .embedding_service import (
     embed_texts,
 )
 from .vector_store import (
-    migration_collection_name,
-    get_collection_by_name,
+    create_migration_collection,
     index_document_into_collection,
 )
 
@@ -46,12 +45,10 @@ def migrate_course(
     if target_version < 2:
         raise ValueError("目标版本必须使用带版本号的Collection")
 
-    collection_name = migration_collection_name(
+    collection_name, collection = create_migration_collection(
         migration_id,
         execution_token,
     )
-
-    collection = get_collection_by_name(collection_name)
 
     client = create_embedding_client(api_key, base_url)
 

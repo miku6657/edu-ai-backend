@@ -123,6 +123,21 @@ public class UserModelResolver {
             );
         }
 
+        if (profile.getDimension() == null
+                || profile.getDimension() <= 0) {
+
+            throw new BusinessException(
+                    409,
+                    "课程Embedding维度不合法"
+            );
+        }
+
+        validate(
+                profile.getProvider(),
+                profile.getBaseUrl(),
+                profile.getModel()
+        );
+
         String embeddingApiKey =
                 profileService.decryptKey(profile);
 

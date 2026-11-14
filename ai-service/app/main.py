@@ -105,6 +105,10 @@ class ChatRequest(BaseModel):
         min_length=1,
         max_length=63,
     )
+    embedding_dimension: int = Field(
+        gt=0,
+        le=8192,
+    )
     chat_model: str = Field(
         min_length=1,
         max_length=100,

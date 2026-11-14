@@ -392,6 +392,11 @@ ChatService {
                     modelConfig.collectionName()
             );
 
+            body.put(
+                    "embedding_dimension",
+                    modelConfig.embeddingDimension()
+            );
+
             ArrayNode messages = body.putArray("history");
 
             for (ChatMessage message : history) {

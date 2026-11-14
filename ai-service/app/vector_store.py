@@ -56,16 +56,43 @@ def migration_collection_name(
 
 
 def get_collection_by_name(name: str):
-    """按明确的 Collection 名称获取或创建集合。"""
+    """按明确的 Collection 名称获取集合（只读，不存在则报错）。"""
     if not name or len(name) > 63:
         raise ValueError("Collection 名称不合法")
-    return client.get_or_create_collection(
+    return client.get_collection(
         name=name,
         embedding_function=None,
+    )
+
+
+def create_migration_collection(
+    migration_id: int,
+    execution_token: str,
+):
+    """创建执行者独占的临时 Collection，不允许复用。"""
+    name = migration_collection_name(
+        migration_id,
+        execution_token,
+    )
+
+    token_hash = hashlib.sha256(
+        execution_token.encode("utf-8")
+    ).hexdigest()
+
+    collection = client.create_collection(
+        name=name,
+        embedding_function=None,
+        metadata={
+            "migration_id": str(migration_id),
+            "execution_token_hash": token_hash,
+            "status": "STAGED",
+        },
         configuration={
             "hnsw": {"space": "cosine"}
         },
     )
+
+    return name, collection
 
 
 def index_document_into_collection(
