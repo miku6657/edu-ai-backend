@@ -1,20 +1,35 @@
 import chromadb
 
-from .config import CHROMA_DIR
-from .embedding_service import embed_query, embed_texts
+from openai import OpenAI
+
+from .config import CHROMA_DIR, EMBEDDING_MODEL
+from .embedding_service import (
+    embed_query,
+    embed_texts,
+    embedding_client,
+    create_embedding_client,
+)
 
 CHROMA_DIR.mkdir(parents=True, exist_ok=True)
 
 client = chromadb.PersistentClient(path=str(CHROMA_DIR))
 
 
-def collection_name(course_id: int) -> str:
-    return f"course_{course_id}"
+def collection_name(course_id: int, version: int = 1) -> str:
+    """版本1沿用旧Collection名称，保证历史数据兼容。
+
+    版本2开始使用带版本号的Collection，实现跨模型隔离。
+    """
+    if version < 1:
+        raise ValueError("Embedding版本不合法")
+    if version == 1:
+        return f"course_{course_id}"
+    return f"course_{course_id}_v{version}"
 
 
-def get_collection(course_id: int):
+def get_collection(course_id: int, version: int = 1):
     return client.get_or_create_collection(
-        name=collection_name(course_id),
+        name=collection_name(course_id, version),
         embedding_function=None,
         configuration={
             "hnsw": {"space": "cosine"}
@@ -26,15 +41,20 @@ def index_document(
     course_id: int,
     document_id,
     chunks: list[dict],
+    version: int = 1,
+    model: str | None = None,
+    client: OpenAI | None = None,
 ) -> int:
     """将一篇 PDF 的文本切片写入向量库。
 
     先写入未激活状态，全部成功后再激活，降低部分失败风险。
     """
-    collection = get_collection(course_id)
+    collection = get_collection(course_id, version)
 
     texts = [c["text"] for c in chunks]
-    embeddings = embed_texts(texts)
+    model = model or EMBEDDING_MODEL
+    client = client or embedding_client
+    embeddings = embed_texts(texts, model=model, client=client)
 
     ids = []
     documents = []
@@ -70,14 +90,25 @@ def search_course(
     course_id: int,
     query: str,
     top_k: int = 5,
+    version: int = 1,
+    model: str | None = None,
+    api_key: str | None = None,
+    base_url: str | None = None,
 ) -> list[dict]:
     """按课程检索知识库，返回最相近的文本切片。"""
-    collection = get_collection(course_id)
+    collection = get_collection(course_id, version)
 
     if collection.count() == 0:
         return []
 
-    query_embedding = embed_query(query)
+    model = model or EMBEDDING_MODEL
+
+    if api_key is None and base_url is None:
+        query_client = embedding_client
+    else:
+        query_client = create_embedding_client(api_key, base_url)
+
+    query_embedding = embed_query(query, model=model, client=query_client)
 
     result = collection.query(
         query_embeddings=[query_embedding],
@@ -136,3 +167,52 @@ def delete_document_vectors(
         collection.delete(ids=all_ids[start:start + 100])
 
     return len(all_ids)
+
+
+def delete_document_vectors_all_versions(
+    course_id: int,
+    document_id: int,
+) -> int:
+    """删除一个文档在该课程所有版本Collection中的向量。
+
+    不删除Collection本身。
+    """
+    prefix = f"course_{course_id}"
+    total_deleted = 0
+
+    for item in client.list_collections():
+        name = (
+            item.name
+            if hasattr(item, "name")
+            else str(item)
+        )
+
+        if name != prefix and not name.startswith(prefix + "_v"):
+            continue
+
+        try:
+            collection = client.get_collection(
+                name=name,
+                embedding_function=None,
+            )
+        except chromadb.errors.NotFoundError:
+            continue
+
+        ids = set()
+        for value in (document_id, str(document_id)):
+            result = collection.get(
+                where={"document_id": value},
+                include=[],
+            )
+            ids.update(result["ids"])
+
+        if not ids:
+            continue
+
+        all_ids = list(ids)
+        for start in range(0, len(all_ids), 100):
+            collection.delete(ids=all_ids[start:start + 100])
+
+        total_deleted += len(all_ids)
+
+    return total_deleted

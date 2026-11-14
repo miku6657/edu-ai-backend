@@ -26,8 +26,13 @@ ai:
   service:
     url: ${AI_SERVICE_URL:http://127.0.0.1:8001}
     internal-key: ${AI_INTERNAL_KEY}
+  model:
+    ollama-allowed-hosts: ${OLLAMA_ALLOWED_HOSTS:localhost,127.0.0.1}
 
 app:
   storage:
     pdf-dir: ${PDF_STORAGE_DIR:./uploads/pdfs}
+  security:
+    config-encryption-key: ${CONFIG_ENCRYPTION_KEY}
+    config-fingerprint-key: ${CONFIG_FINGERPRINT_KEY}
 

@@ -1,6 +1,8 @@
 package com.edu.ai.document.service;
 
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.edu.ai.course.entity.Course;
+import com.edu.ai.course.mapper.CourseMapper;
 import com.edu.ai.document.entity.CourseDocument;
 import com.edu.ai.document.mapper.CourseDocumentMapper;
 
@@ -27,16 +29,19 @@ public class DocumentIndexTask {
             LoggerFactory.getLogger(DocumentIndexTask.class);
 
     private final CourseDocumentMapper documentMapper;
+    private final CourseMapper courseMapper;
     private final HttpClient httpClient;
     private final String serviceUrl;
     private final String internalKey;
 
     public DocumentIndexTask(
             CourseDocumentMapper documentMapper,
+            CourseMapper courseMapper,
             @Value("${ai.service.url}") String serviceUrl,
             @Value("${ai.service.internal-key}") String internalKey) {
 
         this.documentMapper = documentMapper;
+        this.courseMapper = courseMapper;
         this.serviceUrl = serviceUrl;
         this.internalKey = internalKey;
 
@@ -84,17 +89,38 @@ public class DocumentIndexTask {
             return;
         }
 
+        Course course = courseMapper.selectById(
+                doc.getCourseId()
+        );
+
+        if (course == null) {
+            updateCurrentTask(
+                    documentId,
+                    token,
+                    "FAILED",
+                    "所属课程不存在"
+            );
+            return;
+        }
+
+        int embeddingVersion =
+                course.getEmbeddingVersion() == null
+                        ? 1
+                        : course.getEmbeddingVersion();
+
         try {
             String body = """
                     {
                       "course_id": %d,
                       "document_id": %d,
-                      "storage_name": "%s"
+                      "storage_name": "%s",
+                      "embedding_version": %d
                     }
                     """.formatted(
                     doc.getCourseId(),
                     doc.getId(),
-                    doc.getStorageName()
+                    doc.getStorageName(),
+                    embeddingVersion
             );
 
             HttpRequest request = HttpRequest.newBuilder()

@@ -8,9 +8,10 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from .config import AI_INTERNAL_KEY, PDF_STORAGE_DIR
+from .embedding_migration import migrate_course
 from .pdf_parser import parse_pdf
 from .rag_service import rag_stream
-from .vector_store import delete_document_vectors, index_document, search_course
+from .vector_store import delete_document_vectors_all_versions, index_document, search_course
 
 logger = logging.getLogger(__name__)
 
@@ -37,9 +38,16 @@ app = FastAPI(title="edu05-ai-service", lifespan=lifespan)
 
 
 class IndexRequest(BaseModel):
-    course_id: int
-    document_id: int
-    storage_name: str = Field(..., description="PDF 存储文件名")
+    course_id: int = Field(gt=0)
+    document_id: int = Field(gt=0)
+    storage_name: str = Field(
+        min_length=1,
+        max_length=100,
+    )
+    embedding_version: int = Field(
+        default=1,
+        ge=1,
+    )
 
 
 class SearchRequest(BaseModel):
@@ -78,7 +86,7 @@ def internal_index(req: IndexRequest, _: None = Depends(require_internal)):
     pdf_path = (PDF_STORAGE_DIR / req.storage_name).resolve()
 
     # 防止路径穿越
-    if not pdf_path.is_relative_to(PDF_STORAGE_DIR):
+    if not pdf_path.is_relative_to(PDF_STORAGE_DIR.resolve()):
         raise HTTPException(status_code=400, detail="非法文件名")
 
     if not pdf_path.is_file():
@@ -93,7 +101,12 @@ def internal_index(req: IndexRequest, _: None = Depends(require_internal)):
         raise HTTPException(status_code=400, detail="未从 PDF 提取到文本")
 
     with index_lock:
-        indexed = index_document(req.course_id, req.document_id, chunks)
+        indexed = index_document(
+            req.course_id,
+            req.document_id,
+            chunks,
+            version=req.embedding_version,
+        )
 
     return {
         "document_id": req.document_id,
@@ -135,6 +148,67 @@ def chat_stream_api(request: ChatRequest):
     )
 
 
+class MigrationDocument(BaseModel):
+    document_id: int = Field(gt=0)
+    storage_name: str = Field(
+        min_length=1,
+        max_length=100,
+    )
+
+
+class CourseMigrationRequest(BaseModel):
+    course_id: int = Field(gt=0)
+    source_version: int = Field(ge=1)
+    target_version: int = Field(ge=2)
+    documents: list[MigrationDocument] = Field(
+        min_length=1,
+        max_length=500,
+    )
+    provider: str = Field(min_length=1, max_length=40)
+    base_url: str = Field(min_length=1, max_length=500)
+    api_key: str = Field(default="", max_length=1000)
+    model: str = Field(min_length=1, max_length=100)
+    expected_dimension: int = Field(gt=0, le=8192)
+
+
+@app.post(
+    "/internal/embedding/migrate",
+    dependencies=[Depends(require_internal)],
+)
+def internal_embedding_migrate(
+    request: CourseMigrationRequest,
+):
+    documents = [
+        item.model_dump()
+        for item in request.documents
+    ]
+    try:
+        # 与普通索引共用进程内锁。
+        with index_lock:
+            result = migrate_course(
+                course_id=request.course_id,
+                source_version=request.source_version,
+                target_version=request.target_version,
+                documents=documents,
+                pdf_storage_dir=PDF_STORAGE_DIR,
+                provider=request.provider,
+                base_url=request.base_url,
+                api_key=request.api_key,
+                model=request.model,
+                expected_dimension=request.expected_dimension,
+            )
+        return result
+    except Exception:
+        logger.exception(
+            "Embedding migration failed: course_id=%s",
+            request.course_id,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Embedding迁移失败",
+        )
+
+
 class DeleteDocumentRequest(BaseModel):
     course_id: int = Field(gt=0)
     document_id: int = Field(gt=0)
@@ -148,7 +222,7 @@ def delete_document_api(request: DeleteDocumentRequest):
     try:
         # 与 PDF 索引使用同一把锁，避免进程内读写冲突
         with index_lock:
-            deleted_count = delete_document_vectors(
+            deleted_count = delete_document_vectors_all_versions(
                 course_id=request.course_id,
                 document_id=request.document_id,
             )

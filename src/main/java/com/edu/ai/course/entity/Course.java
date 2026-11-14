@@ -30,6 +30,9 @@ public class Course {
     // 课程状态：1 正常，0 停用
     private Integer status;
 
+    // 当前生效的 Embedding 索引版本
+    private Integer embeddingVersion;
+
     private LocalDateTime createTime;
 
     private LocalDateTime updateTime;

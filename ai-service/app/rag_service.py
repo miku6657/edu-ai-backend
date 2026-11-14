@@ -42,6 +42,10 @@ def rag_stream(
     course_id: int,
     question: str,
     history: list[dict],
+    embedding_version: int = 1,
+    embedding_model: str | None = None,
+    embedding_api_key: str | None = None,
+    embedding_base_url: str | None = None,
 ):
     """查询课程知识库、构建 Prompt，并以 SSE 流式返回答案。
 
@@ -49,9 +53,20 @@ def rag_stream(
         event: sources  -> 命中的资料（文档 ID、页码）
         event: token    -> 逐段返回模型输出
         event: done     -> 结束
+
+    课程当前生效的 Embedding 版本与模型，必须由 Java 通过
+    可信的内部请求传入，不能直接信任前端参数。
     """
     # 1. 检索课程知识库，只取当前课程的资料
-    sources = search_course(course_id, question, top_k=RAG_TOP_K)
+    sources = search_course(
+        course_id,
+        question,
+        top_k=RAG_TOP_K,
+        version=embedding_version,
+        model=embedding_model,
+        api_key=embedding_api_key,
+        base_url=embedding_base_url,
+    )
 
     # 2. 返回命中的资料来源
     yield sse_event("sources", {
