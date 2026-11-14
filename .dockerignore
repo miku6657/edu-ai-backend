@@ -1,0 +1,23 @@
+
+# IDEA 与 Gradle 缓存
+.idea
+.gradle
+.git
+*.iml
+
+# Python 子项目，不参与 Java 镜像构建
+ai-service
+
+# Python 虚拟环境
+.venv
+__pycache__
+
+# 本地密钥与上传文件
+.env
+uploads
+
+# Gradle 构建输出，仅保留 app.jar
+build/*
+!build/libs/
+build/libs/*
+!build/libs/app.jar

@@ -21,7 +21,7 @@ AI_INTERNAL_KEY = os.environ["AI_INTERNAL_KEY"]
 
 # PDF 存储目录（指向 Java 后端的上传目录）
 PDF_STORAGE_DIR = resolve_path(
-    os.getenv("PDF_STORAGE_DIR", "../demo2/uploads/pdfs")
+    os.getenv("PDF_STORAGE_DIR", "../uploads/pdfs")
 )
 
 # ChromaDB 持久化目录
