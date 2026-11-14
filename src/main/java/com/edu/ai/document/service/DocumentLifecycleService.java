@@ -66,15 +66,15 @@ public class DocumentLifecycleService {
                 .build();
     }
 
-    // 负责人删除 PDF
+    // 删除文档：上传者或课程创建者可以删除
     public synchronized void delete(
             Long documentId,
-            Long ownerId) {
+            Long userId) {
 
         CourseDocument document =
                 requireDocument(documentId);
 
-        requireOwner(document.getCourseId(), ownerId);
+        requireDocumentManagePermission(document, userId);
 
         if ("DELETED".equals(document.getStatus())) {
             return;
@@ -123,14 +123,14 @@ public class DocumentLifecycleService {
         cleanup(documentId);
     }
 
-    // 重新处理失败的 PDF
+    // 重新处理失败的文档：上传者或课程创建者可以操作
     public void retryIndex(
             Long documentId,
-            Long ownerId) {
+            Long userId) {
 
         CourseDocument doc = requireDocument(documentId);
 
-        requireOwner(doc.getCourseId(), ownerId);
+        requireDocumentManagePermission(doc, userId);
 
         if (!"FAILED".equals(doc.getStatus())) {
             throw new BusinessException(
@@ -360,20 +360,36 @@ public class DocumentLifecycleService {
         return doc;
     }
 
-    private void requireOwner(
-            Long courseId,
-            Long ownerId) {
+    /**
+     * 文档管理权限：
+     * 1. 课程创建者可以管理课程内所有文档
+     * 2. 文档上传者可以管理自己上传的文档
+     */
+    private void requireDocumentManagePermission(
+            CourseDocument document,
+            Long userId) {
 
-        Course course =
-                courseMapper.selectById(courseId);
+        Course course = courseMapper.selectById(
+                document.getCourseId()
+        );
 
-        if (course == null
-                || !ownerId.equals(
-                        course.getOwnerId())) {
+        if (course == null) {
+            throw new BusinessException(
+                    404,
+                    "所属课程不存在"
+            );
+        }
 
+        boolean isCourseOwner =
+                userId.equals(course.getOwnerId());
+
+        boolean isUploader =
+                userId.equals(document.getUploaderId());
+
+        if (!isCourseOwner && !isUploader) {
             throw new BusinessException(
                     403,
-                    "只能管理自己负责课程的文件"
+                    "只能管理自己上传的文件或自己创建课程中的文件"
             );
         }
     }

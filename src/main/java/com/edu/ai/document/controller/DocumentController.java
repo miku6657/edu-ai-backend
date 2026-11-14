@@ -13,7 +13,6 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 
 import org.springframework.web.bind.annotation.*;
@@ -40,20 +39,21 @@ public class DocumentController {
         this.lifecycleService = lifecycleService;
     }
 
-    // 负责人上传 PDF
+    // 上传课件
     @PostMapping(
             value = "/course/{courseId}",
             consumes = MediaType.MULTIPART_FORM_DATA_VALUE
     )
-    @PreAuthorize("hasRole('OWNER')")
     public Result<DocumentVO> upload(
             @PathVariable Long courseId,
             @RequestParam("file") MultipartFile file,
             Authentication authentication) {
 
+        Long userId = getUserId(authentication);
+
         DocumentVO document = documentService.upload(
                 courseId,
-                getUserId(authentication),
+                userId,
                 file
         );
 
@@ -62,9 +62,8 @@ public class DocumentController {
         return Result.success(document);
     }
 
-    // 查看课程资料
+    // 查看课程课件
     @GetMapping("/course/{courseId}")
-    @PreAuthorize("hasAnyRole('OWNER', 'STUDENT')")
     public Result<List<DocumentVO>> list(
             @PathVariable Long courseId,
             Authentication authentication) {
@@ -72,15 +71,13 @@ public class DocumentController {
         return Result.success(
                 documentService.listByCourse(
                         courseId,
-                        getUserId(authentication),
-                        getRole(authentication)
+                        getUserId(authentication)
                 )
         );
     }
 
-    // 下载 PDF
+    // 下载课件
     @GetMapping("/{documentId}/download")
-    @PreAuthorize("hasAnyRole('OWNER', 'STUDENT')")
     public ResponseEntity<Resource> download(
             @PathVariable Long documentId,
             Authentication authentication) {
@@ -88,8 +85,7 @@ public class DocumentController {
         DocumentService.DownloadFile file =
                 documentService.download(
                         documentId,
-                        getUserId(authentication),
-                        getRole(authentication)
+                        getUserId(authentication)
                 );
 
         ContentDisposition disposition =
@@ -109,9 +105,8 @@ public class DocumentController {
                 .body(file.resource());
     }
 
-    // 负责人删除 PDF
+    // 删除课件
     @DeleteMapping("/{documentId}")
-    @PreAuthorize("hasRole('OWNER')")
     public Result<String> delete(
             @PathVariable Long documentId,
             Authentication authentication) {
@@ -124,9 +119,8 @@ public class DocumentController {
         return Result.success("文件删除成功");
     }
 
-    // 负责人重新处理失败的 PDF
+    // 重新处理失败的课件
     @PostMapping("/{documentId}/retry")
-    @PreAuthorize("hasRole('OWNER')")
     public Result<String> retry(
             @PathVariable Long documentId,
             Authentication authentication) {
@@ -136,42 +130,21 @@ public class DocumentController {
                 getUserId(authentication)
         );
 
-        return Result.success("已提交重新索引任务");
+        return Result.success("已提交重新处理任务");
     }
 
-    private Long getUserId(
-            Authentication authentication) {
+    // 获取当前登录用户 ID
+    private Long getUserId(Authentication authentication) {
 
         if (authentication == null
-                || !(authentication.getPrincipal()
-                        instanceof Long userId)) {
+                || !(authentication.getPrincipal() instanceof Long userId)) {
 
             throw new BusinessException(
-                    401, "登录状态无效");
+                    401,
+                    "登录状态无效"
+            );
         }
 
         return userId;
-    }
-
-    private String getRole(
-            Authentication authentication) {
-
-        if (authentication.getAuthorities().stream()
-                .anyMatch(a ->
-                        a.getAuthority()
-                                .equals("ROLE_OWNER"))) {
-            return "OWNER";
-        }
-
-        if (authentication.getAuthorities().stream()
-                .anyMatch(a ->
-                        a.getAuthority()
-                                .equals("ROLE_STUDENT"))) {
-            return "STUDENT";
-        }
-
-        throw new BusinessException(
-                403, "无权访问课程资料"
-        );
     }
 }

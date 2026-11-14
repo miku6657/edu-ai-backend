@@ -8,22 +8,23 @@ import java.util.List;
 
 public interface DocumentService {
 
+    // 上传课件
     DocumentVO upload(
             Long courseId,
-            Long ownerId,
+            Long userId,
             MultipartFile file
     );
 
+    // 查看课程课件
     List<DocumentVO> listByCourse(
             Long courseId,
-            Long userId,
-            String role
+            Long userId
     );
 
+    // 下载课件
     DownloadFile download(
             Long documentId,
-            Long userId,
-            String role
+            Long userId
     );
 
     record DownloadFile(
