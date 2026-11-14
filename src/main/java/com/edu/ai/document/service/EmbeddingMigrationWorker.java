@@ -23,7 +23,14 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @Component
 public class EmbeddingMigrationWorker {
@@ -39,7 +46,15 @@ public class EmbeddingMigrationWorker {
 
     private final AiEmbeddingMigrationClient aiClient;
     private final ConfigCryptoService cryptoService;
+    private final EmbeddingMigrationLeaseService leaseService;
+    private final CourseIndexLockService indexLockService;
     private final TransactionTemplate transactionTemplate;
+
+    private final ScheduledExecutorService heartbeatExecutor =
+            Executors.newScheduledThreadPool(2);
+
+    private final Map<Long, AtomicBoolean> leaseLost =
+            new ConcurrentHashMap<>();
 
     public EmbeddingMigrationWorker(
             CourseEmbeddingMigrationMapper migrationMapper,
@@ -47,6 +62,8 @@ public class EmbeddingMigrationWorker {
             CourseMapper courseMapper,
             AiEmbeddingMigrationClient aiClient,
             ConfigCryptoService cryptoService,
+            EmbeddingMigrationLeaseService leaseService,
+            CourseIndexLockService indexLockService,
             TransactionTemplate transactionTemplate) {
 
         this.migrationMapper = migrationMapper;
@@ -54,6 +71,8 @@ public class EmbeddingMigrationWorker {
         this.courseMapper = courseMapper;
         this.aiClient = aiClient;
         this.cryptoService = cryptoService;
+        this.leaseService = leaseService;
+        this.indexLockService = indexLockService;
         this.transactionTemplate = transactionTemplate;
     }
 
@@ -77,7 +96,23 @@ public class EmbeddingMigrationWorker {
     }
 
     /**
-     * 原子领取任务。
+     * 每分钟恢复一次租约过期的任务。
+     */
+    @Scheduled(fixedDelay = 60000)
+    public void recoverExpiredTasks() {
+
+        int recovered = leaseService.recoverExpired();
+
+        if (recovered > 0) {
+            log.warn(
+                    "Recovered expired embedding migrations: {}",
+                    recovered
+            );
+        }
+    }
+
+    /**
+     * 原子领取任务，同时获得执行令牌和租约。
      */
     private CourseEmbeddingMigration claimOne() {
 
@@ -134,6 +169,10 @@ public class EmbeddingMigrationWorker {
                                     token
                             )
                             .set(
+                                    CourseEmbeddingMigration::getLeaseUntil,
+                                    now.plusMinutes(35)
+                            )
+                            .set(
                                     CourseEmbeddingMigration::getStartedAt,
                                     now
                             )
@@ -159,14 +198,91 @@ public class EmbeddingMigrationWorker {
             CourseEmbeddingMigration migration) {
 
         Long migrationId = migration.getId();
+        Long courseId = migration.getCourseId();
         String token = migration.getProcessingToken();
 
+        // 先获取课程索引锁：迁移期间独占课程。
+        String courseLockToken = indexLockService.tryAcquire(
+                courseId,
+                "EMBEDDING_MIGRATION"
+        );
+
+        // 课程正在索引或删除，不执行迁移。
+        if (courseLockToken == null) {
+            markFailedOrRetry(
+                    migration,
+                    token,
+                    new IllegalStateException(
+                            "课程正在执行其他索引操作，等待重试"
+                    )
+            );
+            return;
+        }
+
+        AtomicBoolean lost = new AtomicBoolean(false);
+        leaseLost.put(migrationId, lost);
+
+        ScheduledFuture<?> heartbeat = null;
+
         try {
+            // 每分钟续租迁移任务租约。
+            heartbeat = heartbeatExecutor.scheduleAtFixedRate(
+                    () -> {
+                        try {
+                            if (!leaseService.renew(migrationId, token)) {
+                                lost.set(true);
+                                log.warn(
+                                        "Migration lease lost: {}",
+                                        migrationId
+                                );
+                            }
+                        } catch (Exception e) {
+                            lost.set(true);
+                            log.error(
+                                    "Migration lease renewal failed: {}",
+                                    migrationId,
+                                    e
+                            );
+                        }
+                    },
+                    1,
+                    1,
+                    TimeUnit.MINUTES
+            );
+
+            // 确认迁移任务仍然属于当前 Worker。
+            CourseEmbeddingMigration current =
+                    migrationMapper.selectOne(
+                            new LambdaQueryWrapper<CourseEmbeddingMigration>()
+                                    .eq(
+                                            CourseEmbeddingMigration::getId,
+                                            migrationId
+                                    )
+                                    .eq(
+                                            CourseEmbeddingMigration::getStatus,
+                                            "RUNNING"
+                                    )
+                                    .eq(
+                                            CourseEmbeddingMigration::getProcessingToken,
+                                            token
+                                    )
+                                    .last("LIMIT 1")
+                    );
+
+            if (current == null) {
+                return;
+            }
+
+            if (!indexLockService.isOwned(
+                    courseId,
+                    courseLockToken)) {
+                throw new IllegalStateException(
+                        "课程索引锁已经失效"
+                );
+            }
 
             List<CourseDocument> documents =
-                    documentMapper.selectReadyByCourseId(
-                            migration.getCourseId()
-                    );
+                    documentMapper.selectReadyByCourseId(courseId);
 
             if (documents.isEmpty()) {
                 throw new IllegalStateException(
@@ -174,11 +290,16 @@ public class EmbeddingMigrationWorker {
                 );
             }
 
-            if (documents.size()
-                    != migration.getTotalDocuments()) {
+            // 记录迁移开始时的文档集合指纹。
+            List<Long> originalIds =
+                    documentMapper.selectReadyDocumentIds(courseId);
 
+            String originalFingerprint =
+                    documentSetFingerprint(originalIds);
+
+            if (documents.size() != migration.getTotalDocuments()) {
                 throw new IllegalStateException(
-                        "迁移期间课程文档发生变化，请重新创建迁移任务"
+                        "课程文档数量发生变化"
                 );
             }
 
@@ -196,12 +317,54 @@ public class EmbeddingMigrationWorker {
                             apiKey
                     );
 
+            // Python 完成后，重新检查租约和课程锁。
+            if (lost.get()) {
+                throw new IllegalStateException(
+                        "迁移租约已经丢失，禁止切换课程版本"
+                );
+            }
+
+            CourseEmbeddingMigration latest =
+                    migrationMapper.selectById(migrationId);
+
+            if (latest == null
+                    || !"RUNNING".equals(latest.getStatus())
+                    || !token.equals(latest.getProcessingToken())) {
+
+                throw new IllegalStateException(
+                        "迁移任务执行令牌已经失效"
+                );
+            }
+
+            if (!indexLockService.isOwned(
+                    courseId,
+                    courseLockToken)) {
+
+                throw new IllegalStateException(
+                        "课程索引锁已经失效，禁止切换版本"
+                );
+            }
+
+            // 重新校验文档集合未发生变化。
+            List<Long> latestIds =
+                    documentMapper.selectReadyDocumentIds(courseId);
+
+            String latestFingerprint =
+                    documentSetFingerprint(latestIds);
+
+            if (!originalFingerprint.equals(latestFingerprint)) {
+                throw new IllegalStateException(
+                        "迁移期间课程文档集合发生变化"
+                );
+            }
+
             validateResult(migration, documents, result);
 
             switchCourseVersion(
                     migration,
                     token,
-                    documents.size()
+                    documents.size(),
+                    courseLockToken
             );
 
         } catch (Exception e) {
@@ -209,15 +372,34 @@ public class EmbeddingMigrationWorker {
             log.error(
                     "Embedding migration failed, migrationId={}, courseId={}",
                     migrationId,
-                    migration.getCourseId(),
+                    courseId,
                     e
             );
 
-            markFailedOrRetry(
-                    migration,
-                    token,
-                    e
-            );
+            if (!lost.get()) {
+                markFailedOrRetry(
+                        migration,
+                        token,
+                        e
+                );
+            }
+
+        } finally {
+
+            if (heartbeat != null) {
+                heartbeat.cancel(false);
+            }
+
+            leaseLost.remove(migrationId);
+
+            // 释放课程索引锁。
+            indexLockService.release(courseId, courseLockToken);
+
+            // 仅在未丢租约时释放迁移任务租约；
+            // 丢租约时留给 recoverExpiredLeases 回收，避免任务卡死。
+            if (!lost.get()) {
+                leaseService.release(migrationId, token);
+            }
         }
     }
 
@@ -275,7 +457,8 @@ public class EmbeddingMigrationWorker {
     private void switchCourseVersion(
             CourseEmbeddingMigration migration,
             String token,
-            int processedDocuments) {
+            int processedDocuments,
+            String courseLockToken) {
 
         transactionTemplate.executeWithoutResult(status -> {
 
@@ -300,6 +483,16 @@ public class EmbeddingMigrationWorker {
             if (current == null) {
                 throw new IllegalStateException(
                         "迁移任务已经失效，不能切换版本"
+                );
+            }
+
+            // 切换版本前再次确认课程锁仍有效。
+            if (!indexLockService.isOwned(
+                    migration.getCourseId(),
+                    courseLockToken)) {
+
+                throw new IllegalStateException(
+                        "课程索引锁失效，禁止切换版本"
                 );
             }
 
@@ -355,6 +548,8 @@ public class EmbeddingMigrationWorker {
             current.setFailedDocuments(0);
             current.setFinishedAt(LocalDateTime.now());
             current.setProcessingToken(null);
+            current.setLeaseUntil(null);
+            current.setNextRetryAt(null);
             current.setUpdateTime(LocalDateTime.now());
 
             migrationMapper.updateById(current);
@@ -442,5 +637,32 @@ public class EmbeddingMigrationWorker {
         return message.length() > 500
                 ? message.substring(0, 500)
                 : message;
+    }
+
+    private String documentSetFingerprint(
+            List<Long> documentIds) {
+
+        try {
+            String value = documentIds.stream()
+                    .sorted()
+                    .map(String::valueOf)
+                    .collect(java.util.stream.Collectors.joining(","));
+
+            byte[] digest = java.security.MessageDigest
+                    .getInstance("SHA-256")
+                    .digest(
+                            value.getBytes(
+                                    java.nio.charset.StandardCharsets.UTF_8
+                            )
+                    );
+
+            return java.util.HexFormat.of().formatHex(digest);
+
+        } catch (Exception e) {
+            throw new IllegalStateException(
+                    "文档集合指纹计算失败",
+                    e
+            );
+        }
     }
 }

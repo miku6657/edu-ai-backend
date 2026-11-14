@@ -23,7 +23,36 @@ public class EmbeddingMigrationLeaseService {
     }
 
     /**
-     * 领取任务后设置/续租。
+     * 初始化任务租约。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public boolean initialize(
+            Long migrationId,
+            String token) {
+
+        LocalDateTime now = LocalDateTime.now();
+
+        int updated = mapper.update(
+                null,
+                new LambdaUpdateWrapper<CourseEmbeddingMigration>()
+                        .eq(CourseEmbeddingMigration::getId, migrationId)
+                        .eq(CourseEmbeddingMigration::getStatus, "RUNNING")
+                        .eq(CourseEmbeddingMigration::getProcessingToken, token)
+                        .set(
+                                CourseEmbeddingMigration::getLeaseUntil,
+                                now.plusMinutes(LEASE_MINUTES)
+                        )
+                        .set(
+                                CourseEmbeddingMigration::getUpdateTime,
+                                now
+                        )
+        );
+
+        return updated == 1;
+    }
+
+    /**
+     * 续租。
      */
     @Transactional(rollbackFor = Exception.class)
     public boolean renew(
@@ -53,9 +82,7 @@ public class EmbeddingMigrationLeaseService {
     }
 
     /**
-     * 恢复租约已经过期的任务。
-     *
-     * 超过最大执行次数的任务直接失败（后续在 SQL 中完善）。
+     * 恢复过期任务。
      */
     @Transactional(rollbackFor = Exception.class)
     public int recoverExpired() {
@@ -69,7 +96,7 @@ public class EmbeddingMigrationLeaseService {
     }
 
     /**
-     * 完成任务时释放租约。
+     * 释放租约。
      */
     @Transactional(rollbackFor = Exception.class)
     public boolean release(
@@ -84,8 +111,10 @@ public class EmbeddingMigrationLeaseService {
                         .eq(CourseEmbeddingMigration::getProcessingToken, token)
                         .set(CourseEmbeddingMigration::getLeaseUntil, null)
                         .set(CourseEmbeddingMigration::getProcessingToken, null)
-                        .set(CourseEmbeddingMigration::getUpdateTime,
-                                LocalDateTime.now())
+                        .set(
+                                CourseEmbeddingMigration::getUpdateTime,
+                                LocalDateTime.now()
+                        )
         );
 
         return updated == 1;

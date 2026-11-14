@@ -26,4 +26,18 @@ public interface CourseDocumentMapper
     List<CourseDocument> selectReadyByCourseId(
             @Param("courseId") Long courseId
     );
+
+    /**
+     * 查询课程中所有已完成索引的文档 ID，用于集合一致性校验。
+     */
+    @Select("""
+            SELECT id
+            FROM course_document
+            WHERE course_id = #{courseId}
+              AND status = 'READY'
+            ORDER BY id ASC
+            """)
+    List<Long> selectReadyDocumentIds(
+            @Param("courseId") Long courseId
+    );
 }

@@ -36,6 +36,7 @@ public class DocumentLifecycleService {
     private final CourseDocumentMapper documentMapper;
     private final CourseMapper courseMapper;
     private final DocumentIndexTask indexTask;
+    private final CourseIndexLockService indexLockService;
     private final HttpClient httpClient;
 
     private final String aiUrl;
@@ -46,6 +47,7 @@ public class DocumentLifecycleService {
             CourseDocumentMapper documentMapper,
             CourseMapper courseMapper,
             DocumentIndexTask indexTask,
+            CourseIndexLockService indexLockService,
             @Value("${ai.service.url}") String aiUrl,
             @Value("${ai.service.internal-key}") String internalKey,
             @Value("${app.storage.pdf-dir}") String pdfDir) {
@@ -53,6 +55,7 @@ public class DocumentLifecycleService {
         this.documentMapper = documentMapper;
         this.courseMapper = courseMapper;
         this.indexTask = indexTask;
+        this.indexLockService = indexLockService;
 
         this.aiUrl = aiUrl;
         this.internalKey = internalKey;
@@ -67,7 +70,7 @@ public class DocumentLifecycleService {
     }
 
     // 删除文档：上传者或课程创建者可以删除
-    public synchronized void delete(
+    public void delete(
             Long documentId,
             Long userId) {
 
@@ -90,37 +93,85 @@ public class DocumentLifecycleService {
             );
         }
 
-        // 使用数据库条件更新抢占删除任务
-        int updated = documentMapper.update(
-                null,
-                new LambdaUpdateWrapper<CourseDocument>()
-                        .eq(CourseDocument::getId, documentId)
-                        .eq(
-                                CourseDocument::getStatus,
-                                document.getStatus()
-                        )
-                        .set(
-                                CourseDocument::getStatus,
-                                "DELETING"
-                        )
-                        .set(
-                                CourseDocument::getErrorMessage,
-                                null
-                        )
-                        .set(
-                                CourseDocument::getUpdateTime,
-                                LocalDateTime.now()
-                        )
+        Long courseId = document.getCourseId();
+
+        String lockToken = indexLockService.tryAcquire(
+                courseId,
+                "DOCUMENT_DELETE"
         );
 
-        if (updated != 1) {
+        if (lockToken == null) {
             throw new BusinessException(
                     409,
-                    "文件状态已变化，请重试"
+                    "课程正在执行索引或迁移操作，请稍后重试"
             );
         }
 
-        cleanup(documentId);
+        try {
+            // 获得课程锁后重新读取文档状态。
+            CourseDocument latest =
+                    requireDocument(documentId);
+
+            requireDocumentManagePermission(latest, userId);
+
+            if ("DELETED".equals(latest.getStatus())) {
+                return;
+            }
+
+            if (!DELETABLE.contains(latest.getStatus())
+                    && !"DELETE_FAILED".equals(
+                            latest.getStatus())) {
+
+                throw new BusinessException(
+                        409,
+                        "文件状态已经变化，暂时不能删除"
+                );
+            }
+
+            int updated = documentMapper.update(
+                    null,
+                    new LambdaUpdateWrapper<CourseDocument>()
+                            .eq(CourseDocument::getId, documentId)
+                            .eq(
+                                    CourseDocument::getStatus,
+                                    latest.getStatus()
+                            )
+                            .set(
+                                    CourseDocument::getStatus,
+                                    "DELETING"
+                            )
+                            .set(
+                                    CourseDocument::getErrorMessage,
+                                    null
+                            )
+                            .set(
+                                    CourseDocument::getUpdateTime,
+                                    LocalDateTime.now()
+                            )
+            );
+
+            if (updated != 1) {
+                throw new BusinessException(
+                        409,
+                        "文件状态已变化，请重试"
+                );
+            }
+
+            if (!indexLockService.isOwned(courseId, lockToken)) {
+                throw new BusinessException(
+                        409,
+                        "课程锁已经失效，请重试"
+                );
+            }
+
+            cleanup(documentId);
+
+        } finally {
+            indexLockService.release(
+                    courseId,
+                    lockToken
+            );
+        }
     }
 
     // 重新处理失败的文档：上传者或课程创建者可以操作
@@ -170,7 +221,41 @@ public class DocumentLifecycleService {
     }
 
     // 服务重启后恢复未完成的删除操作
-    public synchronized void resumeDelete(Long documentId) {
+    public void resumeDelete(Long documentId) {
+
+        CourseDocument doc =
+                documentMapper.selectById(documentId);
+
+        if (doc == null) {
+            return;
+        }
+
+        if (!"DELETING".equals(doc.getStatus())
+                && !"DELETE_FAILED".equals(doc.getStatus())) {
+            return;
+        }
+
+        Long courseId = doc.getCourseId();
+
+        String lockToken = indexLockService.tryAcquire(
+                courseId,
+                "DOCUMENT_DELETE"
+        );
+
+        if (lockToken == null) {
+            return;
+        }
+
+        try {
+            resumeDeleteWithLock(documentId, lockToken);
+        } finally {
+            indexLockService.release(courseId, lockToken);
+        }
+    }
+
+    private void resumeDeleteWithLock(
+            Long documentId,
+            String lockToken) {
 
         CourseDocument doc =
                 documentMapper.selectById(documentId);
@@ -199,9 +284,13 @@ public class DocumentLifecycleService {
                 return;
             }
 
-        } else if (!"DELETING".equals(
-                doc.getStatus())) {
+        } else if (!"DELETING".equals(doc.getStatus())) {
+            return;
+        }
 
+        if (!indexLockService.isOwned(
+                doc.getCourseId(),
+                lockToken)) {
             return;
         }
 

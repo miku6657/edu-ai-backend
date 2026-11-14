@@ -13,14 +13,29 @@ import java.time.LocalDateTime;
 public interface CourseEmbeddingMigrationMapper
         extends BaseMapper<CourseEmbeddingMigration> {
 
+    /**
+     * 恢复过期任务。
+     *
+     * 达到最大执行次数的任务直接标记 FAILED。
+     */
     @Update("""
         UPDATE course_embedding_migration
-        SET status = 'PENDING',
+        SET status = CASE
+                WHEN attempt_count >= 3 THEN 'FAILED'
+                ELSE 'PENDING'
+            END,
             processing_token = NULL,
             lease_until = NULL,
-            next_retry_at = #{nextRetryAt},
-            error_message = 'Worker租约过期，等待恢复',
-            update_time = NOW()
+            next_retry_at = CASE
+                WHEN attempt_count >= 3 THEN NULL
+                ELSE #{nextRetryAt}
+            END,
+            finished_at = CASE
+                WHEN attempt_count >= 3 THEN #{now}
+                ELSE finished_at
+            END,
+            error_message = 'Worker租约过期，任务已恢复',
+            update_time = #{now}
         WHERE status = 'RUNNING'
           AND lease_until IS NOT NULL
           AND lease_until < #{now}

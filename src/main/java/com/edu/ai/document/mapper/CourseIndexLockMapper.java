@@ -2,6 +2,7 @@ package com.edu.ai.document.mapper;
 
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
 import java.time.LocalDateTime;
@@ -68,6 +69,18 @@ public interface CourseIndexLockMapper {
           AND lock_token = #{token}
         """)
     int release(
+            @Param("courseId") Long courseId,
+            @Param("token") String token
+    );
+
+    @Select("""
+        SELECT COUNT(1)
+        FROM course_index_lock
+        WHERE course_id = #{courseId}
+          AND lock_token = #{token}
+          AND lease_until > NOW()
+        """)
+    int isOwned(
             @Param("courseId") Long courseId,
             @Param("token") String token
     );

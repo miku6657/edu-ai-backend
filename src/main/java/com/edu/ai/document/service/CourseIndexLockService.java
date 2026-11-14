@@ -73,4 +73,18 @@ public class CourseIndexLockService {
 
         mapper.release(courseId, token);
     }
+
+    /**
+     * 检查当前操作是否仍持有有效锁。
+     */
+    public boolean isOwned(
+            Long courseId,
+            String token) {
+
+        if (courseId == null || token == null) {
+            return false;
+        }
+
+        return mapper.isOwned(courseId, token) == 1;
+    }
 }
