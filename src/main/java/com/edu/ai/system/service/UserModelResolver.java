@@ -2,6 +2,8 @@ package com.edu.ai.system.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.edu.ai.common.BusinessException;
+import com.edu.ai.document.entity.CourseEmbeddingProfile;
+import com.edu.ai.document.service.CourseEmbeddingProfileService;
 import com.edu.ai.system.entity.UserConfig;
 import com.edu.ai.system.mapper.UserConfigMapper;
 import com.edu.ai.system.security.ConfigCryptoService;
@@ -13,13 +15,16 @@ public class UserModelResolver {
 
     private final UserConfigMapper configMapper;
     private final ConfigCryptoService cryptoService;
+    private final CourseEmbeddingProfileService profileService;
 
     public UserModelResolver(
             UserConfigMapper configMapper,
-            ConfigCryptoService cryptoService) {
+            ConfigCryptoService cryptoService,
+            CourseEmbeddingProfileService profileService) {
 
         this.configMapper = configMapper;
         this.cryptoService = cryptoService;
+        this.profileService = profileService;
     }
 
     public UserModelConfig resolve(Long userId) {
@@ -81,6 +86,40 @@ public class UserModelResolver {
                 embeddingKey,
                 config.getEmbeddingModel(),
                 config.getEmbeddingDim()
+        );
+    }
+
+    /**
+     * 对话模型使用用户当前配置；
+     * Embedding模型使用课程对应索引版本的固定配置。
+     */
+    public UserModelConfig resolveForCourse(
+            Long userId,
+            Long courseId,
+            int embeddingVersion) {
+
+        UserModelConfig current = resolve(userId);
+
+        CourseEmbeddingProfile profile =
+                profileService.require(
+                        courseId,
+                        embeddingVersion
+                );
+
+        String embeddingApiKey =
+                profileService.decryptKey(profile);
+
+        return new UserModelConfig(
+                current.chatProvider(),
+                current.chatBaseUrl(),
+                current.chatApiKey(),
+                current.chatModel(),
+
+                profile.getProvider(),
+                profile.getBaseUrl(),
+                embeddingApiKey,
+                profile.getModel(),
+                profile.getDimension()
         );
     }
 

@@ -49,6 +49,16 @@ public class AiEmbeddingMigrationClient {
         try {
             Map<String, Object> body = new LinkedHashMap<>();
 
+            body.put(
+                    "migration_id",
+                    migration.getId()
+            );
+
+            body.put(
+                    "execution_token",
+                    migration.getProcessingToken()
+            );
+
             body.put("course_id", migration.getCourseId());
             body.put("source_version", migration.getSourceVersion());
             body.put("target_version", migration.getTargetVersion());
@@ -118,15 +128,24 @@ public class AiEmbeddingMigrationClient {
 
             JsonNode root = objectMapper.readTree(response.body());
 
-            if (!"SUCCEEDED".equals(
+            if (!"STAGED".equals(
                     root.path("status").asText())) {
 
                 throw new IllegalStateException(
-                        "Python没有确认迁移成功"
+                        "Python没有确认迁移已暂存"
                 );
             }
 
             MigrationResult result = new MigrationResult();
+
+            result.migrationId =
+                    root.path("migration_id").asLong();
+
+            result.executionToken =
+                    root.path("execution_token").asText();
+
+            result.collectionName =
+                    root.path("collection_name").asText();
 
             result.courseId = root.path("course_id").asLong();
             result.sourceVersion =
@@ -146,6 +165,26 @@ public class AiEmbeddingMigrationClient {
 
             result.status = root.path("status").asText();
 
+            // 严格校验执行者身份与临时 Collection 名称。
+            if (result.migrationId != migration.getId()
+                    || !migration.getProcessingToken().equals(
+                            result.executionToken)) {
+
+                throw new IllegalStateException(
+                        "迁移执行者不匹配"
+                );
+            }
+
+            if (result.collectionName == null
+                    || !result.collectionName.matches(
+                            "mig_[0-9]+_[a-f0-9]{24}"
+                    )) {
+
+                throw new IllegalStateException(
+                        "Python返回的临时Collection名称不合法"
+                );
+            }
+
             return result;
 
         } catch (InterruptedException e) {
@@ -160,6 +199,12 @@ public class AiEmbeddingMigrationClient {
     }
 
     public static class MigrationResult {
+
+        public long migrationId;
+
+        public String executionToken;
+
+        public String collectionName;
 
         public long courseId;
 

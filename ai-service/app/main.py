@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from .config import AI_INTERNAL_KEY, PDF_STORAGE_DIR
 from .embedding_migration import migrate_course
+from .embedding_service import create_embedding_client
 from .pdf_parser import parse_pdf
 from .rag_service import rag_stream
 from .vector_store import delete_document_vectors_all_versions, index_document, search_course
@@ -47,6 +48,18 @@ class IndexRequest(BaseModel):
     embedding_version: int = Field(
         default=1,
         ge=1,
+    )
+    embedding_model: str = Field(
+        min_length=1,
+        max_length=100,
+    )
+    embedding_base_url: str = Field(
+        min_length=1,
+        max_length=500,
+    )
+    embedding_api_key: str = Field(
+        default="",
+        max_length=1000,
     )
 
 
@@ -126,11 +139,18 @@ def internal_index(req: IndexRequest, _: None = Depends(require_internal)):
         raise HTTPException(status_code=400, detail="未从 PDF 提取到文本")
 
     with index_lock:
+        embedding_client = create_embedding_client(
+            api_key=req.embedding_api_key,
+            base_url=req.embedding_base_url,
+        )
+
         indexed = index_document(
-            req.course_id,
-            req.document_id,
-            chunks,
+            course_id=req.course_id,
+            document_id=req.document_id,
+            chunks=chunks,
             version=req.embedding_version,
+            model=req.embedding_model,
+            client=embedding_client,
         )
 
     return {
@@ -189,6 +209,11 @@ class MigrationDocument(BaseModel):
 
 
 class CourseMigrationRequest(BaseModel):
+    migration_id: int = Field(gt=0)
+    execution_token: str = Field(
+        min_length=1,
+        max_length=128,
+    )
     course_id: int = Field(gt=0)
     source_version: int = Field(ge=1)
     target_version: int = Field(ge=2)
@@ -215,20 +240,20 @@ def internal_embedding_migrate(
         for item in request.documents
     ]
     try:
-        # 与普通索引共用进程内锁。
-        with index_lock:
-            result = migrate_course(
-                course_id=request.course_id,
-                source_version=request.source_version,
-                target_version=request.target_version,
-                documents=documents,
-                pdf_storage_dir=PDF_STORAGE_DIR,
-                provider=request.provider,
-                base_url=request.base_url,
-                api_key=request.api_key,
-                model=request.model,
-                expected_dimension=request.expected_dimension,
-            )
+        result = migrate_course(
+            migration_id=request.migration_id,
+            execution_token=request.execution_token,
+            course_id=request.course_id,
+            source_version=request.source_version,
+            target_version=request.target_version,
+            documents=documents,
+            pdf_storage_dir=PDF_STORAGE_DIR,
+            provider=request.provider,
+            base_url=request.base_url,
+            api_key=request.api_key,
+            model=request.model,
+            expected_dimension=request.expected_dimension,
+        )
         return result
     except Exception:
         logger.exception(

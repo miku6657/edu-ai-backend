@@ -1,4 +1,5 @@
 import chromadb
+import hashlib
 
 from openai import OpenAI
 
@@ -35,6 +36,84 @@ def get_collection(course_id: int, version: int = 1):
             "hnsw": {"space": "cosine"}
         },
     )
+
+
+def migration_collection_name(
+    migration_id: int,
+    execution_token: str,
+) -> str:
+    """生成当前迁移执行者独占的临时 Collection 名称。"""
+    if migration_id <= 0:
+        raise ValueError("migration_id 不合法")
+    if not execution_token:
+        raise ValueError("execution_token 不能为空")
+
+    digest = hashlib.sha256(
+        execution_token.encode("utf-8")
+    ).hexdigest()[:24]
+
+    return f"mig_{migration_id}_{digest}"
+
+
+def get_collection_by_name(name: str):
+    """按明确的 Collection 名称获取或创建集合。"""
+    if not name or len(name) > 63:
+        raise ValueError("Collection 名称不合法")
+    return client.get_or_create_collection(
+        name=name,
+        embedding_function=None,
+        configuration={
+            "hnsw": {"space": "cosine"}
+        },
+    )
+
+
+def index_document_into_collection(
+    collection,
+    document_id: int,
+    chunks: list[dict],
+    model: str,
+    embedding_client,
+    active: str = "0",
+) -> int:
+    """向指定 Collection 写入文档向量。"""
+    if not chunks:
+        raise ValueError("文档没有有效切片")
+
+    texts = [item["text"] for item in chunks]
+    embeddings = embed_texts(
+        texts,
+        model=model,
+        client=embedding_client,
+    )
+
+    if len(embeddings) != len(chunks):
+        raise RuntimeError("向量数量不匹配")
+
+    ids = []
+    documents = []
+    metadatas = []
+
+    for chunk in chunks:
+        ids.append(
+            f"{document_id}:{chunk['page']}:{chunk['chunk_index']}"
+        )
+        documents.append(chunk["text"])
+        metadatas.append({
+            "document_id": str(document_id),
+            "page": chunk["page"],
+            "chunk_index": chunk["chunk_index"],
+            "active": active,
+        })
+
+    collection.upsert(
+        ids=ids,
+        embeddings=embeddings,
+        documents=documents,
+        metadatas=metadatas,
+    )
+
+    return len(ids)
 
 
 def index_document(
@@ -308,3 +387,59 @@ def delete_document_vectors_all_versions(
         total_deleted += len(all_ids)
 
     return total_deleted
+
+
+def search_course_by_collection(
+    collection_name_value: str,
+    query: str,
+    top_k: int = 5,
+    model: str | None = None,
+    api_key: str | None = None,
+    base_url: str | None = None,
+) -> list[dict]:
+    """按 CourseEmbeddingProfile 中保存的 Collection 名称检索。"""
+    if not collection_name_value:
+        raise ValueError("Collection名称不能为空")
+
+    collection = client.get_collection(
+        name=collection_name_value,
+        embedding_function=None,
+    )
+
+    if collection.count() == 0:
+        return []
+
+    model = model or EMBEDDING_MODEL
+
+    query_client = create_embedding_client(
+        api_key=api_key,
+        base_url=base_url,
+    )
+
+    query_embedding = embed_query(
+        query,
+        model=model,
+        client=query_client,
+    )
+
+    result = collection.query(
+        query_embeddings=[query_embedding],
+        n_results=top_k,
+        include=["documents", "metadatas", "distances"],
+    )
+
+    documents = result.get("documents") or [[]]
+    metadatas = result.get("metadatas") or [[]]
+    distances = result.get("distances") or [[]]
+
+    hits = []
+    for doc, meta, dist in zip(documents[0], metadatas[0], distances[0]):
+        hits.append({
+            "document_id": meta.get("document_id"),
+            "page": meta.get("page"),
+            "chunk_index": meta.get("chunk_index"),
+            "text": doc,
+            "score": round(1.0 - float(dist), 4),
+        })
+
+    return hits

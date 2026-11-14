@@ -8,9 +8,11 @@ import com.edu.ai.course.mapper.CourseMapper;
 
 import com.edu.ai.document.entity.CourseDocument;
 import com.edu.ai.document.entity.CourseEmbeddingMigration;
+import com.edu.ai.document.entity.CourseEmbeddingProfile;
 
 import com.edu.ai.document.mapper.CourseDocumentMapper;
 import com.edu.ai.document.mapper.CourseEmbeddingMigrationMapper;
+import com.edu.ai.document.mapper.CourseEmbeddingProfileMapper;
 
 import com.edu.ai.system.security.ConfigCryptoService;
 
@@ -43,6 +45,7 @@ public class EmbeddingMigrationWorker {
     private final CourseEmbeddingMigrationMapper migrationMapper;
     private final CourseDocumentMapper documentMapper;
     private final CourseMapper courseMapper;
+    private final CourseEmbeddingProfileMapper profileMapper;
 
     private final AiEmbeddingMigrationClient aiClient;
     private final ConfigCryptoService cryptoService;
@@ -61,6 +64,7 @@ public class EmbeddingMigrationWorker {
             CourseEmbeddingMigrationMapper migrationMapper,
             CourseDocumentMapper documentMapper,
             CourseMapper courseMapper,
+            CourseEmbeddingProfileMapper profileMapper,
             AiEmbeddingMigrationClient aiClient,
             ConfigCryptoService cryptoService,
             EmbeddingMigrationLeaseService leaseService,
@@ -71,6 +75,7 @@ public class EmbeddingMigrationWorker {
         this.migrationMapper = migrationMapper;
         this.documentMapper = documentMapper;
         this.courseMapper = courseMapper;
+        this.profileMapper = profileMapper;
         this.aiClient = aiClient;
         this.cryptoService = cryptoService;
         this.leaseService = leaseService;
@@ -369,12 +374,50 @@ public class EmbeddingMigrationWorker {
 
             courseLease.assertValid();
 
+            LocalDateTime now = LocalDateTime.now();
+
+            int saved = migrationMapper.update(
+                    null,
+                    new LambdaUpdateWrapper<CourseEmbeddingMigration>()
+                            .eq(
+                                    CourseEmbeddingMigration::getId,
+                                    migrationId
+                            )
+                            .eq(
+                                    CourseEmbeddingMigration::getStatus,
+                                    "RUNNING"
+                            )
+                            .eq(
+                                    CourseEmbeddingMigration::getProcessingToken,
+                                    token
+                            )
+                            .gt(
+                                    CourseEmbeddingMigration::getLeaseUntil,
+                                    now
+                            )
+                            .set(
+                                    CourseEmbeddingMigration::getTargetCollectionName,
+                                    result.collectionName
+                            )
+                            .set(
+                                    CourseEmbeddingMigration::getUpdateTime,
+                                    now
+                            )
+            );
+
+            if (saved != 1) {
+                throw new IllegalStateException(
+                        "迁移执行令牌已经失效，禁止保存临时Collection"
+                );
+            }
+
             // 使用原有的事务方法完成版本切换。
             switchCourseVersion(
                     migration,
                     token,
                     documents.size(),
-                    courseLease.getToken()
+                    courseLease.getToken(),
+                    result.collectionName
             );
 
         } catch (Exception e) {
@@ -422,11 +465,34 @@ public class EmbeddingMigrationWorker {
             List<CourseDocument> documents,
             AiEmbeddingMigrationClient.MigrationResult result) {
 
-        if (result == null
-                || !"SUCCEEDED".equals(result.status)) {
+        if (result == null) {
+            throw new IllegalStateException(
+                    "迁移结果为空"
+            );
+        }
+
+        if (!"STAGED".equals(result.status)) {
+            throw new IllegalStateException(
+                    "目标索引尚未完成构建"
+            );
+        }
+
+        if (result.migrationId != migration.getId()
+                || !migration.getProcessingToken().equals(
+                        result.executionToken)) {
 
             throw new IllegalStateException(
-                    "迁移结果状态不正确"
+                    "Python返回的迁移执行者标识不匹配"
+            );
+        }
+
+        if (result.collectionName == null
+                || !result.collectionName.matches(
+                        "mig_[0-9]+_[a-f0-9]{24}"
+                )) {
+
+            throw new IllegalStateException(
+                    "Python返回的临时Collection名称不合法"
             );
         }
 
@@ -469,7 +535,8 @@ public class EmbeddingMigrationWorker {
             CourseEmbeddingMigration migration,
             String token,
             int processedDocuments,
-            String courseLockToken) {
+            String courseLockToken,
+            String collectionName) {
 
         transactionTemplate.executeWithoutResult(status -> {
 
@@ -488,12 +555,34 @@ public class EmbeddingMigrationWorker {
                                             CourseEmbeddingMigration::getProcessingToken,
                                             token
                                     )
+                                    .gt(
+                                            CourseEmbeddingMigration::getLeaseUntil,
+                                            LocalDateTime.now()
+                                    )
                                     .last("LIMIT 1 FOR UPDATE")
                     );
 
             if (current == null) {
                 throw new IllegalStateException(
                         "迁移任务已经失效，不能切换版本"
+                );
+            }
+
+            if (current.getTargetCollectionName() == null
+                    || !current.getTargetCollectionName().equals(
+                            collectionName)) {
+
+                throw new IllegalStateException(
+                        "迁移目标Collection与数据库记录不一致"
+                );
+            }
+
+            if (current.getLeaseUntil() == null
+                    || !current.getLeaseUntil().isAfter(
+                            LocalDateTime.now())) {
+
+                throw new IllegalStateException(
+                        "迁移任务租约已经失效"
                 );
             }
 
@@ -529,6 +618,52 @@ public class EmbeddingMigrationWorker {
                         "课程版本已经发生变化，不能切换"
                 );
             }
+
+            // 在同一事务内先保存新版本模型配置，防止切换后缺少配置。
+            if (current.getTargetCollectionName() == null
+                    || !current.getTargetCollectionName().matches(
+                            "mig_[0-9]+_[a-f0-9]{24}"
+                    )) {
+
+                throw new IllegalStateException(
+                        "目标Collection名称无效"
+                );
+            }
+
+            CourseEmbeddingProfile profile =
+                    new CourseEmbeddingProfile();
+
+            profile.setCourseId(current.getCourseId());
+
+            profile.setEmbeddingVersion(
+                    current.getTargetVersion()
+            );
+
+            profile.setProvider(current.getTargetProvider());
+
+            profile.setBaseUrl(current.getTargetBaseUrl());
+
+            profile.setModel(current.getTargetModel());
+
+            profile.setDimension(current.getTargetDimension());
+
+            profile.setCollectionName(
+                    current.getTargetCollectionName()
+            );
+
+            profile.setApiKeyCiphertext(
+                    current.getTargetApiKeyCiphertext()
+            );
+
+            profile.setApiKeyFingerprint(
+                    current.getTargetApiKeyFingerprint()
+            );
+
+            profile.setStatus("ACTIVE");
+
+            profile.setCreateTime(LocalDateTime.now());
+
+            profileMapper.insert(profile);
 
             // 原子更新课程当前生效版本。
             int changed = courseMapper.update(

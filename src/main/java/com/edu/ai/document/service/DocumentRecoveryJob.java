@@ -8,6 +8,7 @@ import com.edu.ai.document.mapper.CourseDocumentMapper;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -20,66 +21,85 @@ public class DocumentRecoveryJob {
     private static final Logger log =
             LoggerFactory.getLogger(DocumentRecoveryJob.class);
 
-    // 索引请求最多等待10分钟，这里给15分钟恢复窗口
     private static final int TIMEOUT_MINUTES = 15;
+    private static final int BATCH_SIZE = 20;
 
     private final CourseDocumentMapper documentMapper;
     private final DocumentIndexTask indexTask;
     private final DocumentLifecycleService lifecycleService;
+    private final CourseIndexLease courseIndexLease;
 
     public DocumentRecoveryJob(
             CourseDocumentMapper documentMapper,
             DocumentIndexTask indexTask,
-            DocumentLifecycleService lifecycleService) {
+            DocumentLifecycleService lifecycleService,
+            CourseIndexLease courseIndexLease) {
 
         this.documentMapper = documentMapper;
         this.indexTask = indexTask;
         this.lifecycleService = lifecycleService;
+        this.courseIndexLease = courseIndexLease;
     }
 
-    @Scheduled(
-            initialDelay = 30000,
-            fixedDelay = 60000
-    )
+    @Scheduled(initialDelay = 30000, fixedDelay = 60000)
     public void recover() {
-
         recoverProcessing();
         recoverUploaded();
         recoverDeleting();
     }
 
-    // 恢复长时间卡住的 PROCESSING 文档
+    /**
+     * 恢复超时索引任务。
+     *
+     * 必须先取得课程锁，避免与仍在运行的索引任务竞争。
+     */
     private void recoverProcessing() {
 
         LocalDateTime deadline =
-                LocalDateTime.now()
-                        .minusMinutes(TIMEOUT_MINUTES);
+                LocalDateTime.now().minusMinutes(TIMEOUT_MINUTES);
 
         List<CourseDocument> documents =
                 documentMapper.selectList(
                         new LambdaQueryWrapper<CourseDocument>()
-                                .eq(CourseDocument::getStatus,
-                                        "PROCESSING")
+                                .eq(
+                                        CourseDocument::getStatus,
+                                        "PROCESSING"
+                                )
                                 .and(w -> w
                                         .le(
-                                                CourseDocument
-                                                        ::getProcessingStartedAt,
-                                                deadline)
+                                                CourseDocument::getProcessingStartedAt,
+                                                deadline
+                                        )
                                         .or(x -> x
                                                 .isNull(
-                                                        CourseDocument
-                                                                ::getProcessingStartedAt)
+                                                        CourseDocument::getProcessingStartedAt
+                                                )
                                                 .le(
-                                                        CourseDocument
-                                                                ::getUpdateTime,
-                                                        deadline)))
+                                                        CourseDocument::getUpdateTime,
+                                                        deadline
+                                                )
+                                        )
+                                )
                                 .orderByAsc(CourseDocument::getId)
-                                .last("LIMIT 20")
+                                .last("LIMIT " + BATCH_SIZE)
                 );
 
         for (CourseDocument doc : documents) {
 
-            try {
+            CourseIndexLease.Handle lease =
+                    courseIndexLease.tryOpen(
+                            doc.getCourseId(),
+                            "DOCUMENT_RECOVERY"
+                    );
+
+            if (lease == null) {
+                continue;
+            }
+
+            try (lease) {
+
+                lease.assertValid();
+
                 boolean retry =
                         doc.getAttemptCount() == null
                         || doc.getAttemptCount()
@@ -88,57 +108,80 @@ public class DocumentRecoveryJob {
                 String nextStatus =
                         retry ? "UPLOADED" : "FAILED";
 
-                LambdaUpdateWrapper<CourseDocument> wrapper =
+                LocalDateTime now = LocalDateTime.now();
+
+                LambdaUpdateWrapper<CourseDocument> update =
                         new LambdaUpdateWrapper<CourseDocument>()
-                                .eq(CourseDocument::getId,
-                                        doc.getId())
-                                .eq(CourseDocument::getStatus,
-                                        "PROCESSING")
-                                .set(CourseDocument::getStatus,
-                                        nextStatus)
-                                .set(CourseDocument::getErrorMessage,
+                                .eq(
+                                        CourseDocument::getId,
+                                        doc.getId()
+                                )
+                                .eq(
+                                        CourseDocument::getCourseId,
+                                        doc.getCourseId()
+                                )
+                                .eq(
+                                        CourseDocument::getStatus,
+                                        "PROCESSING"
+                                )
+                                .set(
+                                        CourseDocument::getStatus,
+                                        nextStatus
+                                )
+                                .set(
+                                        CourseDocument::getErrorMessage,
                                         retry
-                                                ? "任务超时，等待恢复"
-                                                : "任务超时，超过重试次数")
-                                .set(CourseDocument::getProcessingToken,
-                                        null)
-                                .set(CourseDocument
-                                                ::getProcessingStartedAt,
-                                        null)
-                                .set(CourseDocument::getUpdateTime,
-                                        LocalDateTime.now());
+                                                ? "索引任务超时，等待重新处理"
+                                                : "索引任务超时，已达到最大重试次数"
+                                )
+                                .set(
+                                        CourseDocument::getProcessingToken,
+                                        null
+                                )
+                                .set(
+                                        CourseDocument::getProcessingStartedAt,
+                                        null
+                                )
+                                .set(
+                                        CourseDocument::getUpdateTime,
+                                        now
+                                );
 
-                // 加上任务标识，避免清除新任务
+                // 使用原执行令牌进行乐观条件校验。
                 if (doc.getProcessingToken() == null) {
-                    wrapper.isNull(
-                            CourseDocument::getProcessingToken);
+                    update.isNull(
+                            CourseDocument::getProcessingToken
+                    );
                 } else {
-                    wrapper.eq(
+                    update.eq(
                             CourseDocument::getProcessingToken,
-                            doc.getProcessingToken());
+                            doc.getProcessingToken()
+                    );
                 }
 
-                // 旧数据可能没有 processingStartedAt
+                // 防止将查询后发生变化的任务误恢复。
                 if (doc.getProcessingStartedAt() == null) {
-                    wrapper.isNull(
-                            CourseDocument
-                                    ::getProcessingStartedAt);
-                    wrapper.le(
+                    update.isNull(
+                            CourseDocument::getProcessingStartedAt
+                    );
+                    update.le(
                             CourseDocument::getUpdateTime,
-                            deadline);
+                            deadline
+                    );
                 } else {
-                    wrapper.eq(
-                            CourseDocument
-                                    ::getProcessingStartedAt,
-                            doc.getProcessingStartedAt());
+                    update.eq(
+                            CourseDocument::getProcessingStartedAt,
+                            doc.getProcessingStartedAt()
+                    );
                 }
 
-                int updated =
-                        documentMapper.update(null, wrapper);
+                lease.assertValid();
 
-                if (updated == 1) {
+                int changed = documentMapper.update(null, update);
+
+                if (changed == 1) {
                     log.warn(
-                            "Recovered stale indexing task: {}, status={}",
+                            "Recovered stale document: id={}, status={}",
                             doc.getId(),
                             nextStatus
                     );
@@ -146,24 +189,41 @@ public class DocumentRecoveryJob {
 
             } catch (Exception e) {
                 log.error(
-                        "Recover indexing task failed: {}",
-                        doc.getId(), e);
+                        "Recover processing document failed: {}",
+                        doc.getId(),
+                        e
+                );
             }
         }
     }
 
-    // 恢复待处理队列
+    /**
+     * 扫描待索引文档。
+     *
+     * 获取课程锁失败时不修改状态。
+     * 下一轮仍会重新扫描。
+     */
     private void recoverUploaded() {
 
         List<CourseDocument> documents =
                 documentMapper.selectList(
                         new LambdaQueryWrapper<CourseDocument>()
-                                .eq(CourseDocument::getStatus,
-                                        "UPLOADED")
-                                .lt(CourseDocument::getAttemptCount,
-                                        DocumentIndexTask.MAX_ATTEMPTS)
+                                .eq(
+                                        CourseDocument::getStatus,
+                                        "UPLOADED"
+                                )
+                                .and(w -> w
+                                        .isNull(
+                                                CourseDocument::getAttemptCount
+                                        )
+                                        .or()
+                                        .lt(
+                                                CourseDocument::getAttemptCount,
+                                                DocumentIndexTask.MAX_ATTEMPTS
+                                        )
+                                )
                                 .orderByAsc(CourseDocument::getId)
-                                .last("LIMIT 20")
+                                .last("LIMIT " + BATCH_SIZE)
                 );
 
         for (CourseDocument doc : documents) {
@@ -172,22 +232,28 @@ public class DocumentRecoveryJob {
             } catch (Exception e) {
                 log.error(
                         "Schedule index failed: {}",
-                        doc.getId(), e);
+                        doc.getId(),
+                        e
+                );
             }
         }
     }
 
-    // 恢复未完成删除任务
+    /**
+     * 恢复未完成的删除任务。
+     */
     private void recoverDeleting() {
 
         List<CourseDocument> documents =
                 documentMapper.selectList(
                         new LambdaQueryWrapper<CourseDocument>()
-                                .in(CourseDocument::getStatus,
+                                .in(
+                                        CourseDocument::getStatus,
                                         "DELETING",
-                                        "DELETE_FAILED")
+                                        "DELETE_FAILED"
+                                )
                                 .orderByAsc(CourseDocument::getId)
-                                .last("LIMIT 20")
+                                .last("LIMIT " + BATCH_SIZE)
                 );
 
         for (CourseDocument doc : documents) {
@@ -196,7 +262,9 @@ public class DocumentRecoveryJob {
             } catch (Exception e) {
                 log.error(
                         "Recover deletion failed: {}",
-                        doc.getId(), e);
+                        doc.getId(),
+                        e
+                );
             }
         }
     }

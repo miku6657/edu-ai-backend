@@ -6,7 +6,10 @@ import com.edu.ai.course.entity.Course;
 import com.edu.ai.course.mapper.CourseMapper;
 
 import com.edu.ai.document.entity.CourseDocument;
+import com.edu.ai.document.entity.CourseEmbeddingProfile;
 import com.edu.ai.document.mapper.CourseDocumentMapper;
+
+import tools.jackson.databind.ObjectMapper;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,6 +25,8 @@ import java.net.http.HttpResponse;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -36,6 +41,8 @@ public class DocumentIndexTask {
     private final CourseMapper courseMapper;
     private final CourseIndexLockService indexLockService;
     private final CourseIndexLease courseIndexLease;
+    private final CourseEmbeddingProfileService profileService;
+    private final ObjectMapper objectMapper;
 
     private final HttpClient httpClient;
 
@@ -47,6 +54,8 @@ public class DocumentIndexTask {
             CourseMapper courseMapper,
             CourseIndexLockService indexLockService,
             CourseIndexLease courseIndexLease,
+            CourseEmbeddingProfileService profileService,
+            ObjectMapper objectMapper,
             @Value("${ai.service.url}") String serviceUrl,
             @Value("${ai.service.internal-key}") String internalKey) {
 
@@ -54,6 +63,8 @@ public class DocumentIndexTask {
         this.courseMapper = courseMapper;
         this.indexLockService = indexLockService;
         this.courseIndexLease = courseIndexLease;
+        this.profileService = profileService;
+        this.objectMapper = objectMapper;
 
         this.serviceUrl = serviceUrl;
         this.internalKey = internalKey;
@@ -189,19 +200,36 @@ public class DocumentIndexTask {
                 );
             }
 
-            String body = """
-                    {
-                      "course_id": %d,
-                      "document_id": %d,
-                      "storage_name": "%s",
-                      "embedding_version": %d
-                    }
-                    """.formatted(
-                    doc.getCourseId(),
-                    doc.getId(),
-                    doc.getStorageName(),
-                    embeddingVersion
-            );
+            CourseEmbeddingProfile profile;
+
+            if (embeddingVersion == 1) {
+                profile = profileService.ensureInitial(
+                        course.getUserId(),
+                        courseId
+                );
+            } else {
+                profile = profileService.require(
+                        courseId,
+                        embeddingVersion
+                );
+            }
+
+            String embeddingApiKey =
+                    profileService.decryptKey(profile);
+
+            Map<String, Object> payload =
+                    new LinkedHashMap<>();
+
+            payload.put("course_id", doc.getCourseId());
+            payload.put("document_id", doc.getId());
+            payload.put("storage_name", doc.getStorageName());
+            payload.put("embedding_version", embeddingVersion);
+
+            payload.put("embedding_model", profile.getModel());
+            payload.put("embedding_base_url", profile.getBaseUrl());
+            payload.put("embedding_api_key", embeddingApiKey);
+
+            String body = objectMapper.writeValueAsString(payload);
 
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(

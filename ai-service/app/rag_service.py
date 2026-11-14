@@ -2,7 +2,7 @@ import json
 import logging
 
 from .chat_service import chat_stream
-from .vector_store import search_course
+from .vector_store import search_course, search_course_by_collection
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +43,7 @@ def rag_stream(
     question: str,
     history: list[dict],
     embedding_version: int = 1,
+    collection_name_value: str | None = None,
     embedding_model: str | None = None,
     embedding_api_key: str | None = None,
     embedding_base_url: str | None = None,
@@ -61,15 +62,26 @@ def rag_stream(
     都由 Java 通过可信的内部请求传入，不能直接信任前端参数。
     """
     # 1. 检索课程知识库，只取当前课程的资料
-    sources = search_course(
-        course_id,
-        question,
-        top_k=RAG_TOP_K,
-        version=embedding_version,
-        model=embedding_model,
-        api_key=embedding_api_key,
-        base_url=embedding_base_url,
-    )
+    if collection_name_value:
+        sources = search_course_by_collection(
+            collection_name_value=collection_name_value,
+            query=question,
+            top_k=RAG_TOP_K,
+            model=embedding_model,
+            api_key=embedding_api_key,
+            base_url=embedding_base_url,
+        )
+    else:
+        # 仅用于尚未完成历史 Profile 初始化的旧版本兼容。
+        sources = search_course(
+            course_id,
+            question,
+            top_k=RAG_TOP_K,
+            version=embedding_version,
+            model=embedding_model,
+            api_key=embedding_api_key,
+            base_url=embedding_base_url,
+        )
 
     # 2. 返回命中的资料来源
     yield sse_event("sources", {

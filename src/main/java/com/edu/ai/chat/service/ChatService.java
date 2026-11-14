@@ -229,11 +229,6 @@ ChatService {
                 userId
         );
 
-        // 在请求开始时固定本次使用的模型配置。
-        // 不将模型配置放入全局变量。
-        UserModelResolver.UserModelConfig modelConfig =
-                userModelResolver.resolve(userId);
-
         Course course = courseMapper.selectById(
                 request.getCourseId()
         );
@@ -246,6 +241,15 @@ ChatService {
                 course.getEmbeddingVersion() == null
                         ? 1
                         : course.getEmbeddingVersion();
+
+        // 对话模型用用户当前配置；
+        // Embedding 模型用课程活动索引版本对应的固定配置。
+        UserModelResolver.UserModelConfig modelConfig =
+                userModelResolver.resolveForCourse(
+                        userId,
+                        request.getCourseId(),
+                        embeddingVersion
+                );
 
         ChatSession session =
                 resolveSession(request, userId);

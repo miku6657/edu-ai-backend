@@ -41,6 +41,11 @@ public class CourseEmbeddingMigration {
     private String targetConfigFingerprint;
 
     /**
+     * Python 实际构建的临时 Collection 名称。
+     */
+    private String targetCollectionName;
+
+    /**
      * PENDING
      * RUNNING
      * SUCCEEDED
