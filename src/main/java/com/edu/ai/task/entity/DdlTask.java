@@ -14,8 +14,8 @@ import java.time.LocalTime;
 @TableName("ddl_task")
 public class DdlTask {
 
-    @TableId(type = IdType.AUTO)
-    private Long id;
+    @TableId(value = "task_id", type = IdType.AUTO)
+    private Long taskId;
 
     // 所属用户
     private Long userId;

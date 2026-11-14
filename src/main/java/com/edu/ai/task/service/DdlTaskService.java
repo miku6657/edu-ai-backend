@@ -320,7 +320,7 @@ public class DdlTaskService {
 
         DdlTask task = ddlTaskMapper.selectOne(
                 new LambdaQueryWrapper<DdlTask>()
-                        .eq(DdlTask::getId, taskId)
+                        .eq(DdlTask::getTaskId, taskId)
                         .eq(DdlTask::getUserId, userId)
                         .last("LIMIT 1")
         );

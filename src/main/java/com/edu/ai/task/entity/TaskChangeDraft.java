@@ -3,6 +3,7 @@ package com.edu.ai.task.entity;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+
 import lombok.Data;
 
 import java.time.LocalDate;
@@ -10,15 +11,15 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 
 @Data
-@TableName("task_change_draft")
+@TableName("ddl_task_change_draft")
 public class TaskChangeDraft {
 
     @TableId(type = IdType.AUTO)
     private Long id;
 
-    private Long userId;
-
     private Long targetTaskId;
+
+    private Long userId;
 
     private String newTaskTitle;
 
@@ -44,10 +45,19 @@ public class TaskChangeDraft {
 
     private String userTimezone;
 
-    // PENDING、ACCEPTED、REJECTED、EXPIRED
-    private String status;
-
     private LocalDateTime expiresAt;
 
-    private LocalDateTime createdAt;
+    private String decision;
+
+    private String decisionRequestId;
+
+    private LocalDateTime decidedAt;
+
+    private Long resultTaskId;
+
+    private String status;
+
+    private LocalDateTime createTime;
+
+    private LocalDateTime updateTime;
 }

@@ -50,7 +50,7 @@ public class DdlTaskVO {
 
         DdlTaskVO vo = new DdlTaskVO();
 
-        vo.setId(task.getId());
+        vo.setId(task.getTaskId());
         vo.setDisplayCode(task.getDisplayCode());
         vo.setCourseId(task.getCourseId());
         vo.setCourseName(task.getCourseName());
