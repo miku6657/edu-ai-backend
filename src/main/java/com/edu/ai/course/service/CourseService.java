@@ -7,32 +7,24 @@ import java.util.List;
 
 public interface CourseService {
 
-    // 负责人创建课程
-    Course createCourse(CourseDTO dto, Long ownerId);
+    Course createCourse(CourseDTO dto, Long userId);
 
-    // 负责人修改自己的课程
-    void updateCourse(
-            Long courseId, CourseDTO dto, Long ownerId);
+    void updateCourse(Long courseId, CourseDTO dto, Long userId);
 
-    // 停用课程
-    void disableCourse(Long courseId, Long ownerId);
+    void disableCourse(Long courseId, Long userId);
 
-    // 查询当前负责人创建的课程
-    List<Course> getOwnerCourses(Long ownerId);
+    // 当前用户创建或加入的课程
+    List<Course> getUserCourses(Long userId);
 
-    // 查询当前学生加入的课程
-    List<Course> getStudentCourses(Long studentId);
+    // 当前用户可以加入的课程
+    List<Course> getAvailableCourses(Long userId);
 
-    // 查询所有可加入课程
-    List<Course> getAvailableCourses();
+    // 课程详情
+    Course getCourseDetail(Long courseId, Long userId);
 
-    // 查看课程详情
-    Course getCourseDetail(
-            Long courseId, Long userId, String role);
+    // 加入课程
+    void joinCourse(Long courseId, Long userId);
 
-    // 学生加入课程
-    void joinCourse(Long courseId, Long studentId);
-
-    // 学生退出课程
-    void leaveCourse(Long courseId, Long studentId);
+    // 退出课程
+    void leaveCourse(Long courseId, Long userId);
 }

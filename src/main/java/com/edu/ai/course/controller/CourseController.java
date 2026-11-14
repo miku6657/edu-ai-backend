@@ -14,6 +14,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/courses")
+@PreAuthorize("isAuthenticated()")
 public class CourseController {
 
     private final CourseService courseService;
@@ -22,23 +23,21 @@ public class CourseController {
         this.courseService = courseService;
     }
 
-    // 负责人创建课程
+    // 创建课程：所有登录用户
     @PostMapping
-    @PreAuthorize("hasRole('OWNER')")
     public Result<Course> create(
             @RequestBody CourseDTO dto,
             Authentication authentication) {
 
-        Long ownerId = getCurrentUserId(authentication);
+        Long userId = getCurrentUserId(authentication);
 
         return Result.success(
-                courseService.createCourse(dto, ownerId)
+                courseService.createCourse(dto, userId)
         );
     }
 
-    // 负责人修改课程
+    // 修改自己创建的课程
     @PutMapping("/{id}")
-    @PreAuthorize("hasRole('OWNER')")
     public Result<String> update(
             @PathVariable Long id,
             @RequestBody CourseDTO dto,
@@ -51,9 +50,8 @@ public class CourseController {
         return Result.success("课程修改成功");
     }
 
-    // 负责人停用课程
+    // 停用自己创建的课程
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasRole('OWNER')")
     public Result<String> disable(
             @PathVariable Long id,
             Authentication authentication) {
@@ -65,55 +63,45 @@ public class CourseController {
         return Result.success("课程已停用");
     }
 
-    // 查询我的课程
+    // 查询当前用户创建或加入的课程
     @GetMapping("/mine")
-    @PreAuthorize("hasAnyRole('OWNER', 'STUDENT')")
     public Result<List<Course>> myCourses(
             Authentication authentication) {
 
         Long userId = getCurrentUserId(authentication);
 
-        if (hasRole(authentication, "OWNER")) {
-            return Result.success(
-                    courseService.getOwnerCourses(userId)
-            );
-        }
-
         return Result.success(
-                courseService.getStudentCourses(userId)
+                courseService.getUserCourses(userId)
         );
     }
 
-    // 学生查询可加入的课程
+    // 查询当前用户可以加入的课程
     @GetMapping("/available")
-    @PreAuthorize("hasRole('STUDENT')")
-    public Result<List<Course>> available() {
+    public Result<List<Course>> available(
+            Authentication authentication) {
+
+        Long userId = getCurrentUserId(authentication);
 
         return Result.success(
-                courseService.getAvailableCourses()
+                courseService.getAvailableCourses(userId)
         );
     }
 
     // 查看课程详情
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyRole('OWNER', 'STUDENT')")
     public Result<Course> detail(
             @PathVariable Long id,
             Authentication authentication) {
 
-        Long userId = getCurrentUserId(authentication);
-
-        String role = hasRole(authentication, "OWNER")
-                ? "OWNER" : "STUDENT";
-
         return Result.success(
-                courseService.getCourseDetail(id, userId, role)
+                courseService.getCourseDetail(
+                        id, getCurrentUserId(authentication)
+                )
         );
     }
 
-    // 学生加入课程
+    // 加入课程
     @PostMapping("/{id}/join")
-    @PreAuthorize("hasRole('STUDENT')")
     public Result<String> join(
             @PathVariable Long id,
             Authentication authentication) {
@@ -125,9 +113,8 @@ public class CourseController {
         return Result.success("加入课程成功");
     }
 
-    // 学生退出课程
+    // 退出课程
     @DeleteMapping("/{id}/join")
-    @PreAuthorize("hasRole('STUDENT')")
     public Result<String> leave(
             @PathVariable Long id,
             Authentication authentication) {
@@ -139,9 +126,8 @@ public class CourseController {
         return Result.success("退出课程成功");
     }
 
-    // 从已认证的 JWT 身份中获取用户 ID
-    private Long getCurrentUserId(
-            Authentication authentication) {
+    // 从 JWT 认证信息中获取当前用户 ID
+    private Long getCurrentUserId(Authentication authentication) {
 
         if (authentication == null
                 || !(authentication.getPrincipal() instanceof Long)) {
@@ -149,15 +135,5 @@ public class CourseController {
         }
 
         return (Long) authentication.getPrincipal();
-    }
-
-    // 检查当前用户角色
-    private boolean hasRole(
-            Authentication authentication, String role) {
-
-        return authentication.getAuthorities().stream()
-                .anyMatch(authority ->
-                        authority.getAuthority()
-                                .equals("ROLE_" + role));
     }
 }

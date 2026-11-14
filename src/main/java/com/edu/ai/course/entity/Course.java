@@ -21,7 +21,7 @@ public class Course {
     // 课程描述
     private String description;
 
-    // 课程负责人 ID
+    // 课程创建者 ID
     private Long ownerId;
 
     // 课程状态：1 正常，0 停用
