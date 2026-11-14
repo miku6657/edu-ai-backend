@@ -29,15 +29,18 @@ public class TaskChangeDraftService {
     private final DdlTaskMapper taskMapper;
     private final TaskChangeDraftMapper draftMapper;
     private final DdlDisplayCodeGenerator displayCodeGenerator;
+    private final DdlTaskStatusResolver statusResolver;
 
     public TaskChangeDraftService(
             DdlTaskMapper taskMapper,
             TaskChangeDraftMapper draftMapper,
-            DdlDisplayCodeGenerator displayCodeGenerator) {
+            DdlDisplayCodeGenerator displayCodeGenerator,
+            DdlTaskStatusResolver statusResolver) {
 
         this.taskMapper = taskMapper;
         this.draftMapper = draftMapper;
         this.displayCodeGenerator = displayCodeGenerator;
+        this.statusResolver = statusResolver;
     }
 
     /**
@@ -100,6 +103,20 @@ public class TaskChangeDraftService {
 
         draft.setNewTaskTitle(
                 request.getNewTaskTitle().trim()
+        );
+
+        draft.setNewDescription(
+                request.getNewDescription()
+        );
+
+        draft.setNewRelativeTime(
+                Boolean.TRUE.equals(
+                        request.getNewRelativeTime()
+                )
+        );
+
+        draft.setNewConfidence(
+                request.getNewConfidence()
         );
 
         draft.setNewTimePrecision(
@@ -315,9 +332,7 @@ public class TaskChangeDraftService {
 
             case "CONFIRM_UPDATE" -> {
 
-                applyDraft(original, draft);
-
-                original.setUpdatedAt(now);
+                applyDraft(original, draft, now);
 
                 taskMapper.updateById(original);
 
@@ -380,9 +395,25 @@ public class TaskChangeDraftService {
      */
     private void applyDraft(
             DdlTask task,
-            TaskChangeDraft draft) {
+            TaskChangeDraft draft,
+            LocalDateTime now) {
+
+        boolean deadlineChanged =
+                !java.util.Objects.equals(
+                        task.getDueDate(),
+                        draft.getNewDueDate()
+                )
+                || !java.util.Objects.equals(
+                        task.getDueTime(),
+                        draft.getNewDueTime()
+                )
+                || !java.util.Objects.equals(
+                        task.getDueAt(),
+                        draft.getNewDueAt()
+                );
 
         task.setTaskTitle(draft.getNewTaskTitle());
+        task.setDescription(draft.getNewDescription());
 
         task.setTimePrecision(
                 draft.getNewTimePrecision()
@@ -395,6 +426,12 @@ public class TaskChangeDraftService {
         task.setTimeInferred(
                 Boolean.TRUE.equals(draft.getNewTimeInferred())
         );
+
+        task.setRelativeTime(
+                Boolean.TRUE.equals(draft.getNewRelativeTime())
+        );
+
+        task.setConfidence(draft.getNewConfidence());
 
         task.setTimeAmbiguityReason(
                 draft.getNewTimeAmbiguityReason()
@@ -417,7 +454,26 @@ public class TaskChangeDraftService {
             task.setUserTimezone(draft.getUserTimezone());
         }
 
-        task.setStatus(resolveStatus(draft));
+        task.setStatus(
+                statusResolver.resolve(
+                        draft.getNewTimePrecision(),
+                        draft.getNewDueAt(),
+                        now
+                )
+        );
+
+        // 截止时间改变后，旧提醒状态不再有效
+        if (deadlineChanged) {
+
+            task.setFollowUpAt(null);
+            task.setFollowUpCount(0);
+
+            task.setRemindedT24h(false);
+            task.setRemindedT6h(false);
+            task.setRemindedOverdue(false);
+        }
+
+        task.setUpdatedAt(now);
     }
 
     /**
@@ -436,6 +492,7 @@ public class TaskChangeDraftService {
         task.setCourseName(original.getCourseName());
 
         task.setTaskTitle(draft.getNewTaskTitle());
+        task.setDescription(draft.getNewDescription());
 
         task.setTimePrecision(
                 draft.getNewTimePrecision()
@@ -448,6 +505,8 @@ public class TaskChangeDraftService {
         task.setTimeInferred(
                 Boolean.TRUE.equals(draft.getNewTimeInferred())
         );
+
+        task.setRelativeTime(draft.getNewRelativeTime());
 
         task.setTimeAmbiguityReason(
                 draft.getNewTimeAmbiguityReason()
@@ -470,12 +529,14 @@ public class TaskChangeDraftService {
                         : original.getUserTimezone()
         );
 
-        task.setConfidence(original.getConfidence());
+        task.setConfidence(draft.getNewConfidence());
 
-        task.setStatus(resolveStatus(draft));
-
-        task.setRelativeTime(
-                Boolean.TRUE.equals(draft.getNewTimeInferred())
+        task.setStatus(
+                statusResolver.resolve(
+                        draft.getNewTimePrecision(),
+                        draft.getNewDueAt(),
+                        now
+                )
         );
 
         task.setFollowUpCount(0);
@@ -484,26 +545,10 @@ public class TaskChangeDraftService {
         task.setRemindedT6h(false);
         task.setRemindedOverdue(false);
 
-        task.setSourcePlatform(original.getSourcePlatform());
+        task.setSourcePlatform("AI");
 
         task.setCreatedAt(now);
         task.setUpdatedAt(now);
-    }
-
-    /**
-     * 根据截止时间确定任务状态。
-     */
-    private String resolveStatus(TaskChangeDraft draft) {
-
-        if (draft.getNewDueAt() == null) {
-            return "PENDING_TIME";
-        }
-
-        if (draft.getNewDueAt().isBefore(LocalDateTime.now())) {
-            return "OVERDUE";
-        }
-
-        return "ACTIVE";
     }
 
     /**

@@ -33,6 +33,7 @@ public class DdlTaskExtractService {
     private final ObjectMapper objectMapper;
     private final TransactionTemplate transactionTemplate;
     private final DdlDisplayCodeGenerator displayCodeGenerator;
+    private final DdlTaskStatusResolver statusResolver;
 
     public DdlTaskExtractService(
             DdlTaskExtractGateway extractGateway,
@@ -44,7 +45,8 @@ public class DdlTaskExtractService {
             DdlRequestHashService hashService,
             ObjectMapper objectMapper,
             TransactionTemplate transactionTemplate,
-            DdlDisplayCodeGenerator displayCodeGenerator) {
+            DdlDisplayCodeGenerator displayCodeGenerator,
+            DdlTaskStatusResolver statusResolver) {
 
         this.extractGateway = extractGateway;
         this.duplicateService = duplicateService;
@@ -56,6 +58,7 @@ public class DdlTaskExtractService {
         this.objectMapper = objectMapper;
         this.transactionTemplate = transactionTemplate;
         this.displayCodeGenerator = displayCodeGenerator;
+        this.statusResolver = statusResolver;
     }
 
     /**
@@ -366,7 +369,7 @@ public class DdlTaskExtractService {
         );
 
         task.setRelativeTime(
-                Boolean.TRUE.equals(data.getTimeInferred())
+                Boolean.TRUE.equals(data.getRelativeTime())
         );
 
         task.setTimeAmbiguityReason(
@@ -387,25 +390,13 @@ public class DdlTaskExtractService {
                         : BigDecimal.valueOf(data.getConfidence())
         );
 
-        String precision = data.getTimePrecision();
-
-        if ("INVALID_OR_PAST".equals(precision)
-                || "VAGUE_OR_MISSING".equals(precision)) {
-
-            task.setStatus("PENDING_CONFIRM");
-
-        } else if (data.getDueAt() == null) {
-
-            task.setStatus("PENDING_TIME");
-
-        } else if (data.getDueAt().isBefore(now)) {
-
-            task.setStatus("PENDING_CONFIRM");
-
-        } else {
-
-            task.setStatus("ACTIVE");
-        }
+        task.setStatus(
+                statusResolver.resolve(
+                        data.getTimePrecision(),
+                        data.getDueAt(),
+                        now
+                )
+        );
 
         task.setFollowUpCount(0);
 
@@ -433,6 +424,7 @@ public class DdlTaskExtractService {
                 new TaskChangeDraftCreateRequest();
 
         draft.setNewTaskTitle(data.getTaskTitle());
+        draft.setNewDescription(data.getDescription());
         draft.setNewTimePrecision(data.getTimePrecision());
 
         draft.setNewDueDate(data.getDueDate());
@@ -440,6 +432,16 @@ public class DdlTaskExtractService {
         draft.setNewDueAt(data.getDueAt());
 
         draft.setNewTimeInferred(data.getTimeInferred());
+
+        draft.setNewRelativeTime(
+                data.getRelativeTime()
+        );
+
+        draft.setNewConfidence(
+                data.getConfidence() == null
+                        ? null
+                        : BigDecimal.valueOf(data.getConfidence())
+        );
 
         draft.setNewTimeAmbiguityReason(
                 data.getTimeAmbiguityReason()
@@ -489,56 +491,82 @@ public class DdlTaskExtractService {
             DdlTaskExtractedData data,
             LocalDateTime now) {
 
+        // AI 已经提供完整截止时间
         if (data.getDueAt() != null) {
 
             LocalDateTime dueAt = data.getDueAt();
 
             if (data.getDueDate() != null
-                    && !data.getDueDate().equals(dueAt.toLocalDate())) {
-                throw new BusinessException(422, "截止日期不一致");
+                    && !data.getDueDate().equals(
+                            dueAt.toLocalDate())) {
+                throw new BusinessException(
+                        422, "截止日期不一致"
+                );
             }
 
             if (data.getDueTime() != null
-                    && !data.getDueTime().equals(dueAt.toLocalTime())) {
-                throw new BusinessException(422, "截止时间不一致");
+                    && !data.getDueTime().equals(
+                            dueAt.toLocalTime())) {
+                throw new BusinessException(
+                        422, "截止时间不一致"
+                );
             }
 
             data.setDueDate(dueAt.toLocalDate());
             data.setDueTime(dueAt.toLocalTime());
 
             data.setTimePrecision(
-                    dueAt.isBefore(now)
+                    !dueAt.isAfter(now)
                             ? "INVALID_OR_PAST"
                             : "EXACT_DATETIME"
             );
 
+            data.setTimeInferred(false);
             return;
         }
 
+        // 日期和时间都有
         if (data.getDueDate() != null
                 && data.getDueTime() != null) {
 
-            data.setDueAt(
-                    LocalDateTime.of(
-                            data.getDueDate(),
-                            data.getDueTime()
-                    )
+            LocalDateTime dueAt = LocalDateTime.of(
+                    data.getDueDate(),
+                    data.getDueTime()
             );
 
+            data.setDueAt(dueAt);
+
             data.setTimePrecision(
-                    data.getDueAt().isBefore(now)
+                    !dueAt.isAfter(now)
                             ? "INVALID_OR_PAST"
                             : "EXACT_DATETIME"
             );
 
-        } else if (data.getDueDate() != null) {
+            data.setTimeInferred(false);
+            return;
+        }
+
+        // 只有日期
+        if (data.getDueDate() != null) {
+
+            data.setDueTime(null);
+
+            data.setDueAt(
+                    data.getDueDate().atTime(23, 59, 59)
+            );
 
             data.setTimePrecision("DATE_ONLY");
-
-        } else {
-
-            data.setTimePrecision("VAGUE_OR_MISSING");
+            data.setTimeInferred(true);
+            return;
         }
+
+        // 没有可用截止日期
+        data.setDueDate(null);
+        data.setDueTime(null);
+        data.setDueAt(null);
+
+        data.setTimePrecision("VAGUE_OR_MISSING");
+        data.setTimeInferred(false);
     }
 
     /**

@@ -17,6 +17,8 @@ public class TaskChangeDraftCreateRequest {
     @Size(max = 200)
     private String newTaskTitle;
 
+    private String newDescription;
+
     @NotBlank(message = "时间精度不能为空")
     private String newTimePrecision;
 
@@ -27,6 +29,10 @@ public class TaskChangeDraftCreateRequest {
     private LocalDateTime newDueAt;
 
     private Boolean newTimeInferred;
+
+    private Boolean newRelativeTime;
+
+    private java.math.BigDecimal newConfidence;
 
     private String newTimeAmbiguityReason;
 

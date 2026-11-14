@@ -17,6 +17,9 @@ public class TaskChangeDraftVO {
     @JsonProperty("new_task_title")
     private String newTaskTitle;
 
+    @JsonProperty("new_description")
+    private String newDescription;
+
     @JsonProperty("new_time_precision")
     private String newTimePrecision;
 
@@ -31,6 +34,12 @@ public class TaskChangeDraftVO {
 
     @JsonProperty("new_time_inferred")
     private Boolean newTimeInferred;
+
+    @JsonProperty("new_relative_time")
+    private Boolean newRelativeTime;
+
+    @JsonProperty("new_confidence")
+    private java.math.BigDecimal newConfidence;
 
     @JsonProperty("new_time_ambiguity_reason")
     private String newTimeAmbiguityReason;
@@ -60,6 +69,7 @@ public class TaskChangeDraftVO {
 
         vo.setTargetTaskId(draft.getTargetTaskId());
         vo.setNewTaskTitle(draft.getNewTaskTitle());
+        vo.setNewDescription(draft.getNewDescription());
         vo.setNewTimePrecision(
                 draft.getNewTimePrecision()
         );
@@ -71,6 +81,9 @@ public class TaskChangeDraftVO {
         vo.setNewTimeInferred(
                 draft.getNewTimeInferred()
         );
+
+        vo.setNewRelativeTime(draft.getNewRelativeTime());
+        vo.setNewConfidence(draft.getNewConfidence());
 
         vo.setNewTimeAmbiguityReason(
                 draft.getNewTimeAmbiguityReason()

@@ -1,5 +1,6 @@
 package com.edu.ai.task.dto;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import lombok.Data;
@@ -18,6 +19,7 @@ public class DdlTaskExtractedData {
     private String description;
 
     @JsonProperty("time_precision")
+    @JsonAlias("timePrecision")
     private String timePrecision;
 
     private LocalDate dueDate;
@@ -27,7 +29,13 @@ public class DdlTaskExtractedData {
     private LocalDateTime dueAt;
 
     @JsonProperty("time_inferred")
+    @JsonAlias("timeInferred")
     private Boolean timeInferred;
+
+    // 是否使用相对时间表达
+    @JsonProperty("is_relative_time")
+    @JsonAlias("isRelativeTime")
+    private Boolean relativeTime;
 
     @JsonProperty("time_ambiguity_reason")
     private String timeAmbiguityReason;

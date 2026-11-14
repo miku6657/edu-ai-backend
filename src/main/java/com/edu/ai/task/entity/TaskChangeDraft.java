@@ -23,6 +23,8 @@ public class TaskChangeDraft {
 
     private String newTaskTitle;
 
+    private String newDescription;
+
     private String newTimePrecision;
 
     private LocalDate newDueDate;
@@ -32,6 +34,10 @@ public class TaskChangeDraft {
     private LocalDateTime newDueAt;
 
     private Boolean newTimeInferred;
+
+    private Boolean newRelativeTime;
+
+    private java.math.BigDecimal newConfidence;
 
     private String newTimeAmbiguityReason;
 

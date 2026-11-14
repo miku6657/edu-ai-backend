@@ -27,6 +27,9 @@ public class DdlTaskVO {
     @JsonProperty("task_title")
     private String taskTitle;
 
+    @JsonProperty("description")
+    private String description;
+
     @JsonProperty("deliverable_format")
     private String deliverableFormat;
 
@@ -103,6 +106,7 @@ public class DdlTaskVO {
         vo.setCourseId(task.getCourseId());
         vo.setCourseName(task.getCourseName());
         vo.setTaskTitle(task.getTaskTitle());
+        vo.setDescription(task.getDescription());
 
         vo.setDeliverableFormat(task.getDeliverableFormat());
         vo.setSubmissionChannel(task.getSubmissionChannel());

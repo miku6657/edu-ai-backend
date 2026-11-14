@@ -24,15 +24,18 @@ public class DdlTaskService {
     private final DdlTaskMapper taskMapper;
     private final TaskChangeDraftService draftService;
     private final DdlDisplayCodeGenerator displayCodeGenerator;
+    private final DdlTaskStatusResolver statusResolver;
 
     public DdlTaskService(
             DdlTaskMapper taskMapper,
             TaskChangeDraftService draftService,
-            DdlDisplayCodeGenerator displayCodeGenerator) {
+            DdlDisplayCodeGenerator displayCodeGenerator,
+            DdlTaskStatusResolver statusResolver) {
 
         this.taskMapper = taskMapper;
         this.draftService = draftService;
         this.displayCodeGenerator = displayCodeGenerator;
+        this.statusResolver = statusResolver;
     }
 
     /**
@@ -162,6 +165,7 @@ public class DdlTaskService {
 
         LocalDate oldDate = task.getDueDate();
         LocalTime oldTime = task.getDueTime();
+        String oldPrecision = task.getTimePrecision();
 
         task.setCourseId(request.getCourseId());
         task.setCourseName(request.getCourseName().trim());
@@ -183,16 +187,23 @@ public class DdlTaskService {
                 !java.util.Objects.equals(
                         oldDate, request.getDueDate())
                 || !java.util.Objects.equals(
-                        oldTime, request.getDueTime());
+                        oldTime, request.getDueTime())
+                || !java.util.Objects.equals(
+                        oldPrecision, request.getTimePrecision());
 
         normalizeTime(task);
 
-        if (Boolean.TRUE.equals(request.getReconfirmTime())) {
-            task.setStatus(determineInitialStatus(
-                    task, LocalDateTime.now()));
-        } else if (timeChanged) {
-            task.setStatus(determineInitialStatus(
-                    task, LocalDateTime.now()));
+        if (Boolean.TRUE.equals(request.getReconfirmTime())
+                || timeChanged) {
+
+            task.setRelativeTime(false);
+
+            task.setStatus(
+                    determineInitialStatus(
+                            task,
+                            LocalDateTime.now()
+                    )
+            );
         }
 
         task.setUpdatedAt(LocalDateTime.now());
@@ -338,25 +349,63 @@ public class DdlTaskService {
     }
 
     /**
-     * 根据日期和时间生成 dueAt。
+     * 根据时间精度规范化日期与时刻。
      */
     private void normalizeTime(DdlTask task) {
 
-        if (task.getDueDate() == null) {
+        String precision = task.getTimePrecision();
+
+        // 没有明确时间
+        if ("VAGUE_OR_MISSING".equals(precision)) {
+            task.setDueDate(null);
+            task.setDueTime(null);
             task.setDueAt(null);
+            task.setTimeInferred(false);
             return;
         }
 
-        if (task.getDueTime() == null) {
-            task.setDueAt(null);
+        // 只有日期，默认当天 23:59:59
+        if ("DATE_ONLY".equals(precision)) {
+
+            if (task.getDueDate() == null) {
+                throw new BusinessException(
+                        400, "仅日期类型必须填写截止日期"
+                );
+            }
+
+            task.setDueTime(null);
+
+            task.setDueAt(
+                    task.getDueDate().atTime(23, 59, 59)
+            );
+
+            task.setTimeInferred(true);
             return;
         }
 
-        task.setDueAt(
-                LocalDateTime.of(
-                        task.getDueDate(),
-                        task.getDueTime()
-                )
+        // 精确到时刻
+        if ("EXACT_DATETIME".equals(precision)) {
+
+            if (task.getDueDate() == null
+                    || task.getDueTime() == null) {
+                throw new BusinessException(
+                        400, "精确时间必须填写日期和时刻"
+                );
+            }
+
+            task.setDueAt(
+                    LocalDateTime.of(
+                            task.getDueDate(),
+                            task.getDueTime()
+                    )
+            );
+
+            task.setTimeInferred(false);
+            return;
+        }
+
+        throw new BusinessException(
+                400, "不支持的时间精度"
         );
     }
 
@@ -367,26 +416,11 @@ public class DdlTaskService {
             DdlTask task,
             LocalDateTime now) {
 
-        String precision = task.getTimePrecision();
-
-        if ("VAGUE_OR_MISSING".equals(precision)
-                || "PENDING_CONFIRM".equals(precision)) {
-            return "PENDING_CONFIRM";
-        }
-
-        if (task.getDueDate() == null) {
-            return "PENDING_TIME";
-        }
-
-        if (task.getDueAt() == null) {
-            return "PENDING_TIME";
-        }
-
-        if (task.getDueAt().isBefore(now)) {
-            return "PENDING_CONFIRM";
-        }
-
-        return "ACTIVE";
+        return statusResolver.resolve(
+                task.getTimePrecision(),
+                task.getDueAt(),
+                now
+        );
     }
 
     /**
@@ -482,6 +516,30 @@ public class DdlTaskService {
             throw new BusinessException(
                     400, "不支持的时间精度");
         }
+
+        String effectivePrecision =
+                precision == null
+                        ? "EXACT_DATETIME"
+                        : precision;
+
+        if ("EXACT_DATETIME".equals(effectivePrecision)
+                && (request.getDueDate() == null
+                || request.getDueTime() == null)) {
+
+            throw new BusinessException(
+                    400,
+                    "精确时间必须填写截止日期和时刻"
+            );
+        }
+
+        if ("DATE_ONLY".equals(effectivePrecision)
+                && request.getDueDate() == null) {
+
+            throw new BusinessException(
+                    400,
+                    "仅日期类型必须填写截止日期"
+            );
+        }
     }
 
     private void validateUpdateRequest(
@@ -510,6 +568,25 @@ public class DdlTaskService {
         ).contains(request.getTimePrecision())) {
             throw new BusinessException(
                     400, "不支持的时间精度");
+        }
+
+        if ("EXACT_DATETIME".equals(request.getTimePrecision())
+                && (request.getDueDate() == null
+                || request.getDueTime() == null)) {
+
+            throw new BusinessException(
+                    400,
+                    "精确时间必须填写截止日期和时刻"
+            );
+        }
+
+        if ("DATE_ONLY".equals(request.getTimePrecision())
+                && request.getDueDate() == null) {
+
+            throw new BusinessException(
+                    400,
+                    "仅日期类型必须填写截止日期"
+            );
         }
     }
 }
