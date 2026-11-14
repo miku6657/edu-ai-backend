@@ -275,6 +275,16 @@ public class TaskChangeDraftService {
             Long userId,
             DraftDecisionRequest request) {
 
+        // 1. 参数校验
+        if (targetTaskId == null || targetTaskId <= 0
+                || userId == null || userId <= 0) {
+
+            throw new BusinessException(
+                    400,
+                    "任务ID或用户ID不合法"
+            );
+        }
+
         if (request == null
                 || request.getDecision() == null
                 || request.getClientRequestId() == null
@@ -286,36 +296,20 @@ public class TaskChangeDraftService {
             );
         }
 
-        String decision = request.getDecision().name();
+        String clientRequestId =
+                request.getClientRequestId().trim();
 
-        // 幂等：同一请求重复提交时，直接返回之前的处理结果
-        TaskChangeDraft previous = draftMapper.selectOne(
-                new LambdaQueryWrapper<TaskChangeDraft>()
-                        .eq(TaskChangeDraft::getUserId, userId)
-                        .eq(
-                                TaskChangeDraft::getDecisionRequestId,
-                                request.getClientRequestId()
-                        )
-                        .ne(TaskChangeDraft::getStatus, "PENDING")
-                        .last("LIMIT 1")
-        );
-
-        if (previous != null) {
-
-            if (!targetTaskId.equals(previous.getTargetTaskId())
-                    || !decision.equals(previous.getDecision())) {
-
-                throw new BusinessException(
-                        409,
-                        "请求编号已被其他操作使用"
-                );
-            }
-
-            return taskMapper.selectById(
-                    previous.getResultTaskId()
+        if (clientRequestId.length() > 100) {
+            throw new BusinessException(
+                    400,
+                    "请求编号不能超过100个字符"
             );
         }
 
+        String decision = request.getDecision().name();
+
+        // 2. 先锁定原任务
+        // 相同任务的决策请求必须串行执行
         DdlTask original = taskMapper.selectOne(
                 new LambdaQueryWrapper<DdlTask>()
                         .eq(DdlTask::getId, targetTaskId)
@@ -330,13 +324,37 @@ public class TaskChangeDraftService {
             );
         }
 
+        // 3. 获取任务锁之后再次检查幂等记录
+        // 避免并发请求在第一次事务提交前查询不到结果
+        TaskChangeDraft previous = findPreviousDecision(
+                userId,
+                clientRequestId
+        );
+
+        if (previous != null) {
+            return returnPreviousResult(
+                    previous,
+                    targetTaskId,
+                    decision
+            );
+        }
+
+        // 4. 查询待确认草案
         TaskChangeDraft draft = draftMapper.selectOne(
                 new LambdaQueryWrapper<TaskChangeDraft>()
-                        .eq(TaskChangeDraft::getTargetTaskId,
-                                targetTaskId)
-                        .eq(TaskChangeDraft::getUserId, userId)
-                        .eq(TaskChangeDraft::getStatus, "PENDING")
-                        .last("LIMIT 1")
+                        .eq(
+                                TaskChangeDraft::getTargetTaskId,
+                                targetTaskId
+                        )
+                        .eq(
+                                TaskChangeDraft::getUserId,
+                                userId
+                        )
+                        .eq(
+                                TaskChangeDraft::getStatus,
+                                "PENDING"
+                        )
+                        .last("LIMIT 1 FOR UPDATE")
         );
 
         if (draft == null) {
@@ -348,14 +366,17 @@ public class TaskChangeDraftService {
 
         LocalDateTime now = LocalDateTime.now();
 
-        if (!draft.getExpiresAt().isAfter(now)) {
+        // 5. 检查草案是否过期
+        if (draft.getExpiresAt() == null
+                || !draft.getExpiresAt().isAfter(now)) {
+
             throw new BusinessException(
                     409,
                     "变更草案已过期，请重新处理"
             );
         }
 
-        // 原子抢占草案，防止并发重复处理
+        // 6. 原子抢占
         int claimed = draftMapper.update(
                 null,
                 new LambdaUpdateWrapper<TaskChangeDraft>()
@@ -383,36 +404,18 @@ public class TaskChangeDraftService {
 
         if (claimed != 1) {
 
-            // 再次检查是否是同一个请求已经处理成功
+            // 再检查一次，处理已经完成的重复请求
             TaskChangeDraft previousResult =
-                    draftMapper.selectOne(
-                            new LambdaQueryWrapper<TaskChangeDraft>()
-                                    .eq(
-                                            TaskChangeDraft::getUserId,
-                                            userId
-                                    )
-                                    .eq(
-                                            TaskChangeDraft::getDecisionRequestId,
-                                            request.getClientRequestId()
-                                    )
-                                    .last("LIMIT 1")
+                    findPreviousDecision(
+                            userId,
+                            clientRequestId
                     );
 
             if (previousResult != null) {
-
-                if (!targetTaskId.equals(
-                            previousResult.getTargetTaskId())
-                        || !decision.equals(
-                            previousResult.getDecision())) {
-
-                    throw new BusinessException(
-                            409,
-                            "请求编号已被其他操作使用"
-                    );
-                }
-
-                return taskMapper.selectById(
-                        previousResult.getResultTaskId()
+                return returnPreviousResult(
+                        previousResult,
+                        targetTaskId,
+                        decision
                 );
             }
 
@@ -422,6 +425,7 @@ public class TaskChangeDraftService {
             );
         }
 
+        // 7. 执行具体决策
         DdlTask result;
 
         switch (decision) {
@@ -473,15 +477,71 @@ public class TaskChangeDraftService {
             );
         }
 
+        // 8. 保存最终决策信息
         draft.setResultTaskId(result.getId());
         draft.setDecision(decision);
-        draft.setDecisionRequestId(
-                request.getClientRequestId()
-        );
+        draft.setDecisionRequestId(clientRequestId);
         draft.setDecidedAt(now);
         draft.setUpdateTime(now);
 
         draftMapper.updateById(draft);
+
+        return result;
+    }
+
+    /**
+     * 根据用户和请求编号查询已经完成的决策。
+     */
+    private TaskChangeDraft findPreviousDecision(
+            Long userId,
+            String clientRequestId) {
+
+        return draftMapper.selectOne(
+                new LambdaQueryWrapper<TaskChangeDraft>()
+                        .eq(TaskChangeDraft::getUserId, userId)
+                        .eq(
+                                TaskChangeDraft::getDecisionRequestId,
+                                clientRequestId
+                        )
+                        .last("LIMIT 1")
+        );
+    }
+
+    /**
+     * 返回之前的决策结果。
+     */
+    private DdlTask returnPreviousResult(
+            TaskChangeDraft previous,
+            Long targetTaskId,
+            String decision) {
+
+        // 同一个请求编号不能用于不同任务或不同决策
+        if (!targetTaskId.equals(previous.getTargetTaskId())
+                || !decision.equals(previous.getDecision())) {
+
+            throw new BusinessException(
+                    409,
+                    "请求编号已被其他操作使用"
+            );
+        }
+
+        if (previous.getResultTaskId() == null) {
+            throw new BusinessException(
+                    409,
+                    "原决策结果不存在，请联系管理员"
+            );
+        }
+
+        DdlTask result = taskMapper.selectById(
+                previous.getResultTaskId()
+        );
+
+        if (result == null) {
+            throw new BusinessException(
+                    409,
+                    "原决策对应的任务已不存在"
+            );
+        }
 
         return result;
     }

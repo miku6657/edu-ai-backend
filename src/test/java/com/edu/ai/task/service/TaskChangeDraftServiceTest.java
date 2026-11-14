@@ -219,6 +219,7 @@ class TaskChangeDraftServiceTest {
         previous.setStatus("CONFIRMED");
 
         when(draftMapper.selectOne(any())).thenReturn(previous);
+        when(taskMapper.selectOne(any())).thenReturn(original);
         when(taskMapper.selectById(taskId)).thenReturn(original);
 
         DdlTask result = service.decide(

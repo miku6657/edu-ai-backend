@@ -2,6 +2,8 @@ package com.edu.ai.task.dto;
 
 import com.edu.ai.task.entity.DdlTask;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import tools.jackson.databind.annotation.JsonSerialize;
+import tools.jackson.databind.ser.std.ToStringSerializer;
 import lombok.Data;
 
 import java.math.BigDecimal;
@@ -13,12 +15,14 @@ import java.time.LocalTime;
 public class DdlTaskVO {
 
     @JsonProperty("task_id")
+    @JsonSerialize(using = ToStringSerializer.class)
     private Long taskId;
 
     @JsonProperty("display_code")
     private String displayCode;
 
     @JsonProperty("course_id")
+    @JsonSerialize(using = ToStringSerializer.class)
     private Long courseId;
 
     @JsonProperty("course_name")

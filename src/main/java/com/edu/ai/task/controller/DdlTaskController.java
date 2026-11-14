@@ -25,7 +25,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
-@RequestMapping("/v1/ddl/tasks")
+@RequestMapping("/api/v1/ddl/tasks")
 public class DdlTaskController {
 
     private final DdlTaskService ddlTaskService;

@@ -2,6 +2,8 @@ package com.edu.ai.task.dto;
 
 import com.edu.ai.task.entity.TaskChangeDraft;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import tools.jackson.databind.annotation.JsonSerialize;
+import tools.jackson.databind.ser.std.ToStringSerializer;
 import lombok.Data;
 
 import java.time.LocalDate;
@@ -12,6 +14,7 @@ import java.time.LocalTime;
 public class TaskChangeDraftVO {
 
     @JsonProperty("target_task_id")
+    @JsonSerialize(using = ToStringSerializer.class)
     private Long targetTaskId;
 
     @JsonProperty("new_task_title")

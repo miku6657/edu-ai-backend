@@ -3,6 +3,8 @@ package com.edu.ai.common;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.springframework.dao.DuplicateKeyException;
+
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 
@@ -12,6 +14,7 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -36,6 +39,35 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(status)
                 .body(Result.error(code, e.getMessage()));
+    }
+
+    // 数据库唯一键冲突
+    @ExceptionHandler(DuplicateKeyException.class)
+    public ResponseEntity<Result<Object>> handleDuplicateKey(
+            DuplicateKeyException e) {
+
+        log.warn("数据库唯一键冲突: {}",
+                e.getMostSpecificCause().getMessage());
+
+        return ResponseEntity
+                .status(HttpStatus.CONFLICT)
+                .body(Result.error(
+                        409,
+                        "请求数据发生冲突，请检查后重试"
+                ));
+    }
+
+    // 资源不存在
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<Result<Object>> handleNoResourceFound(
+            NoResourceFoundException ex) {
+
+        return ResponseEntity
+                .status(HttpStatus.NOT_FOUND)
+                .body(Result.error(
+                        404,
+                        "请求的资源不存在"
+                ));
     }
 
     // 请求参数校验异常
