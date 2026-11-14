@@ -379,6 +379,19 @@ ChatService {
                     modelConfig.embeddingBaseUrl()
             );
 
+            if (modelConfig.collectionName() == null
+                    || modelConfig.collectionName().isBlank()) {
+
+                throw new IllegalStateException(
+                        "课程索引缺少活动Collection配置"
+                );
+            }
+
+            body.put(
+                    "collection_name",
+                    modelConfig.collectionName()
+            );
+
             ArrayNode messages = body.putArray("history");
 
             for (ChatMessage message : history) {

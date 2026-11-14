@@ -39,20 +39,17 @@ public class DocumentIndexTask {
 
     private final CourseDocumentMapper documentMapper;
     private final CourseMapper courseMapper;
-    private final CourseIndexLockService indexLockService;
     private final CourseIndexLease courseIndexLease;
     private final CourseEmbeddingProfileService profileService;
     private final ObjectMapper objectMapper;
 
     private final HttpClient httpClient;
-
     private final String serviceUrl;
     private final String internalKey;
 
     public DocumentIndexTask(
             CourseDocumentMapper documentMapper,
             CourseMapper courseMapper,
-            CourseIndexLockService indexLockService,
             CourseIndexLease courseIndexLease,
             CourseEmbeddingProfileService profileService,
             ObjectMapper objectMapper,
@@ -61,7 +58,6 @@ public class DocumentIndexTask {
 
         this.documentMapper = documentMapper;
         this.courseMapper = courseMapper;
-        this.indexLockService = indexLockService;
         this.courseIndexLease = courseIndexLease;
         this.profileService = profileService;
         this.objectMapper = objectMapper;
@@ -84,17 +80,12 @@ public class DocumentIndexTask {
         CourseDocument initial =
                 documentMapper.selectById(documentId);
 
-        if (initial == null) {
+        if (initial == null || initial.getCourseId() == null) {
             return;
         }
 
         Long courseId = initial.getCourseId();
 
-        if (courseId == null) {
-            return;
-        }
-
-        // 先获取课程级索引锁（自动续租）。
         CourseIndexLease.Handle lease =
                 courseIndexLease.tryOpen(
                         courseId,
@@ -113,7 +104,7 @@ public class DocumentIndexTask {
             processWithLock(
                     documentId,
                     courseId,
-                    lease.getToken()
+                    lease
             );
         }
     }
@@ -121,19 +112,19 @@ public class DocumentIndexTask {
     private void processWithLock(
             Long documentId,
             Long courseId,
-            String lockToken) {
+            CourseIndexLease.Handle lease) {
 
         String token = UUID.randomUUID().toString();
         LocalDateTime now = LocalDateTime.now();
 
-        // 锁获取后再检查课程状态。
+        lease.assertValid();
+
         Course course = courseMapper.selectById(courseId);
 
         if (course == null) {
             return;
         }
 
-        // 原子领取任务。
         int claimed = documentMapper.update(
                 null,
                 new LambdaUpdateWrapper<CourseDocument>()
@@ -177,28 +168,22 @@ public class DocumentIndexTask {
             return;
         }
 
-        CourseDocument doc =
-                documentMapper.selectById(documentId);
-
-        if (doc == null) {
-            return;
-        }
-
-        int embeddingVersion =
-                course.getEmbeddingVersion() == null
-                        ? 1
-                        : course.getEmbeddingVersion();
-
         try {
-            // 调用 Python 之前再次确认锁有效。
-            if (!indexLockService.isOwned(
-                    courseId,
-                    lockToken)) {
+            CourseDocument doc =
+                    documentMapper.selectById(documentId);
 
+            if (doc == null) {
                 throw new IllegalStateException(
-                        "课程索引锁已经失效"
+                        "索引文档不存在"
                 );
             }
+
+            lease.assertValid();
+
+            int embeddingVersion =
+                    course.getEmbeddingVersion() == null
+                            ? 1
+                            : course.getEmbeddingVersion();
 
             CourseEmbeddingProfile profile;
 
@@ -214,22 +199,49 @@ public class DocumentIndexTask {
                 );
             }
 
+            if (!"ACTIVE".equals(profile.getStatus())) {
+                throw new IllegalStateException(
+                        "当前课程Embedding Profile不是ACTIVE状态"
+                );
+            }
+
             String embeddingApiKey =
                     profileService.decryptKey(profile);
 
             Map<String, Object> payload =
                     new LinkedHashMap<>();
 
-            payload.put("course_id", doc.getCourseId());
-            payload.put("document_id", doc.getId());
+            payload.put("course_id", courseId);
+            payload.put("document_id", documentId);
             payload.put("storage_name", doc.getStorageName());
+
             payload.put("embedding_version", embeddingVersion);
+            payload.put(
+                    "collection_name",
+                    profile.getCollectionName()
+            );
 
-            payload.put("embedding_model", profile.getModel());
-            payload.put("embedding_base_url", profile.getBaseUrl());
-            payload.put("embedding_api_key", embeddingApiKey);
+            payload.put(
+                    "embedding_model",
+                    profile.getModel()
+            );
 
-            String body = objectMapper.writeValueAsString(payload);
+            payload.put(
+                    "embedding_base_url",
+                    profile.getBaseUrl()
+            );
+
+            payload.put(
+                    "embedding_api_key",
+                    embeddingApiKey
+            );
+
+            payload.put(
+                    "expected_dimension",
+                    profile.getDimension()
+            );
+
+            lease.assertValid();
 
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(
@@ -245,7 +257,9 @@ public class DocumentIndexTask {
                             internalKey
                     )
                     .POST(
-                            HttpRequest.BodyPublishers.ofString(body)
+                            HttpRequest.BodyPublishers.ofString(
+                                    objectMapper.writeValueAsString(payload)
+                            )
                     )
                     .build();
 
@@ -259,18 +273,12 @@ public class DocumentIndexTask {
                 throw new IllegalStateException(
                         "Python indexing HTTP "
                                 + response.statusCode()
+                                + ": "
+                                + response.body()
                 );
             }
 
-            // 即使 Python 返回成功，锁丢失也不能更新 READY。
-            if (!indexLockService.isOwned(
-                    courseId,
-                    lockToken)) {
-
-                throw new IllegalStateException(
-                        "索引期间课程锁失效，禁止确认索引成功"
-                );
-            }
+            lease.assertValid();
 
             int updated = updateCurrentTask(
                     documentId,
@@ -279,16 +287,16 @@ public class DocumentIndexTask {
                     null
             );
 
-            if (updated == 1) {
+            if (updated != 1) {
+                log.warn(
+                        "Index result ignored, documentId={}",
+                        documentId
+                );
+            } else {
                 log.info(
                         "PDF indexed successfully, documentId={}, version={}",
                         documentId,
                         embeddingVersion
-                );
-            } else {
-                log.warn(
-                        "Index result ignored, documentId={}",
-                        documentId
                 );
             }
 
@@ -332,7 +340,10 @@ public class DocumentIndexTask {
         return documentMapper.update(
                 null,
                 new LambdaUpdateWrapper<CourseDocument>()
-                        .eq(CourseDocument::getId, documentId)
+                        .eq(
+                                CourseDocument::getId,
+                                documentId
+                        )
                         .eq(
                                 CourseDocument::getStatus,
                                 "PROCESSING"

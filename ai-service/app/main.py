@@ -9,10 +9,15 @@ from pydantic import BaseModel, Field
 
 from .config import AI_INTERNAL_KEY, PDF_STORAGE_DIR
 from .embedding_migration import migrate_course
-from .embedding_service import create_embedding_client
+from .embedding_service import create_embedding_client, embed_texts
 from .pdf_parser import parse_pdf
 from .rag_service import rag_stream
-from .vector_store import delete_document_vectors_all_versions, index_document, search_course
+from .vector_store import (
+    delete_document_vectors_all_versions,
+    get_collection_by_name,
+    index_document_into_collection,
+    search_course,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +54,10 @@ class IndexRequest(BaseModel):
         default=1,
         ge=1,
     )
+    collection_name: str = Field(
+        min_length=1,
+        max_length=63,
+    )
     embedding_model: str = Field(
         min_length=1,
         max_length=100,
@@ -60,6 +69,10 @@ class IndexRequest(BaseModel):
     embedding_api_key: str = Field(
         default="",
         max_length=1000,
+    )
+    expected_dimension: int = Field(
+        gt=0,
+        le=8192,
     )
 
 
@@ -88,6 +101,10 @@ class ChatRequest(BaseModel):
         max_length=10,
     )
     embedding_version: int = Field(ge=1)
+    collection_name: str = Field(
+        min_length=1,
+        max_length=63,
+    )
     chat_model: str = Field(
         min_length=1,
         max_length=100,
@@ -132,26 +149,39 @@ def internal_index(req: IndexRequest, _: None = Depends(require_internal)):
 
     try:
         chunks = parse_pdf(pdf_path)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        if not chunks:
+            raise ValueError("未从 PDF 提取到文本")
 
-    if not chunks:
-        raise HTTPException(status_code=400, detail="未从 PDF 提取到文本")
-
-    with index_lock:
         embedding_client = create_embedding_client(
             api_key=req.embedding_api_key,
             base_url=req.embedding_base_url,
         )
 
-        indexed = index_document(
-            course_id=req.course_id,
-            document_id=req.document_id,
-            chunks=chunks,
-            version=req.embedding_version,
+        collection = get_collection_by_name(req.collection_name)
+
+        # 维度校验：取第一个切片作为样本。
+        sample = embed_texts(
+            [chunks[0]["text"]],
             model=req.embedding_model,
             client=embedding_client,
         )
+        if len(sample[0]) != req.expected_dimension:
+            raise ValueError(
+                f"Embedding维度不匹配: 期望{req.expected_dimension}, "
+                f"实际{len(sample[0])}"
+            )
+
+        indexed = index_document_into_collection(
+            collection,
+            req.document_id,
+            chunks,
+            model=req.embedding_model,
+            embedding_client=embedding_client,
+            active="1",
+        )
+
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
     return {
         "document_id": req.document_id,
@@ -185,6 +215,7 @@ def chat_stream_api(request: ChatRequest):
             question=request.question.strip(),
             history=history,
             embedding_version=request.embedding_version,
+            collection_name_value=request.collection_name,
             chat_model=request.chat_model,
             chat_api_key=request.chat_api_key,
             chat_base_url=request.chat_base_url,

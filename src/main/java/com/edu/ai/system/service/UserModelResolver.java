@@ -85,7 +85,8 @@ public class UserModelResolver {
                 config.getEmbeddingBaseUrl(),
                 embeddingKey,
                 config.getEmbeddingModel(),
-                config.getEmbeddingDim()
+                config.getEmbeddingDim(),
+                null
         );
     }
 
@@ -98,13 +99,29 @@ public class UserModelResolver {
             Long courseId,
             int embeddingVersion) {
 
-        UserModelConfig current = resolve(userId);
+        UserModelConfig current = resolveChatOnly(userId);
 
         CourseEmbeddingProfile profile =
                 profileService.require(
                         courseId,
                         embeddingVersion
                 );
+
+        if (!"ACTIVE".equals(profile.getStatus())) {
+            throw new BusinessException(
+                    409,
+                    "课程Embedding索引版本尚未激活"
+            );
+        }
+
+        if (profile.getCollectionName() == null
+                || profile.getCollectionName().isBlank()) {
+
+            throw new BusinessException(
+                    409,
+                    "课程索引Collection配置缺失"
+            );
+        }
 
         String embeddingApiKey =
                 profileService.decryptKey(profile);
@@ -119,7 +136,59 @@ public class UserModelResolver {
                 profile.getBaseUrl(),
                 embeddingApiKey,
                 profile.getModel(),
-                profile.getDimension()
+                profile.getDimension(),
+                profile.getCollectionName()
+        );
+    }
+
+    /**
+     * 只解析用户当前 Chat 模型。
+     * 不依赖用户当前 Embedding 配置。
+     */
+    private UserModelConfig resolveChatOnly(Long userId) {
+
+        if (userId == null || userId <= 0) {
+            throw new BusinessException(
+                    400,
+                    "用户ID不合法"
+            );
+        }
+
+        UserConfig config = configMapper.selectOne(
+                new LambdaQueryWrapper<UserConfig>()
+                        .eq(UserConfig::getUserId, userId)
+                        .last("LIMIT 1")
+        );
+
+        if (config == null) {
+            throw new BusinessException(
+                    400,
+                    "请先配置个人Chat模型"
+            );
+        }
+
+        String chatKey = decrypt(
+                config.getChatApiKeyCiphertext()
+        );
+
+        validate(
+                config.getChatProvider(),
+                config.getChatBaseUrl(),
+                config.getChatModel()
+        );
+
+        return new UserModelConfig(
+                config.getChatProvider(),
+                config.getChatBaseUrl(),
+                chatKey,
+                config.getChatModel(),
+
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
         );
     }
 
@@ -161,7 +230,9 @@ public class UserModelResolver {
             String embeddingBaseUrl,
             String embeddingApiKey,
             String embeddingModel,
-            Integer embeddingDimension
+            Integer embeddingDimension,
+
+            String collectionName
     ) {
     }
 }

@@ -424,8 +424,13 @@ def search_course_by_collection(
 
     result = collection.query(
         query_embeddings=[query_embedding],
-        n_results=top_k,
-        include=["documents", "metadatas", "distances"],
+        n_results=min(top_k, collection.count()),
+        where={"active": "1"},
+        include=[
+            "documents",
+            "metadatas",
+            "distances",
+        ],
     )
 
     documents = result.get("documents") or [[]]
