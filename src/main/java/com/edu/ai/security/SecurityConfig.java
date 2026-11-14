@@ -1,7 +1,8 @@
-
 package com.edu.ai.security;
 
 import tools.jackson.databind.ObjectMapper;
+
+import com.edu.ai.common.Result;
 
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
@@ -9,16 +10,20 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import org.springframework.http.HttpMethod;
+
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.ProviderManager;
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
+
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
+
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
+
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
@@ -29,11 +34,17 @@ import org.springframework.web.cors.CorsConfigurationSource;
 @EnableMethodSecurity
 public class SecurityConfig {
 
+    /**
+     * 密码加密器
+     */
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
     }
 
+    /**
+     * 认证管理器
+     */
     @Bean
     public AuthenticationManager authenticationManager(
             UserDetailsService userDetailsService,
@@ -47,6 +58,9 @@ public class SecurityConfig {
         return new ProviderManager(provider);
     }
 
+    /**
+     * Spring Security 核心配置
+     */
     @Bean
     public SecurityFilterChain securityFilterChain(
             HttpSecurity http,
@@ -56,31 +70,42 @@ public class SecurityConfig {
             ObjectMapper objectMapper) throws Exception {
 
         http
+                // JWT 无状态认证，不使用 CSRF 表单会话
                 .csrf(csrf -> csrf.disable())
 
+                // CORS
                 .cors(cors ->
                         cors.configurationSource(corsSource))
 
+                // 无状态 Session
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(
                                 SessionCreationPolicy.STATELESS))
 
+                // URL 权限
                 .authorizeHttpRequests(auth -> auth
 
+                        // 允许跨域预检
                         .requestMatchers(
                                 HttpMethod.OPTIONS, "/**")
                         .permitAll()
 
-                        .requestMatchers("/api/auth/login")
-                        .permitAll()
+                        // 登录和注册公开
+                        .requestMatchers(
+                                "/api/auth/login",
+                                "/api/auth/register"
+                        ).permitAll()
 
+                        // 管理员接口
                         .requestMatchers("/api/admin/**")
                         .hasRole("ADMIN")
 
+                        // 其他接口必须登录
                         .anyRequest()
                         .authenticated()
                 )
 
+                // 统一认证异常
                 .exceptionHandling(exception -> exception
 
                         .authenticationEntryPoint(
@@ -93,9 +118,8 @@ public class SecurityConfig {
 
                                     response.getWriter().write(
                                             objectMapper.writeValueAsString(
-                                                    java.util.Map.of(
-                                                            "code", 401,
-                                                            "message",
+                                                    Result.error(
+                                                            401,
                                                             "请先登录或重新登录"
                                                     )
                                             )
@@ -113,9 +137,8 @@ public class SecurityConfig {
 
                                     response.getWriter().write(
                                             objectMapper.writeValueAsString(
-                                                    java.util.Map.of(
-                                                            "code", 403,
-                                                            "message",
+                                                    Result.error(
+                                                            403,
                                                             "没有访问权限"
                                                     )
                                             )
@@ -124,6 +147,7 @@ public class SecurityConfig {
                         )
                 )
 
+                // JWT 过滤器
                 .addFilterBefore(
                         jwtFilter,
                         UsernamePasswordAuthenticationFilter.class
@@ -132,7 +156,9 @@ public class SecurityConfig {
         return http.build();
     }
 
-    // 防止 @Component JWT Filter 被 Servlet 容器重复注册
+    /**
+     * 禁止 JWT Filter 被 Servlet 容器重复注册
+     */
     @Bean
     public FilterRegistrationBean<JwtAuthenticationFilter>
     jwtFilterRegistration(JwtAuthenticationFilter filter) {
@@ -145,4 +171,3 @@ public class SecurityConfig {
         return registration;
     }
 }
-

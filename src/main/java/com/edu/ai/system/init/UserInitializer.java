@@ -25,9 +25,12 @@ public class UserInitializer implements CommandLineRunner {
     @Override
     public void run(String... args) {
 
-        createUser("admin01", "ADMIN", "ADMIN_INIT_PASSWORD");
-        createUser("owner01", "USER", "OWNER_INIT_PASSWORD");
-        createUser("student01", "USER", "STUDENT_INIT_PASSWORD");
+        // 只初始化管理员账号
+        createUser(
+                "admin01",
+                "ADMIN",
+                "ADMIN_INIT_PASSWORD"
+        );
     }
 
     private void createUser(

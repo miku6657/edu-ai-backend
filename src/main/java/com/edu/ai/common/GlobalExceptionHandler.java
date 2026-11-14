@@ -9,6 +9,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.access.AccessDeniedException;
 
+import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
@@ -35,6 +36,23 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(status)
                 .body(Result.error(code, e.getMessage()));
+    }
+
+    // 请求参数校验异常
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<Result<Object>> handleValidation(
+            MethodArgumentNotValidException e) {
+
+        String message = e.getBindingResult()
+                .getFieldErrors()
+                .stream()
+                .findFirst()
+                .map(error -> error.getDefaultMessage())
+                .orElse("请求参数不合法");
+
+        return ResponseEntity
+                .status(HttpStatus.BAD_REQUEST)
+                .body(Result.error(400, message));
     }
 
     // 用户登录认证失败

@@ -49,7 +49,7 @@ public class TaskReminderService {
         // 个人课程空间：只查询当前用户创建的正常课程
         List<Course> courses = courseMapper.selectList(
                 new LambdaQueryWrapper<Course>()
-                        .eq(Course::getOwnerId, userId)
+                        .eq(Course::getUserId, userId)
                         .eq(Course::getStatus, 1)
         );
 

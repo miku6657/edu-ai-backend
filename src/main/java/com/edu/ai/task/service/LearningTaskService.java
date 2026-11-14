@@ -255,9 +255,9 @@ public class LearningTaskService {
 
         Course course = requireCourse(courseId);
 
-        if (!userId.equals(course.getOwnerId())) {
+        if (!userId.equals(course.getUserId())) {
             throw new BusinessException(
-                    403, "只有课程创建者可以管理任务");
+                    403, "无权管理其他用户课程中的任务");
         }
     }
 

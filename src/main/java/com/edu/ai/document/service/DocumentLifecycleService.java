@@ -379,7 +379,7 @@ public class DocumentLifecycleService {
         }
 
         if (userId == null ||
-                !userId.equals(course.getOwnerId())) {
+                !userId.equals(course.getUserId())) {
 
             throw new BusinessException(
                     403,

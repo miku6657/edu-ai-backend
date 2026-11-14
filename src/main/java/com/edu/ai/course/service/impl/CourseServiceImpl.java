@@ -1,4 +1,3 @@
-
 package com.edu.ai.course.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -23,7 +22,7 @@ public class CourseServiceImpl implements CourseService {
         this.courseMapper = courseMapper;
     }
 
-    // 创建课程
+    // 创建个人课程空间
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Course createCourse(CourseDTO dto, Long userId) {
@@ -34,17 +33,20 @@ public class CourseServiceImpl implements CourseService {
 
         course.setName(dto.getName().trim());
         course.setDescription(dto.getDescription());
-        course.setOwnerId(userId);
+        course.setUserId(userId);
         course.setStatus(1);
-        course.setCreateTime(LocalDateTime.now());
-        course.setUpdateTime(LocalDateTime.now());
+
+        LocalDateTime now = LocalDateTime.now();
+
+        course.setCreateTime(now);
+        course.setUpdateTime(now);
 
         courseMapper.insert(course);
 
         return course;
     }
 
-    // 修改自己创建的课程
+    // 修改自己的课程
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void updateCourse(
@@ -63,7 +65,7 @@ public class CourseServiceImpl implements CourseService {
         courseMapper.updateById(course);
     }
 
-    // 停用自己创建的课程
+    // 停用自己的课程
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void disableCourse(Long courseId, Long userId) {
@@ -76,18 +78,18 @@ public class CourseServiceImpl implements CourseService {
         courseMapper.updateById(course);
     }
 
-    // 查询当前用户创建的课程
+    // 查询自己的所有课程
     @Override
     public List<Course> getMyCourses(Long userId) {
 
         return courseMapper.selectList(
                 new LambdaQueryWrapper<Course>()
-                        .eq(Course::getOwnerId, userId)
+                        .eq(Course::getUserId, userId)
                         .orderByDesc(Course::getCreateTime)
         );
     }
 
-    // 查看课程详情
+    // 查看自己的课程详情
     @Override
     public Course getCourseDetail(
             Long courseId,
@@ -96,10 +98,14 @@ public class CourseServiceImpl implements CourseService {
         return requireMyCourse(courseId, userId);
     }
 
-    // 检查课程是否属于当前用户
+    // 校验课程归属
     private Course requireMyCourse(
             Long courseId,
             Long userId) {
+
+        if (userId == null) {
+            throw new BusinessException(401, "登录状态无效");
+        }
 
         Course course = courseMapper.selectById(courseId);
 
@@ -107,11 +113,8 @@ public class CourseServiceImpl implements CourseService {
             throw new BusinessException(404, "课程不存在");
         }
 
-        if (!userId.equals(course.getOwnerId())) {
-            throw new BusinessException(
-                    403,
-                    "无权管理该课程"
-            );
+        if (!userId.equals(course.getUserId())) {
+            throw new BusinessException(403, "无权访问该课程");
         }
 
         return course;
@@ -124,10 +127,7 @@ public class CourseServiceImpl implements CourseService {
                 || dto.getName() == null
                 || dto.getName().isBlank()) {
 
-            throw new BusinessException(
-                    400,
-                    "课程名称不能为空"
-            );
+            throw new BusinessException(400, "课程名称不能为空");
         }
 
         if (dto.getName().trim().length() > 100) {

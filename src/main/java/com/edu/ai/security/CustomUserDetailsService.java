@@ -38,6 +38,15 @@ public class CustomUserDetailsService implements UserDetailsService {
             );
         }
 
+        // 角色校验：仅允许 ADMIN 和 USER
+        if (!"ADMIN".equals(user.getRole())
+                && !"USER".equals(user.getRole())) {
+
+            throw new UsernameNotFoundException(
+                    "用户角色无效"
+            );
+        }
+
         // 返回 Spring Security 用户对象
         return new LoginUser(
                 user.getId(),

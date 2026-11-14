@@ -67,7 +67,7 @@ public class AdminCourseService {
         }
 
         if (ownerId != null) {
-            query.eq(Course::getOwnerId, ownerId);
+            query.eq(Course::getUserId, ownerId);
         }
 
         Page<Course> page = courseMapper.selectPage(
