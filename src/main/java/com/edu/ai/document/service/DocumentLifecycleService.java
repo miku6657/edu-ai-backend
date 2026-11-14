@@ -36,7 +36,7 @@ public class DocumentLifecycleService {
     private final CourseDocumentMapper documentMapper;
     private final CourseMapper courseMapper;
     private final DocumentIndexTask indexTask;
-    private final CourseIndexLockService indexLockService;
+    private final CourseIndexLease courseIndexLease;
     private final HttpClient httpClient;
 
     private final String aiUrl;
@@ -47,7 +47,7 @@ public class DocumentLifecycleService {
             CourseDocumentMapper documentMapper,
             CourseMapper courseMapper,
             DocumentIndexTask indexTask,
-            CourseIndexLockService indexLockService,
+            CourseIndexLease courseIndexLease,
             @Value("${ai.service.url}") String aiUrl,
             @Value("${ai.service.internal-key}") String internalKey,
             @Value("${app.storage.pdf-dir}") String pdfDir) {
@@ -55,7 +55,7 @@ public class DocumentLifecycleService {
         this.documentMapper = documentMapper;
         this.courseMapper = courseMapper;
         this.indexTask = indexTask;
-        this.indexLockService = indexLockService;
+        this.courseIndexLease = courseIndexLease;
 
         this.aiUrl = aiUrl;
         this.internalKey = internalKey;
@@ -95,19 +95,20 @@ public class DocumentLifecycleService {
 
         Long courseId = document.getCourseId();
 
-        String lockToken = indexLockService.tryAcquire(
-                courseId,
-                "DOCUMENT_DELETE"
-        );
+        CourseIndexLease.Handle lease =
+                courseIndexLease.tryOpen(
+                        courseId,
+                        "DOCUMENT_DELETE"
+                );
 
-        if (lockToken == null) {
+        if (lease == null) {
             throw new BusinessException(
                     409,
-                    "课程正在执行索引或迁移操作，请稍后重试"
+                    "课程正在索引或迁移，请稍后重试"
             );
         }
 
-        try {
+        try (lease) {
             // 获得课程锁后重新读取文档状态。
             CourseDocument latest =
                     requireDocument(documentId);
@@ -157,20 +158,9 @@ public class DocumentLifecycleService {
                 );
             }
 
-            if (!indexLockService.isOwned(courseId, lockToken)) {
-                throw new BusinessException(
-                        409,
-                        "课程锁已经失效，请重试"
-                );
-            }
+            lease.assertValid();
 
             cleanup(documentId);
-
-        } finally {
-            indexLockService.release(
-                    courseId,
-                    lockToken
-            );
         }
     }
 
@@ -237,25 +227,24 @@ public class DocumentLifecycleService {
 
         Long courseId = doc.getCourseId();
 
-        String lockToken = indexLockService.tryAcquire(
-                courseId,
-                "DOCUMENT_DELETE"
-        );
+        CourseIndexLease.Handle lease =
+                courseIndexLease.tryOpen(
+                        courseId,
+                        "DOCUMENT_DELETE"
+                );
 
-        if (lockToken == null) {
+        if (lease == null) {
             return;
         }
 
-        try {
-            resumeDeleteWithLock(documentId, lockToken);
-        } finally {
-            indexLockService.release(courseId, lockToken);
+        try (lease) {
+            resumeDeleteWithLock(documentId, lease);
         }
     }
 
     private void resumeDeleteWithLock(
             Long documentId,
-            String lockToken) {
+            CourseIndexLease.Handle lease) {
 
         CourseDocument doc =
                 documentMapper.selectById(documentId);
@@ -288,11 +277,7 @@ public class DocumentLifecycleService {
             return;
         }
 
-        if (!indexLockService.isOwned(
-                doc.getCourseId(),
-                lockToken)) {
-            return;
-        }
+        lease.assertValid();
 
         try {
             cleanup(documentId);

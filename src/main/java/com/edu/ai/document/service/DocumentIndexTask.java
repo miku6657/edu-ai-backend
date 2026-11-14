@@ -35,6 +35,7 @@ public class DocumentIndexTask {
     private final CourseDocumentMapper documentMapper;
     private final CourseMapper courseMapper;
     private final CourseIndexLockService indexLockService;
+    private final CourseIndexLease courseIndexLease;
 
     private final HttpClient httpClient;
 
@@ -45,12 +46,14 @@ public class DocumentIndexTask {
             CourseDocumentMapper documentMapper,
             CourseMapper courseMapper,
             CourseIndexLockService indexLockService,
+            CourseIndexLease courseIndexLease,
             @Value("${ai.service.url}") String serviceUrl,
             @Value("${ai.service.internal-key}") String internalKey) {
 
         this.documentMapper = documentMapper;
         this.courseMapper = courseMapper;
         this.indexLockService = indexLockService;
+        this.courseIndexLease = courseIndexLease;
 
         this.serviceUrl = serviceUrl;
         this.internalKey = internalKey;
@@ -80,31 +83,26 @@ public class DocumentIndexTask {
             return;
         }
 
-        // 先获取课程级索引锁。
-        String lockToken = indexLockService.tryAcquire(
-                courseId,
-                "DOCUMENT_INDEX"
-        );
+        // 先获取课程级索引锁（自动续租）。
+        CourseIndexLease.Handle lease =
+                courseIndexLease.tryOpen(
+                        courseId,
+                        "DOCUMENT_INDEX"
+                );
 
-        if (lockToken == null) {
+        if (lease == null) {
             log.info(
-                    "Course index locked, skip this attempt: documentId={}",
+                    "Course index busy, documentId={}",
                     documentId
             );
             return;
         }
 
-        try {
+        try (lease) {
             processWithLock(
                     documentId,
                     courseId,
-                    lockToken
-            );
-
-        } finally {
-            indexLockService.release(
-                    courseId,
-                    lockToken
+                    lease.getToken()
             );
         }
     }

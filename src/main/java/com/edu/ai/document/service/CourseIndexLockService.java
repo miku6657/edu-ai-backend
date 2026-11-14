@@ -1,7 +1,6 @@
 package com.edu.ai.document.service;
 
 import com.edu.ai.document.mapper.CourseIndexLockMapper;
-
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -20,26 +19,36 @@ public class CourseIndexLockService {
     }
 
     /**
-     * 尝试获取课程索引锁。
+     * 尝试获取课程锁。
      *
-     * 返回 token；获取失败返回 null。
+     * 获取成功返回 token。
+     * 获取失败返回 null。
      */
     public String tryAcquire(
             Long courseId,
             String lockType) {
 
+        if (courseId == null || courseId <= 0
+                || lockType == null
+                || lockType.isBlank()) {
+            throw new IllegalArgumentException(
+                    "课程锁参数不合法"
+            );
+        }
+
         String token = UUID.randomUUID().toString();
 
-        int result = mapper.acquire(
+        mapper.acquire(
                 courseId,
                 token,
                 lockType,
-                LocalDateTime.now().plusMinutes(LOCK_MINUTES)
+                LocalDateTime.now()
+                        .plusMinutes(LOCK_MINUTES)
         );
 
-        // INSERT 返回 1，抢占空闲/过期锁返回 2，均视为获取成功；
-        // 返回 0 表示锁仍被他人持有，获取失败。
-        if (result < 1) {
+        // 不依赖 INSERT/UPDATE 受影响行数。
+        // 直接读取数据库确认 token 所有权。
+        if (!isOwned(courseId, token)) {
             return null;
         }
 
@@ -47,44 +56,58 @@ public class CourseIndexLockService {
     }
 
     /**
-     * 续租。
+     * 续租当前课程锁。
      */
     public boolean renew(
             Long courseId,
             String token) {
 
+        if (courseId == null
+                || token == null
+                || token.isBlank()) {
+            return false;
+        }
+
         return mapper.renew(
                 courseId,
                 token,
-                LocalDateTime.now().plusMinutes(LOCK_MINUTES)
+                LocalDateTime.now()
+                        .plusMinutes(LOCK_MINUTES)
         ) == 1;
     }
 
     /**
-     * 释放锁。
-     */
-    public void release(
-            Long courseId,
-            String token) {
-
-        if (courseId == null || token == null) {
-            return;
-        }
-
-        mapper.release(courseId, token);
-    }
-
-    /**
-     * 检查当前操作是否仍持有有效锁。
+     * 检查当前 token 是否仍然有效。
      */
     public boolean isOwned(
             Long courseId,
             String token) {
 
-        if (courseId == null || token == null) {
+        if (courseId == null
+                || token == null
+                || token.isBlank()) {
             return false;
         }
 
-        return mapper.isOwned(courseId, token) == 1;
+        return mapper.isOwned(
+                courseId,
+                token
+        ) == 1;
+    }
+
+    /**
+     * 仅当前持有者才能释放课程锁。
+     */
+    public void release(
+            Long courseId,
+            String token) {
+
+        if (courseId == null
+                || token == null
+                || token.isBlank()) {
+            return;
+        }
+
+        mapper.release(courseId, token);
     }
 }

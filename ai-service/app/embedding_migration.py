@@ -1,16 +1,43 @@
 import logging
 from pathlib import Path
 
+import chromadb
+
 from .pdf_parser import parse_pdf
-from .embedding_service import create_embedding_client, embed_texts
+from .embedding_service import (
+    create_embedding_client,
+    embed_texts,
+)
 from .vector_store import (
-    index_document_for_migration,
+    client as chroma_client,
     get_collection,
     collection_name,
+    index_document_for_migration,
     activate_collection,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def reset_target_collection(
+    course_id: int,
+    target_version: int,
+):
+    """清理尚未激活的目标 Collection。
+
+    注意：此函数只能在 Java 已确认源版本仍为活动版本，
+    且持有课程独占锁时由内部迁移流程调用。
+    """
+    if target_version < 2:
+        raise ValueError("禁止重置历史版本1")
+
+    name = collection_name(course_id, target_version)
+
+    try:
+        chroma_client.delete_collection(name=name)
+    except chromadb.errors.NotFoundError:
+        # 目标集合不存在，无需清理。
+        pass
 
 
 def migrate_course(
@@ -30,14 +57,15 @@ def migrate_course(
     documents 结构：
         [{"document_id": 1, "storage_name": "xxx.pdf"}, ...]
 
-    迁移阶段向量只写入未激活状态，全部文档完成并验证通过后
-    统一激活，最后为目标 Collection 打元数据。
-    失败时绝不修改旧 Collection。
+    每次执行都从空的目标版本开始重建，源版本完全不动。
     """
     if target_version <= source_version:
         raise ValueError("目标版本必须大于源版本")
     if target_version < 2:
         raise ValueError("目标版本必须使用带版本号的Collection")
+
+    # 清理上一次失败可能残留的目标 Collection，保证从空开始重建。
+    reset_target_collection(course_id, target_version)
 
     client = create_embedding_client(api_key, base_url)
 
