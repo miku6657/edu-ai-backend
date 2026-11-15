@@ -1,5 +1,6 @@
 package com.edu.ai.system.service;
 
+import com.edu.ai.common.BusinessException;
 import com.edu.ai.system.dto.ModelProbeRequest;
 import com.edu.ai.system.dto.ModelProbeResultVO;
 
@@ -69,9 +70,11 @@ public class AiModelGateway {
             );
 
             if (response.statusCode() != 200) {
-                throw new IllegalStateException(
-                        "AI模型探测服务异常，HTTP "
+                throw new BusinessException(
+                        502,
+                        "模型探测失败，AI服务返回HTTP "
                                 + response.statusCode()
+                                + "，请检查Python服务日志"
                 );
             }
 
@@ -107,6 +110,9 @@ public class AiModelGateway {
             Thread.currentThread().interrupt();
             throw new IllegalStateException(
                     "模型探测被中断", e);
+
+        } catch (BusinessException e) {
+            throw e;
 
         } catch (Exception e) {
             throw new IllegalStateException(

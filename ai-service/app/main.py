@@ -1,5 +1,6 @@
 import hmac
 import logging
+import time
 from contextlib import asynccontextmanager
 from threading import Lock
 
@@ -7,6 +8,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from .chat_service import create_chat_client
 from .config import AI_INTERNAL_KEY, PDF_STORAGE_DIR
 from .embedding_migration import migrate_course
 from .embedding_service import create_embedding_client, embed_texts
@@ -139,6 +141,81 @@ class ChatRequest(BaseModel):
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+class ModelProbeRequest(BaseModel):
+    probe_type: str = Field(min_length=1, max_length=20)
+    provider: str = Field(min_length=1, max_length=40)
+    base_url: str = Field(min_length=1, max_length=500)
+    api_key: str = Field(default="", max_length=1000)
+    model_name: str = Field(min_length=1, max_length=100)
+
+
+@app.post(
+    "/internal/model/probe",
+    dependencies=[Depends(require_internal)],
+)
+def internal_model_probe(request: ModelProbeRequest):
+    started = time.perf_counter()
+
+    try:
+        if request.probe_type == "CHAT":
+            client = create_chat_client(
+                api_key=request.api_key,
+                base_url=request.base_url,
+            )
+            client.chat.completions.create(
+                model=request.model_name,
+                messages=[{"role": "user", "content": "请回复OK"}],
+                max_tokens=16,
+            )
+            actual_dim = None
+
+        elif request.probe_type == "EMBEDDING":
+            client = create_embedding_client(
+                api_key=request.api_key,
+                base_url=request.base_url,
+            )
+            response = client.embeddings.create(
+                model=request.model_name,
+                input=["模型连通性测试"],
+            )
+            actual_dim = len(response.data[0].embedding)
+
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="不支持的探测类型，仅支持 CHAT / EMBEDDING",
+            )
+
+    except HTTPException:
+        raise
+
+    except Exception as exc:
+        logger.warning(
+            "模型探测失败: type=%s model=%s err=%s",
+            request.probe_type,
+            request.model_name,
+            exc,
+        )
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        return {
+            "reachable": False,
+            "probe_type": request.probe_type,
+            "model_name": request.model_name,
+            "actual_dim": None,
+            "latency_ms": latency_ms,
+            "error": str(exc),
+        }
+
+    latency_ms = int((time.perf_counter() - started) * 1000)
+    return {
+        "reachable": True,
+        "probe_type": request.probe_type,
+        "model_name": request.model_name,
+        "actual_dim": actual_dim,
+        "latency_ms": latency_ms,
+    }
 
 
 @app.post("/internal/index")

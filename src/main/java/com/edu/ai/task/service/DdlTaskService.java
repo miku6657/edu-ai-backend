@@ -139,6 +139,14 @@ public class DdlTaskService {
 
         task.setStatus(determineInitialStatus(task, now));
 
+        // 时区兜底：手动创建流程未显式传入时区时，默认使用北京时间。
+        // user_timezone 列为 NOT NULL，MyBatis-Plus 会忽略 null 属性，
+        // 若此处不为空，insert 会因缺少该字段而报错。
+        if (task.getUserTimezone() == null
+                || task.getUserTimezone().isBlank()) {
+            task.setUserTimezone("Asia/Shanghai");
+        }
+
         taskMapper.insert(task);
 
         return task;
