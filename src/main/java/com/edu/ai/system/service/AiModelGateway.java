@@ -36,6 +36,7 @@ public class AiModelGateway {
         this.objectMapper = objectMapper;
 
         this.httpClient = HttpClient.newBuilder()
+                .version(HttpClient.Version.HTTP_1_1)
                 .connectTimeout(Duration.ofSeconds(10))
                 .build();
     }
