@@ -133,6 +133,8 @@ public class EmbeddingCollectionCleanupJob {
                 throw new IllegalStateException(
                         "Collection清理失败，HTTP "
                                 + response.statusCode()
+                                + "，Python响应："
+                                + response.body()
                 );
             }
 

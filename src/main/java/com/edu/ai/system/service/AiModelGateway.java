@@ -70,11 +70,23 @@ public class AiModelGateway {
             );
 
             if (response.statusCode() != 200) {
+
+                String responseBody = response.body();
+
+                // 将Python响应写入本地调试日志，方便定位422。
+                // 注意不要记录完整请求体或API Key。
+                System.err.println(
+                        "[AI PROBE ERROR] HTTP "
+                                + response.statusCode()
+                                + ", response="
+                                + responseBody
+                );
+
                 throw new BusinessException(
                         502,
                         "模型探测失败，AI服务返回HTTP "
                                 + response.statusCode()
-                                + "，请检查Python服务日志"
+                                + "，请查看Java日志中的AI PROBE ERROR"
                 );
             }
 
