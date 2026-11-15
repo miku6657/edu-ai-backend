@@ -20,6 +20,7 @@ import com.edu.ai.system.mapper.UserMapper;
 
 import com.edu.ai.system.security.ConfigCryptoService;
 
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -37,6 +38,7 @@ public class UserModelConfigService {
     private final UserConfigService userConfigService;
     private final ModelConfigFingerprint fingerprint;
     private final ModelConfigValidator configValidator;
+    private final JdbcTemplate jdbcTemplate;
 
     public UserModelConfigService(
             UserMapper userMapper,
@@ -46,7 +48,8 @@ public class UserModelConfigService {
             AiModelGateway aiModelGateway,
             UserConfigService userConfigService,
             ModelConfigFingerprint fingerprint,
-            ModelConfigValidator configValidator) {
+            ModelConfigValidator configValidator,
+            JdbcTemplate jdbcTemplate) {
 
         this.userMapper = userMapper;
         this.configMapper = configMapper;
@@ -56,6 +59,7 @@ public class UserModelConfigService {
         this.userConfigService = userConfigService;
         this.fingerprint = fingerprint;
         this.configValidator = configValidator;
+        this.jdbcTemplate = jdbcTemplate;
     }
 
     /**
@@ -249,26 +253,44 @@ public class UserModelConfigService {
                 chatFingerprint
         );
 
-        long courseCount = courseMapper.selectCount(
-                new LambdaQueryWrapper<Course>()
-                        .eq(Course::getUserId, userId)
+        Long boundCount = jdbcTemplate.queryForObject(
+                """
+                SELECT
+                    (SELECT COUNT(*)
+                     FROM course_embedding_profile p
+                     JOIN course c ON c.id = p.course_id
+                     WHERE c.user_id = ?)
+                  + (SELECT COUNT(*)
+                     FROM course_document d
+                     JOIN course c ON c.id = d.course_id
+                     WHERE c.user_id = ?
+                       AND d.status = 'READY')
+                  + (SELECT COUNT(*)
+                     FROM course_embedding_migration m
+                     WHERE m.user_id = ?
+                       AND m.status IN ('PENDING', 'RUNNING'))
+                """,
+                Long.class,
+                userId,
+                userId,
+                userId
         );
 
-        if (targetChanged && courseCount > 0) {
+        boolean hasBoundIndex =
+                boundCount != null && boundCount > 0;
+
+        if (targetChanged && hasBoundIndex) {
+
             if (!request.isMigrateExistingCourses()) {
                 throw new BusinessException(
                         409,
-                        "修改 Embedding 配置会影响已有课程，请确认迁移"
+                        "已有课程绑定Embedding索引，请先处理课程模型迁移"
                 );
             }
 
-            /*
-             * 目前还没有完成课程向量迁移任务。
-             * 必须阻止保存，不能只修改配置而保留旧向量。
-             */
             throw new BusinessException(
                     501,
-                    "课程 Embedding 迁移功能尚未实现，暂不能切换模型"
+                    "已有课程索引的批量模型迁移尚未接通，不能直接覆盖配置"
             );
         }
 
