@@ -2,10 +2,13 @@ package com.edu.ai.task.controller;
 
 import com.edu.ai.common.BusinessException;
 import com.edu.ai.common.Result;
+import com.edu.ai.course.service.CoursePermissionService;
 import com.edu.ai.task.service.LearningPathService;
 import com.edu.ai.task.service.LearningPathService.PathResult;
+import com.edu.ai.task.service.QuestionKnowledgeService;
 
 import jakarta.validation.constraints.NotNull;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
@@ -17,16 +20,23 @@ import java.util.Map;
 public class LearningPathController {
 
     private final LearningPathService service;
+    private final QuestionKnowledgeService questionKnowledgeService;
+    private final CoursePermissionService coursePermissionService;
 
     public LearningPathController(
-            LearningPathService service) {
+            LearningPathService service,
+            QuestionKnowledgeService questionKnowledgeService,
+            CoursePermissionService coursePermissionService) {
         this.service = service;
+        this.questionKnowledgeService = questionKnowledgeService;
+        this.coursePermissionService = coursePermissionService;
     }
 
     public record PointRequest(
             String title,
             Integer estimatedMinutes,
-            Integer sortOrder
+            Integer sortOrder,
+            String matchKeywords
     ) {}
 
     public record DependencyRequest(
@@ -43,8 +53,11 @@ public class LearningPathController {
             String courseId,
             String title,
             int estimatedMinutes,
-            int sortOrder
+            int sortOrder,
+            String matchKeywords
     ) {}
+
+    public record KeywordsRequest(String matchKeywords) {}
 
     private Long userId(Authentication auth) {
         if (auth == null
@@ -68,7 +81,8 @@ public class LearningPathController {
                 userId(auth),
                 request.title(),
                 request.estimatedMinutes(),
-                request.sortOrder()
+                request.sortOrder(),
+                request.matchKeywords()
         );
 
         return Result.success(
@@ -99,6 +113,24 @@ public class LearningPathController {
         return Result.success("先修关系已保存");
     }
 
+    // 教师修改知识点匹配关键词
+    @PutMapping("/courses/{courseId}/points/{pointId}/keywords")
+    public Result<String> updatePointKeywords(
+            @PathVariable Long courseId,
+            @PathVariable Long pointId,
+            @RequestBody KeywordsRequest request,
+            Authentication auth) {
+
+        service.updatePointKeywords(
+                courseId,
+                pointId,
+                userId(auth),
+                request.matchKeywords()
+        );
+
+        return Result.success("知识点匹配关键词已更新");
+    }
+
     // 教师及课程成员查看知识点
     @GetMapping("/courses/{courseId}/points")
     public Result<List<PointVO>> listPoints(
@@ -113,7 +145,8 @@ public class LearningPathController {
                                 point.courseId().toString(),
                                 point.title(),
                                 point.estimatedMinutes(),
-                                point.sortOrder()
+                                point.sortOrder(),
+                                point.matchKeywords()
                         ))
                         .toList()
         );
@@ -129,6 +162,28 @@ public class LearningPathController {
                 service.listMyMastery(
                         courseId,
                         userId(auth)
+                )
+        );
+    }
+
+    // 学生查看自己的知识点薄弱统计
+    @GetMapping("/courses/{courseId}/weak-points")
+    @PreAuthorize("hasRole('STUDENT')")
+    public Result<List<QuestionKnowledgeService.WeakPoint>> weakPoints(
+            @PathVariable Long courseId,
+            Authentication auth) {
+
+        Long studentId = userId(auth);
+
+        coursePermissionService.requireActiveRead(
+                courseId,
+                studentId
+        );
+
+        return Result.success(
+                questionKnowledgeService.listWeakPoints(
+                        courseId,
+                        studentId
                 )
         );
     }

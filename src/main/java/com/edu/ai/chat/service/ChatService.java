@@ -11,11 +11,15 @@ import com.edu.ai.course.entity.Course;
 import com.edu.ai.course.mapper.CourseMapper;
 import com.edu.ai.course.service.CoursePermissionService;
 import com.edu.ai.system.service.UserModelResolver;
+import com.edu.ai.task.service.QuestionKnowledgeService;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -44,6 +48,9 @@ import com.edu.ai.chat.service.ChatStreamRegistry.RunningStream;
 public class
 ChatService {
 
+    private static final Logger log =
+            LoggerFactory.getLogger(ChatService.class);
+
     private final ChatSessionMapper sessionMapper;
     private final ChatMessageMapper messageMapper;
     private final CourseMapper courseMapper;
@@ -52,6 +59,7 @@ ChatService {
     private final ThreadPoolTaskExecutor executor;
     private final ObjectMapper objectMapper;
     private final ChatStreamRegistry streamRegistry;
+    private final QuestionKnowledgeService questionKnowledgeService;
     private final HttpClient httpClient;
 
     private final String serviceUrl;
@@ -67,6 +75,7 @@ ChatService {
             ThreadPoolTaskExecutor executor,
             ObjectMapper objectMapper,
             ChatStreamRegistry streamRegistry,
+            QuestionKnowledgeService questionKnowledgeService,
             @Value("${ai.service.url}") String serviceUrl,
             @Value("${ai.service.internal-key}") String internalKey) {
 
@@ -78,6 +87,7 @@ ChatService {
         this.executor = executor;
         this.objectMapper = objectMapper;
         this.streamRegistry = streamRegistry;
+        this.questionKnowledgeService = questionKnowledgeService;
         this.serviceUrl = serviceUrl;
         this.internalKey = internalKey;
 
@@ -142,16 +152,16 @@ ChatService {
     }
 
     // 保存普通用户消息
-    private void saveMessage(
+    private Long saveMessage(
             Long sessionId,
             String role,
             String content) {
 
-        saveMessage(sessionId, role, content, null);
+        return saveMessage(sessionId, role, content, null);
     }
 
     // 保存用户或AI消息及引用来源
-    private void saveMessage(
+    private Long saveMessage(
             Long sessionId,
             String role,
             String content,
@@ -166,6 +176,14 @@ ChatService {
         message.setCreateTime(LocalDateTime.now());
 
         messageMapper.insert(message);
+
+        if (message.getId() == null) {
+            throw new IllegalStateException(
+                    "保存聊天消息后未获取到消息ID"
+            );
+        }
+
+        return message.getId();
     }
 
     // 获取本次提问之前的最近10条消息
@@ -250,7 +268,7 @@ ChatService {
             List<ChatMessage> history =
                     getRecentHistory(sessionId);
 
-            saveMessage(
+            Long questionMessageId = saveMessage(
                     sessionId,
                     "user",
                     question
@@ -285,6 +303,7 @@ ChatService {
                             emitter,
                             session,
                             question,
+                            questionMessageId,
                             history,
                             running,
                             modelConfig,
@@ -313,6 +332,7 @@ ChatService {
             SseEmitter emitter,
             ChatSession session,
             String question,
+            Long questionMessageId,
             List<ChatMessage> history,
             RunningStream running,
             UserModelResolver.UserModelConfig modelConfig,
@@ -543,6 +563,24 @@ ChatService {
             if (!running.markSuccessful()) {
                 throw new IllegalStateException(
                         "聊天任务状态异常，无法标记成功");
+            }
+
+            // 成功完成一次RAG问答后，统计对应知识点。
+            // 统计失败不影响已经生成的AI回答。
+            try {
+                questionKnowledgeService.recordSuccessfulQuestion(
+                        questionMessageId,
+                        session.getId(),
+                        session.getUserId(),
+                        session.getCourseId(),
+                        question
+                );
+            } catch (Exception e) {
+                log.warn(
+                        "知识点提问统计失败, messageId={}",
+                        questionMessageId,
+                        e
+                );
             }
 
             // 第五步：通知前端

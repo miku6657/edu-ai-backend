@@ -7,6 +7,7 @@ import com.edu.ai.chat.entity.ChatMessage;
 import com.edu.ai.chat.mapper.ChatSessionMapper;
 import com.edu.ai.chat.mapper.ChatMessageMapper;
 import com.edu.ai.common.BusinessException;
+import com.edu.ai.task.service.QuestionKnowledgeService;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,17 +21,20 @@ public class ChatSessionManageService {
     private final ChatSessionMapper sessionMapper;
     private final ChatMessageMapper messageMapper;
     private final ChatStreamRegistry streamRegistry;
+    private final QuestionKnowledgeService questionKnowledgeService;
     private final TransactionTemplate transactionTemplate;
 
     public ChatSessionManageService(
             ChatSessionMapper sessionMapper,
             ChatMessageMapper messageMapper,
             ChatStreamRegistry streamRegistry,
+            QuestionKnowledgeService questionKnowledgeService,
             TransactionTemplate transactionTemplate) {
 
         this.sessionMapper = sessionMapper;
         this.messageMapper = messageMapper;
         this.streamRegistry = streamRegistry;
+        this.questionKnowledgeService = questionKnowledgeService;
         this.transactionTemplate = transactionTemplate;
     }
 
@@ -81,6 +85,10 @@ public class ChatSessionManageService {
             transactionTemplate.executeWithoutResult(status -> {
 
                 requireOwnedSession(sessionId, userId);
+
+                questionKnowledgeService.deleteSessionRecords(
+                        sessionId
+                );
 
                 messageMapper.delete(
                         new LambdaQueryWrapper<ChatMessage>()

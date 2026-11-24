@@ -21,16 +21,19 @@ public class LearningPathService {
     private final CoursePermissionService permissions;
     private final UserMapper userMapper;
     private final LearningPathTaskSyncService taskSyncService;
+    private final QuestionKnowledgeService questionKnowledgeService;
 
     public LearningPathService(
             JdbcTemplate jdbc,
             CoursePermissionService permissions,
             UserMapper userMapper,
-            LearningPathTaskSyncService taskSyncService) {
+            LearningPathTaskSyncService taskSyncService,
+            QuestionKnowledgeService questionKnowledgeService) {
         this.jdbc = jdbc;
         this.permissions = permissions;
         this.userMapper = userMapper;
         this.taskSyncService = taskSyncService;
+        this.questionKnowledgeService = questionKnowledgeService;
     }
 
     public record Point(
@@ -38,7 +41,8 @@ public class LearningPathService {
             Long courseId,
             String title,
             int estimatedMinutes,
-            int sortOrder
+            int sortOrder,
+            String matchKeywords
     ) {}
 
     public record PathItem(
@@ -77,7 +81,8 @@ public class LearningPathService {
         return jdbc.query(
                 """
                 SELECT id, course_id, title,
-                       estimated_minutes, sort_order
+                       estimated_minutes, sort_order,
+                       match_keywords
                 FROM course_knowledge_point
                 WHERE course_id = ?
                 ORDER BY sort_order, id
@@ -87,7 +92,8 @@ public class LearningPathService {
                         rs.getLong("course_id"),
                         rs.getString("title"),
                         rs.getInt("estimated_minutes"),
-                        rs.getInt("sort_order")
+                        rs.getInt("sort_order"),
+                        rs.getString("match_keywords")
                 ),
                 courseId
         );
@@ -129,7 +135,8 @@ public class LearningPathService {
             Long userId,
             String title,
             Integer estimatedMinutes,
-            Integer sortOrder) {
+            Integer sortOrder,
+            String matchKeywords) {
 
         permissions.requireManage(courseId, userId);
 
@@ -142,18 +149,61 @@ public class LearningPathService {
                     400, "知识点名称或预计学时不合法");
         }
 
+        String keywords = matchKeywords == null
+                ? ""
+                : matchKeywords.trim();
+
+        if (keywords.length() > 500) {
+            throw new BusinessException(
+                    400, "知识点匹配关键词不能超过500字");
+        }
+
         return insertWithId(
                 """
                 INSERT INTO course_knowledge_point
-                    (course_id, title,
-                     estimated_minutes, sort_order)
-                VALUES (?, ?, ?, ?)
+                    (course_id, title, estimated_minutes,
+                     sort_order, match_keywords)
+                VALUES (?, ?, ?, ?, ?)
                 """,
                 courseId,
                 title.trim(),
                 estimatedMinutes,
-                sortOrder == null ? 0 : sortOrder
+                sortOrder == null ? 0 : sortOrder,
+                keywords
         );
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void updatePointKeywords(
+            Long courseId,
+            Long pointId,
+            Long userId,
+            String matchKeywords) {
+
+        permissions.requireManage(courseId, userId);
+
+        if (matchKeywords == null
+                || matchKeywords.length() > 500) {
+            throw new BusinessException(
+                    400, "关键词内容不合法");
+        }
+
+        int updated = jdbc.update(
+                """
+                UPDATE course_knowledge_point
+                SET match_keywords = ?
+                WHERE id = ?
+                  AND course_id = ?
+                """,
+                matchKeywords.trim(),
+                pointId,
+                courseId
+        );
+
+        if (updated != 1) {
+            throw new BusinessException(
+                    404, "课程知识点不存在");
+        }
     }
 
     /**
@@ -262,6 +312,42 @@ public class LearningPathService {
                 },
                 courseId, studentId
         );
+
+        return result;
+    }
+
+    /**
+     * 学习路径生成使用的有效掌握程度。
+     *
+     * 自评与系统推断分开保存，仅在生成时合并。
+     * 等级越小，需要的复习时间越多。
+     */
+    private Map<Long, Integer> effectiveMastery(
+            Long courseId,
+            Long studentId) {
+
+        Map<Long, Integer> result =
+                new HashMap<>(mastery(courseId, studentId));
+
+        Map<Long, Integer> inferred =
+                questionKnowledgeService.inferredMastery(
+                        courseId,
+                        studentId
+                );
+
+        for (var entry : inferred.entrySet()) {
+            Long pointId = entry.getKey();
+
+            int manualLevel =
+                    result.getOrDefault(pointId, 2);
+
+            int inferredLevel = entry.getValue();
+
+            result.put(
+                    pointId,
+                    Math.min(manualLevel, inferredLevel)
+            );
+        }
 
         return result;
     }
@@ -461,7 +547,7 @@ public class LearningPathService {
         }
 
         Map<Long, Integer> mastery =
-                mastery(courseId, studentId);
+                effectiveMastery(courseId, studentId);
 
         List<Point> ordered =
                 orderPoints(courseId, coursePoints, mastery);
