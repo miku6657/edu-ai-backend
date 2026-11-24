@@ -109,6 +109,18 @@ export function generateLearningPath(
   )
 }
 
+/**
+ * 根据学习目标查找已有学习路径。
+ * 不存在时返回 null，不会生成新的路径。
+ */
+export function getLearningPathByGoal(
+  goalId: BigIntId,
+): Promise<LearningPath | null> {
+  return apiRequest<LearningPath | null>(
+    `/v1/learning-paths/goals/${encodeURIComponent(goalId)}`,
+  )
+}
+
 export function getLearningPath(
   pathId: BigIntId,
 ): Promise<LearningPath> {
@@ -145,5 +157,13 @@ export function applyLearningPathAdjustment(
       method: 'POST',
       body: { fingerprint },
     },
+  )
+}
+
+export function getMyKnowledgeMastery(
+  courseId: BigIntId,
+): Promise<Record<string, number>> {
+  return apiRequest<Record<string, number>>(
+    `/v1/learning-paths/courses/${encodeURIComponent(courseId)}/mastery`,
   )
 }

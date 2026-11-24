@@ -7,7 +7,9 @@ import {
   applyLearningPathAdjustment,
   generateLearningPath,
   getLearningPath,
+  getLearningPathByGoal,
   getLearningPathProgress,
+  getMyKnowledgeMastery,
   listKnowledgePoints,
   previewLearningPathAdjustment,
   updateKnowledgeMastery,
@@ -79,10 +81,12 @@ describe('learning path API', () => {
     }
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse([point]))
+      .mockResolvedValueOnce(jsonResponse({ [LARGE_ID]: 3 }))
       .mockResolvedValueOnce(jsonResponse({ pointId: LARGE_ID }))
       .mockResolvedValueOnce(jsonResponse('依赖已添加'))
       .mockResolvedValueOnce(jsonResponse('掌握度已更新'))
       .mockResolvedValueOnce(jsonResponse(path))
+      .mockResolvedValueOnce(jsonResponse(null))
       .mockResolvedValueOnce(jsonResponse(path))
       .mockResolvedValueOnce(jsonResponse(progress))
       .mockResolvedValueOnce(jsonResponse(adjustment))
@@ -90,6 +94,9 @@ describe('learning path API', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     await expect(listKnowledgePoints(LARGE_ID)).resolves.toEqual([point])
+    await expect(getMyKnowledgeMastery(LARGE_ID)).resolves.toEqual({
+      [LARGE_ID]: 3,
+    })
     await expect(
       addKnowledgePoint(LARGE_ID, {
         title: point.title,
@@ -104,6 +111,7 @@ describe('learning path API', () => {
       updateKnowledgeMastery(LARGE_ID, LARGE_ID, 3),
     ).resolves.toBe('掌握度已更新')
     await expect(generateLearningPath(LARGE_ID)).resolves.toEqual(path)
+    await expect(getLearningPathByGoal(LARGE_ID)).resolves.toBeNull()
     await expect(getLearningPath(LARGE_ID)).resolves.toEqual(path)
     await expect(getLearningPathProgress(LARGE_ID)).resolves.toEqual(progress)
     await expect(
@@ -120,6 +128,11 @@ describe('learning path API', () => {
     }))).toEqual([
       {
         url: `/api/v1/learning-paths/courses/${LARGE_ID}/points`,
+        method: 'GET',
+        body: undefined,
+      },
+      {
+        url: `/api/v1/learning-paths/courses/${LARGE_ID}/mastery`,
         method: 'GET',
         body: undefined,
       },
@@ -148,6 +161,11 @@ describe('learning path API', () => {
       {
         url: `/api/v1/learning-paths/goals/${LARGE_ID}/generate`,
         method: 'POST',
+        body: undefined,
+      },
+      {
+        url: `/api/v1/learning-paths/goals/${LARGE_ID}`,
+        method: 'GET',
         body: undefined,
       },
       {

@@ -42,6 +42,7 @@ import {
   zonedDateParts,
 } from '@/views/home/dashboard-data'
 import DdlTaskForm from '@/views/ddl/DdlTaskForm.vue'
+import TeacherKnowledgePointPanel from '@/views/ddl/TeacherKnowledgePointPanel.vue'
 import {
   boardCounts,
   buildCreatePayload,
@@ -787,6 +788,8 @@ async function showPublicProgress(
         </div>
       </div>
     </section>
+
+    <TeacherKnowledgePointPanel v-if="auth.isTeacher" />
 
     <!-- F4-01：学生个人学习目标 -->
     <StudentLearningGoalPanel

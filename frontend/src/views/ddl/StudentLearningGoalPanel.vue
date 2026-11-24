@@ -14,6 +14,7 @@ import type { LearningGoal } from '@/api/learning-goal'
 import {
   generateLearningPath,
   getLearningPath,
+  getLearningPathByGoal,
   getLearningPathProgress,
   previewLearningPathAdjustment,
   applyLearningPathAdjustment,
@@ -24,6 +25,7 @@ import type {
   LearningPathProgress,
 } from '@/api/learning-path'
 import BaseCard from '@/components/ui/BaseCard.vue'
+import StudentKnowledgeMasteryPanel from '@/views/ddl/StudentKnowledgeMasteryPanel.vue'
 import {
   notifyError,
   notifySuccess,
@@ -102,6 +104,21 @@ watch(courseId, async (id) => {
         goalText: result.goalText,
         weeklyHours: result.weeklyHours,
         targetDate: result.targetDate,
+      }
+
+      if (result.status === 'CONFIRMED') {
+        const existingPath = await getLearningPathByGoal(result.id)
+
+        if (version !== queryVersion.value) return
+
+        generatedPath.value = existingPath
+
+        if (existingPath) {
+          learningPathProgress.value =
+            await getLearningPathProgress(existingPath.pathId)
+
+          if (version !== queryVersion.value) return
+        }
       }
     }
   } catch (error) {
@@ -388,8 +405,13 @@ defineExpose({ refreshPathProgress })
         学习目标已确认。下一阶段将根据目标、每周可用时间和课程知识点生成学习路径。
       </p>
 
+      <StudentKnowledgeMasteryPanel
+        v-if="courseId"
+        :course-id="courseId"
+      />
+
       <el-button
-        v-if="goal?.status === 'CONFIRMED'"
+        v-if="goal?.status === 'CONFIRMED' && !generatedPath"
         type="primary"
         :loading="generating"
         @click="generatePath"
