@@ -1,6 +1,7 @@
 package com.edu.ai.security;
 
 import com.edu.ai.system.entity.User;
+import com.edu.ai.system.enums.UserRole;
 import com.edu.ai.system.mapper.UserMapper;
 
 import jakarta.servlet.FilterChain;
@@ -22,14 +23,10 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 import java.util.List;
-import java.util.Set;
 
 @Component
 public class JwtAuthenticationFilter
         extends OncePerRequestFilter {
-
-    private static final Set<String> VALID_ROLES =
-            Set.of("ADMIN", "USER");
 
     private final JwtTokenProvider jwtTokenProvider;
     private final UserMapper userMapper;
@@ -51,9 +48,7 @@ public class JwtAuthenticationFilter
 
         String header = request.getHeader("Authorization");
 
-        if (header == null
-                || !header.startsWith("Bearer ")) {
-
+        if (header == null || !header.startsWith("Bearer ")) {
             filterChain.doFilter(request, response);
             return;
         }
@@ -70,7 +65,7 @@ public class JwtAuthenticationFilter
 
             Long userId = jwtTokenProvider.getUserId(token);
 
-            // 每次请求重新查询数据库
+            // 每次请求重新读取数据库中的用户状态和角色
             User user = userMapper.selectById(userId);
 
             if (user == null) {
@@ -78,7 +73,6 @@ public class JwtAuthenticationFilter
                 return;
             }
 
-            // 检查用户是否已禁用
             if (!Integer.valueOf(1).equals(user.getStatus())) {
                 unauthorized(response, "账号已被禁用");
                 return;
@@ -86,20 +80,19 @@ public class JwtAuthenticationFilter
 
             String role = user.getRole();
 
-            if (role == null || !VALID_ROLES.contains(role)) {
+            if (!UserRole.isValid(role)) {
                 unauthorized(response, "用户角色无效");
                 return;
             }
 
-            // 权限以数据库中的当前角色为准
+            role = UserRole.normalize(role);
+
             List<SimpleGrantedAuthority> authorities =
                     List.of(
-                            new SimpleGrantedAuthority(
-                                    "ROLE_" + role)
+                            new SimpleGrantedAuthority("ROLE_" + role)
                     );
 
-            // 保持 Long 类型 principal，
-            // 兼容已有 Controller 的身份获取方式
+            // 保持原有 Long 类型 principal，避免影响现有 Controller
             UsernamePasswordAuthenticationToken authentication =
                     new UsernamePasswordAuthenticationToken(
                             user.getId(),
@@ -139,7 +132,8 @@ public class JwtAuthenticationFilter
         response.setStatus(401);
         response.setCharacterEncoding("UTF-8");
         response.setContentType(
-                "application/json;charset=UTF-8");
+                "application/json;charset=UTF-8"
+        );
 
         String body = """
                 {

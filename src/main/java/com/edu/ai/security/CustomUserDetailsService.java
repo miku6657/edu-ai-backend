@@ -1,8 +1,8 @@
-
 package com.edu.ai.security;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.edu.ai.system.entity.User;
+import com.edu.ai.system.enums.UserRole;
 import com.edu.ai.system.mapper.UserMapper;
 
 import org.springframework.security.core.userdetails.UserDetails;
@@ -23,36 +23,24 @@ public class CustomUserDetailsService implements UserDetailsService {
     public UserDetails loadUserByUsername(String username)
             throws UsernameNotFoundException {
 
-        // 根据用户名查询用户
-        LambdaQueryWrapper<User> queryWrapper =
-                new LambdaQueryWrapper<>();
+        User user = userMapper.selectOne(
+                new LambdaQueryWrapper<User>()
+                        .eq(User::getUsername, username)
+        );
 
-        queryWrapper.eq(User::getUsername, username);
-
-        User user = userMapper.selectOne(queryWrapper);
-
-        // 用户不存在
         if (user == null) {
-            throw new UsernameNotFoundException(
-                    "用户不存在：" + username
-            );
+            throw new UsernameNotFoundException("用户不存在");
         }
 
-        // 角色校验：仅允许 ADMIN 和 USER
-        if (!"ADMIN".equals(user.getRole())
-                && !"USER".equals(user.getRole())) {
-
-            throw new UsernameNotFoundException(
-                    "用户角色无效"
-            );
+        if (!UserRole.isValid(user.getRole())) {
+            throw new UsernameNotFoundException("用户角色无效");
         }
 
-        // 返回 Spring Security 用户对象
         return new LoginUser(
                 user.getId(),
                 user.getUsername(),
                 user.getPassword(),
-                user.getRole(),
+                UserRole.normalize(user.getRole()),
                 user.getStatus() != null
                         && user.getStatus() == 1
         );

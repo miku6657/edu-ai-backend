@@ -8,6 +8,7 @@ import com.edu.ai.security.JwtTokenProvider;
 
 import com.edu.ai.system.dto.RegisterRequest;
 import com.edu.ai.system.entity.User;
+import com.edu.ai.system.enums.UserRole;
 import com.edu.ai.system.mapper.UserMapper;
 import com.edu.ai.system.service.AuthService;
 
@@ -50,10 +51,11 @@ public class AuthServiceImpl implements AuthService {
 
         if (password.getBytes(StandardCharsets.UTF_8).length > 72) {
             throw new BusinessException(
-                    400, "密码不能超过72个UTF-8字节");
+                    400,
+                    "密码不能超过72个UTF-8字节"
+            );
         }
 
-        // 检查用户名是否已经存在
         Long count = userMapper.selectCount(
                 new LambdaQueryWrapper<User>()
                         .eq(User::getUsername, username)
@@ -68,30 +70,23 @@ public class AuthServiceImpl implements AuthService {
         User user = new User();
 
         user.setUsername(username);
-
-        // 密码必须经过 BCrypt 加密
         user.setPassword(passwordEncoder.encode(password));
-
-        // 前端目前没有昵称字段，默认使用用户名
         user.setNickname(username);
 
-        // 普通注册用户固定为 USER
-        user.setRole("USER");
+        // 普通注册只能成为学生
+        // 教师和管理员由管理员在后台创建
+        user.setRole(UserRole.STUDENT.name());
 
-        // 1：正常
         user.setStatus(1);
-
         user.setCreateTime(now);
         user.setUpdateTime(now);
 
         try {
             userMapper.insert(user);
         } catch (DuplicateKeyException e) {
-            // 并发注册时由数据库唯一索引兜底
             throw new BusinessException(409, "用户名已存在");
         }
 
-        // 注册成功后立即签发 JWT
         String token = jwtTokenProvider.generateToken(
                 user.getId(),
                 user.getRole()

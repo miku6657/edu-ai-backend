@@ -1,10 +1,13 @@
 package com.edu.ai.course.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+
 import com.edu.ai.common.BusinessException;
+
 import com.edu.ai.course.dto.CourseDTO;
 import com.edu.ai.course.entity.Course;
 import com.edu.ai.course.mapper.CourseMapper;
+import com.edu.ai.course.service.CourseInviteCodeGenerator;
 import com.edu.ai.course.service.CourseService;
 
 import org.springframework.stereotype.Service;
@@ -18,11 +21,19 @@ public class CourseServiceImpl implements CourseService {
 
     private final CourseMapper courseMapper;
 
-    public CourseServiceImpl(CourseMapper courseMapper) {
+    private final CourseInviteCodeGenerator inviteCodeGenerator;
+
+    public CourseServiceImpl(
+            CourseMapper courseMapper,
+            CourseInviteCodeGenerator inviteCodeGenerator) {
+
         this.courseMapper = courseMapper;
+        this.inviteCodeGenerator = inviteCodeGenerator;
     }
 
-    // 创建个人课程空间
+    /**
+     * 教师创建课程
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Course createCourse(CourseDTO dto, Long userId) {
@@ -33,7 +44,13 @@ public class CourseServiceImpl implements CourseService {
 
         course.setName(dto.getName().trim());
         course.setDescription(dto.getDescription());
+
+        // 课程创建人
         course.setUserId(userId);
+
+        // 自动生成邀请码
+        course.setInviteCode(inviteCodeGenerator.generate());
+
         course.setStatus(1);
 
         LocalDateTime now = LocalDateTime.now();
@@ -46,7 +63,9 @@ public class CourseServiceImpl implements CourseService {
         return course;
     }
 
-    // 修改自己的课程
+    /**
+     * 修改自己的课程
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void updateCourse(
@@ -65,7 +84,9 @@ public class CourseServiceImpl implements CourseService {
         courseMapper.updateById(course);
     }
 
-    // 停用自己的课程
+    /**
+     * 停用自己的课程
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void disableCourse(Long courseId, Long userId) {
@@ -78,7 +99,9 @@ public class CourseServiceImpl implements CourseService {
         courseMapper.updateById(course);
     }
 
-    // 查询自己的所有课程
+    /**
+     * 查询教师创建的课程
+     */
     @Override
     public List<Course> getMyCourses(Long userId) {
 
@@ -89,7 +112,9 @@ public class CourseServiceImpl implements CourseService {
         );
     }
 
-    // 查看自己的课程详情
+    /**
+     * 查询教师自己的课程详情
+     */
     @Override
     public Course getCourseDetail(
             Long courseId,
@@ -98,7 +123,9 @@ public class CourseServiceImpl implements CourseService {
         return requireMyCourse(courseId, userId);
     }
 
-    // 校验课程归属
+    /**
+     * 校验课程归属
+     */
     private Course requireMyCourse(
             Long courseId,
             Long userId) {
@@ -120,7 +147,6 @@ public class CourseServiceImpl implements CourseService {
         return course;
     }
 
-    // 校验课程参数
     private void validateCourseDTO(CourseDTO dto) {
 
         if (dto == null
