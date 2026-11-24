@@ -176,3 +176,54 @@ export function removeCourseStudent(
     },
   )
 }
+
+/**
+ * 管理员查看课程邀请码
+ */
+export function adminGetCourseInviteCode(
+  courseId: BigIntId,
+): Promise<CourseInviteCode> {
+  return apiRequest<CourseInviteCode>(
+    `/admin/courses/${encodeURIComponent(courseId)}/invite-code`,
+  )
+}
+
+/**
+ * 管理员重新生成课程邀请码
+ */
+export function adminRegenerateCourseInviteCode(
+  courseId: BigIntId,
+): Promise<CourseInviteCode> {
+  return apiRequest<CourseInviteCode>(
+    `/admin/courses/${encodeURIComponent(courseId)}/invite-code`,
+    {
+      method: 'POST',
+    },
+  )
+}
+
+/**
+ * 管理员查看课程成员
+ */
+export function adminListCourseStudents(
+  courseId: BigIntId,
+): Promise<CourseMember[]> {
+  return apiRequest<CourseMember[]>(
+    `/admin/courses/${encodeURIComponent(courseId)}/students`,
+  )
+}
+
+/**
+ * 管理员移除课程学生
+ */
+export function adminRemoveCourseStudent(
+  courseId: BigIntId,
+  studentId: BigIntId,
+): Promise<void> {
+  return apiRequest<void>(
+    `/admin/courses/${encodeURIComponent(courseId)}/students/${encodeURIComponent(studentId)}`,
+    {
+      method: 'DELETE',
+    },
+  )
+}

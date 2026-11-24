@@ -3,9 +3,24 @@ import { computed, onMounted, ref } from 'vue'
 import { Plus, Search, BookOpen, MoreHorizontal } from '@lucide/vue'
 import { ElMessageBox } from 'element-plus'
 
-import { listCourses, createCourse, updateCourse, deleteCourse } from '@/api/course'
-import type { Course } from '@/api/course'
+import {
+  adminGetCourseInviteCode,
+  adminListCourseStudents,
+  adminRegenerateCourseInviteCode,
+  adminRemoveCourseStudent,
+  createCourse,
+  deleteCourse,
+  getCourseInviteCode,
+  joinCourse,
+  listCourseStudents,
+  regenerateCourseInviteCode,
+  removeCourseStudent,
+  updateCourse,
+} from '@/api/course'
+import type { Course, CourseMember } from '@/api/course'
+import { listAccessibleCourses } from '@/api/course-access'
 import type { BigIntId } from '@/api/types'
+import { useAuthStore } from '@/stores/auth'
 import BaseCard from '@/components/ui/BaseCard.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { notifyError, notifySuccess, notifyWarning } from '@/utils/notify'
@@ -16,6 +31,7 @@ import {
 
 const loading = ref(false)
 const loadError = ref('')
+const auth = useAuthStore()
 const courses = ref<Course[]>([])
 const searchQuery = ref('')
 
@@ -23,6 +39,10 @@ const creating = ref(false)
 const editing = ref(false)
 const submitting = ref(false)
 const deletingId = ref<BigIntId | null>(null)
+const membersVisible = ref(false)
+const membersLoading = ref(false)
+const selectedMemberCourse = ref<Course | null>(null)
+const members = ref<CourseMember[]>([])
 
 const createForm = ref({
   name: '',
@@ -70,7 +90,7 @@ async function loadCourses(): Promise<void> {
   loadError.value = ''
 
   try {
-    courses.value = await listCourses()
+    courses.value = await listAccessibleCourses()
   } catch (error) {
     loadError.value =
       error instanceof Error ? error.message : '课程列表读取失败'
@@ -210,6 +230,129 @@ async function disableCourse(course: Course): Promise<void> {
     deletingId.value = null
   }
 }
+
+async function openJoinCourse(): Promise<void> {
+  try {
+    const { value } = await ElMessageBox.prompt(
+      '请输入教师提供的课程邀请码',
+      '加入课程',
+      {
+        confirmButtonText: '加入课程',
+        cancelButtonText: '取消',
+        inputPlaceholder: '例如 K7M9X2PA',
+        inputPattern: /^[A-Za-z0-9]{6,12}$/,
+        inputErrorMessage: '邀请码应为6至12位字母或数字',
+      },
+    )
+
+    const course = await joinCourse({
+      inviteCode: value.trim().toUpperCase(),
+    })
+
+    notifySuccess(`成功加入课程「${course.name}」`)
+    await loadCourses()
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') {
+      notifyError(error)
+    }
+  }
+}
+
+async function showInviteCode(course: Course): Promise<void> {
+  try {
+    const result = auth.isAdmin
+      ? await adminGetCourseInviteCode(course.id)
+      : await getCourseInviteCode(course.id)
+
+    await ElMessageBox.alert(
+      `课程邀请码：${result.inviteCode}`,
+      `「${course.name}」的邀请码`,
+      {
+        confirmButtonText: '知道了',
+      },
+    )
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') {
+      notifyError(error)
+    }
+  }
+}
+
+async function resetInviteCode(course: Course): Promise<void> {
+  try {
+    await ElMessageBox.confirm(
+      '重置后旧邀请码立即失效，已加入的学生不会被移除。确定继续吗？',
+      '重置课程邀请码',
+      {
+        type: 'warning',
+        confirmButtonText: '确认重置',
+        cancelButtonText: '取消',
+      },
+    )
+  } catch {
+    return
+  }
+
+  try {
+    const result = auth.isAdmin
+      ? await adminRegenerateCourseInviteCode(course.id)
+      : await regenerateCourseInviteCode(course.id)
+
+    await ElMessageBox.alert(
+      `新邀请码：${result.inviteCode}`,
+      '重置成功',
+    )
+  } catch (error) {
+    notifyError(error)
+  }
+}
+
+async function openMembers(course: Course): Promise<void> {
+  selectedMemberCourse.value = course
+  membersVisible.value = true
+  membersLoading.value = true
+
+  try {
+    members.value = auth.isAdmin
+      ? await adminListCourseStudents(course.id)
+      : await listCourseStudents(course.id)
+  } catch (error) {
+    notifyError(error)
+  } finally {
+    membersLoading.value = false
+  }
+}
+
+async function removeMember(member: CourseMember): Promise<void> {
+  const course = selectedMemberCourse.value
+  if (!course) return
+
+  try {
+    await ElMessageBox.confirm(
+      `确认将「${member.nickname || member.username}」移出课程吗？`,
+      '移除学生',
+      {
+        type: 'warning',
+        confirmButtonText: '移除',
+        cancelButtonText: '取消',
+      },
+    )
+  } catch {
+    return
+  }
+
+  try {
+    if (auth.isAdmin) {
+      await adminRemoveCourseStudent(course.id, member.studentId)
+    } else {
+      await removeCourseStudent(course.id, member.studentId)
+    }
+    notifySuccess('学生已移出课程')
+    await openMembers(course)
+  } catch (error) {
+    notifyError(error)
+  }
+}
 </script>
 
 <template>
@@ -243,11 +386,20 @@ async function disableCourse(course: Course): Promise<void> {
           </div>
 
           <el-button
+            v-if="auth.isTeacher"
             type="primary"
             :icon="Plus"
             @click="openCreate"
           >
             新建课程
+          </el-button>
+          <el-button
+            v-else-if="auth.isStudent"
+            type="primary"
+            :icon="Plus"
+            @click="openJoinCourse"
+          >
+            加入课程
           </el-button>
         </div>
       </section>
@@ -314,15 +466,27 @@ async function disableCourse(course: Course): Promise<void> {
       <BaseCard v-else-if="!hasCourses">
         <EmptyState
           image="/illustrations/scene-study-desk.png"
-          title="还没有课程"
-          description="创建第一门课程，上传课件后即可开始使用 AI 学习助手。"
+          :title="auth.isAdmin ? '暂无课程' : '还没有课程'"
+          :description="auth.isTeacher
+            ? '创建第一门课程，上传课件后即可开始使用 AI 学习助手。'
+            : auth.isStudent
+              ? '输入教师提供的邀请码即可加入课程。'
+              : ''"
         >
           <template #action>
             <el-button
+              v-if="auth.isTeacher"
               type="primary"
               @click="openCreate"
             >
               新建课程
+            </el-button>
+            <el-button
+              v-else-if="auth.isStudent"
+              type="primary"
+              @click="openJoinCourse"
+            >
+              加入课程
             </el-button>
           </template>
 
@@ -358,7 +522,7 @@ async function disableCourse(course: Course): Promise<void> {
               <BookOpen :size="24" />
             </div>
 
-            <el-dropdown trigger="click">
+            <el-dropdown v-if="auth.isTeacher || auth.isAdmin" trigger="click">
               <button
                 type="button"
                 class="course-menu"
@@ -370,17 +534,30 @@ async function disableCourse(course: Course): Promise<void> {
               <template #dropdown>
                 <el-dropdown-menu>
                   <el-dropdown-item
+                    v-if="auth.isTeacher"
                     @click="openEdit(course)"
                   >
                     编辑课程
                   </el-dropdown-item>
 
                   <el-dropdown-item
-                    v-if="course.status === 1"
+                    v-if="auth.isTeacher && course.status === 1"
                     divided
                     @click="disableCourse(course)"
                   >
                     停用课程
+                  </el-dropdown-item>
+
+                  <el-dropdown-item @click="showInviteCode(course)">
+                    查看邀请码
+                  </el-dropdown-item>
+
+                  <el-dropdown-item @click="resetInviteCode(course)">
+                    重置邀请码
+                  </el-dropdown-item>
+
+                  <el-dropdown-item @click="openMembers(course)">
+                    管理学生
                   </el-dropdown-item>
                 </el-dropdown-menu>
               </template>
@@ -470,6 +647,33 @@ async function disableCourse(course: Course): Promise<void> {
       </div>
 
     </aside>
+
+    <el-dialog
+      v-model="membersVisible"
+      :title="`课程成员 - ${selectedMemberCourse?.name ?? ''}`"
+      width="680px"
+    >
+      <el-table
+        v-loading="membersLoading"
+        :data="members"
+        empty-text="暂无学生"
+      >
+        <el-table-column prop="username" label="用户名" />
+        <el-table-column prop="nickname" label="昵称" />
+        <el-table-column prop="joinTime" label="加入时间" />
+        <el-table-column label="操作" width="100">
+          <template #default="{ row }">
+            <el-button
+              type="danger"
+              text
+              @click="removeMember(row)"
+            >
+              移除
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-dialog>
 
     <!-- 创建课程弹窗 -->
     <el-dialog

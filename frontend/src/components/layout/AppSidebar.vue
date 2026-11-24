@@ -143,7 +143,7 @@ function openNotifications(): void {
     <div class="app-sidebar__nav app-sidebar__nav--secondary">
       <p class="app-sidebar__section">更多</p>
       <router-link
-        v-if="auth.isAuthenticated"
+        v-if="auth.isAdmin"
         class="app-nav-item"
         :class="{ 'app-nav-item--active': route.name === 'settings' }"
         :to="{ name: 'settings' }"
@@ -178,7 +178,7 @@ function openNotifications(): void {
     <router-link
       v-if="auth.isAuthenticated"
       class="app-sidebar__user"
-      :to="{ name: 'settings' }"
+      :to="{ name: auth.isAdmin ? 'settings' : 'home' }"
       title="个人设置"
       @click="emit('navigate')"
     >
@@ -187,7 +187,12 @@ function openNotifications(): void {
         <strong>{{ auth.displayName }}</strong>
         <small>普通用户</small>
       </span>
-      <Settings class="app-sidebar__user-gear" :size="16" :stroke-width="1.8" />
+      <Settings
+        v-if="auth.isAdmin"
+        class="app-sidebar__user-gear"
+        :size="16"
+        :stroke-width="1.8"
+      />
     </router-link>
     <router-link
       v-else

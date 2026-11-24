@@ -1,6 +1,6 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 
-import { listCourses } from '@/api/course'
+import { listAccessibleCourses } from '@/api/course-access'
 import type { Course } from '@/api/course'
 import { listDdlTasks } from '@/api/ddl'
 import type { DdlTask, DdlTaskBoard } from '@/api/ddl'
@@ -256,7 +256,7 @@ export function useHomeData() {
     }
     coursesState.value = { status: 'loading', data: [], error: '' }
     try {
-      const courses = await listCourses()
+      const courses = await listAccessibleCourses()
       coursesState.value = {
         status: courses.length === 0 ? 'empty' : 'ready',
         data: courses,

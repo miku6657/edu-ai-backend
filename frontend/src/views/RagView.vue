@@ -15,7 +15,7 @@ import {
 } from '@lucide/vue'
 import { ElMessageBox } from 'element-plus'
 
-import { listCourses } from '@/api/course'
+import { listAccessibleCourses } from '@/api/course-access'
 import type { Course } from '@/api/course'
 import type { BigIntId } from '@/api/types'
 import { ApiError } from '@/api/error'
@@ -125,7 +125,7 @@ async function bootstrap(): Promise<void> {
   loadingCourses.value = true
   courseError.value = ''
   try {
-    courses.value = await listCourses()
+    courses.value = await listAccessibleCourses()
     const exists = courses.value.some(
       (course) => course.id === selectedCourseId.value,
     )

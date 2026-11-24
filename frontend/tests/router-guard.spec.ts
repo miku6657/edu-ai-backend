@@ -71,11 +71,45 @@ describe('installAuthGuard', () => {
     expect(router.currentRoute.value.fullPath).toBe('/workspace')
   })
 
-  it('已登录访问登录页会回到设置页，避免重复登录', async () => {
+  it('已登录访问登录页会回到首页，避免重复登录', async () => {
     useAuthStore().setSession({ token: 'jwt-token-value', user: null })
     const router = buildRouter()
 
     await router.push('/login')
+
+    expect(router.currentRoute.value.name).toBe('home')
+  })
+
+  it('非管理员访问设置页会回到首页', async () => {
+    useAuthStore().setSession({
+      token: 'jwt-token-value',
+      user: {
+        user_id: '10001',
+        username: 'student',
+        nickname: '学生',
+        role: 'STUDENT',
+      },
+    })
+    const router = buildRouter()
+
+    await router.push('/settings')
+
+    expect(router.currentRoute.value.name).toBe('home')
+  })
+
+  it('管理员可以访问设置页', async () => {
+    useAuthStore().setSession({
+      token: 'jwt-token-value',
+      user: {
+        user_id: '10001',
+        username: 'admin',
+        nickname: '管理员',
+        role: 'ADMIN',
+      },
+    })
+    const router = buildRouter()
+
+    await router.push('/settings')
 
     expect(router.currentRoute.value.name).toBe('settings')
   })

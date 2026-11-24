@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 
 import {
+  adminGetCourseInviteCode,
+  adminListCourseStudents,
+  adminRegenerateCourseInviteCode,
+  adminRemoveCourseStudent,
   deleteCourse,
   getCourseDetail,
   getCourseInviteCode,
@@ -125,6 +129,40 @@ describe('course and document BIGINT APIs', () => {
     expect(capturedRequests(fetchMock)).toEqual([
       { method: 'GET', body: undefined },
       { method: 'POST', body: JSON.stringify({ inviteCode: 'K7M9X2PA' }) },
+      { method: 'GET', body: undefined },
+      { method: 'POST', body: undefined },
+      { method: 'GET', body: undefined },
+      { method: 'DELETE', body: undefined },
+    ])
+  })
+
+  it('uses admin-specific endpoints for course invite and membership management', async () => {
+    const inviteCode = { inviteCode: 'K7M9X2PA' }
+    const member = {
+      studentId: '9007199254740994',
+      username: 'student01',
+      nickname: '学生',
+      joinTime: '2026-11-14T10:00:00',
+    }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(inviteCode))
+      .mockResolvedValueOnce(jsonResponse(inviteCode))
+      .mockResolvedValueOnce(jsonResponse([member]))
+      .mockResolvedValueOnce(jsonResponse(null))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(adminGetCourseInviteCode(LARGE_ID)).resolves.toEqual(inviteCode)
+    await expect(adminRegenerateCourseInviteCode(LARGE_ID)).resolves.toEqual(inviteCode)
+    await expect(adminListCourseStudents(LARGE_ID)).resolves.toEqual([member])
+    await adminRemoveCourseStudent(LARGE_ID, member.studentId)
+
+    expect(capturedUrls(fetchMock)).toEqual([
+      `/api/admin/courses/${LARGE_ID}/invite-code`,
+      `/api/admin/courses/${LARGE_ID}/invite-code`,
+      `/api/admin/courses/${LARGE_ID}/students`,
+      `/api/admin/courses/${LARGE_ID}/students/${member.studentId}`,
+    ])
+    expect(capturedRequests(fetchMock)).toEqual([
       { method: 'GET', body: undefined },
       { method: 'POST', body: undefined },
       { method: 'GET', body: undefined },

@@ -71,7 +71,7 @@ const routes: RouteRecordRaw[] = [
         path: 'settings',
         name: 'settings',
         component: SettingsView,
-        meta: { title: '个人设置', requiresAuth: true },
+        meta: { title: '系统设置', requiresAuth: true },
       },
       {
         // 使用指南：不要求登录，未注册的人也能先看功能说明

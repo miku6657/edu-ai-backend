@@ -3,7 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 
 import { ElMessageBox } from 'element-plus'
 
-import { listCourses } from '@/api/course'
+import { listAccessibleCourses } from '@/api/course-access'
 import type { Course } from '@/api/course'
 import {
   deleteDoc,
@@ -19,6 +19,7 @@ import type { BigIntId } from '@/api/types'
 import BaseCard from '@/components/ui/BaseCard.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import TagBadge from '@/components/ui/TagBadge.vue'
+import { useAuthStore } from '@/stores/auth'
 import { useCourseStore } from '@/stores/course'
 import { notifyError, notifySuccess, notifyWarning } from '@/utils/notify'
 import {
@@ -38,6 +39,10 @@ import {
 type Tone = 'primary' | 'success' | 'warning' | 'danger' | 'neutral'
 
 const courseStore = useCourseStore()
+const auth = useAuthStore()
+const canManageDocuments = computed(
+  () => auth.isTeacher || auth.isAdmin,
+)
 
 const courses = ref<Course[]>([])
 const docs = ref<KnowledgeDoc[]>([])
@@ -142,7 +147,7 @@ async function loadCourses(): Promise<void> {
   loadingCourses.value = true
   loadError.value = ''
   try {
-    courses.value = await listCourses()
+    courses.value = await listAccessibleCourses()
     const exists = courses.value.some(
       (item) => item.id === selectedCourseId.value,
     )
@@ -378,11 +383,15 @@ function documentTone(doc: KnowledgeDoc): Tone {
             v-else-if="courses.length === 0"
             image="/illustrations/scene-study-desk.png"
             title="还没有课程空间"
-            description="先创建课程，再上传课件。"
+            :description="canManageDocuments
+              ? '先创建课程，再上传课件。'
+              : '加入课程后即可查看课程资料。'"
             compact
           >
             <template #action>
-              <router-link class="card-link" :to="{ name: 'courses' }">去创建课程</router-link>
+              <router-link class="card-link" :to="{ name: 'courses' }">
+                {{ canManageDocuments ? '去创建课程' : '去课程空间' }}
+              </router-link>
             </template>
           </EmptyState>
 
@@ -434,6 +443,7 @@ function documentTone(doc: KnowledgeDoc): Tone {
                 </el-select>
                 <el-button size="small" :disabled="loadingDocs" @click="loadDocs">刷新</el-button>
                 <el-button
+                  v-if="canManageDocuments"
                   type="primary"
                   size="small"
                   :loading="uploading"
@@ -460,6 +470,7 @@ function documentTone(doc: KnowledgeDoc): Tone {
 
             <template v-else>
               <div
+                v-if="canManageDocuments"
                 class="upload-zone"
                 :class="{
                   'upload-zone--active': dragActive,
@@ -496,6 +507,7 @@ function documentTone(doc: KnowledgeDoc): Tone {
               </div>
 
               <input
+                v-if="canManageDocuments"
                 ref="fileInput"
                 type="file"
                 :accept="UPLOAD_ACCEPT"
@@ -513,12 +525,14 @@ function documentTone(doc: KnowledgeDoc): Tone {
                 v-else-if="visibleDocs.length === 0"
                 image="/illustrations/scene-study-desk.png"
                 :title="docs.length === 0 ? '当前课程还没有课件' : '没有符合条件的课件'"
-                description="上传 PDF 课件后，系统会自动处理课件。"
+                :description="canManageDocuments
+                  ? '上传 PDF 课件后，系统会自动处理课件。'
+                  : '当前课程暂无可查看的课件。'"
                 compact
               >
                 <template #action>
                   <el-button
-                    v-if="docs.length === 0"
+                    v-if="docs.length === 0 && canManageDocuments"
                     type="primary"
                     size="small"
                     @click="chooseFile"
@@ -526,7 +540,7 @@ function documentTone(doc: KnowledgeDoc): Tone {
                     上传课件
                   </el-button>
                   <el-button
-                    v-else
+                    v-else-if="docs.length > 0"
                     size="small"
                     @click="filterStatus = ''"
                   >
@@ -568,10 +582,15 @@ function documentTone(doc: KnowledgeDoc): Tone {
                     <span v-else class="knowledge-muted">—</span>
                   </template>
                 </el-table-column>
-                <el-table-column label="操作"                 :width="compact ? 130 : 150" fixed="right">
+                <el-table-column
+                  v-if="canManageDocuments"
+                  label="操作"
+                  :width="compact ? 130 : 150"
+                  fixed="right"
+                >
                   <template #default="{ row }">
                     <el-button
-                      v-if="canRetry(row)"
+                      v-if="canManageDocuments && canRetry(row)"
                       text
                       type="primary"
                       :loading="actionDocId === row.id"
@@ -580,7 +599,7 @@ function documentTone(doc: KnowledgeDoc): Tone {
                       重试
                     </el-button>
                     <el-button
-                      v-if="canDelete(row)"
+                      v-if="canManageDocuments && canDelete(row)"
                       text
                       type="danger"
                       :loading="actionDocId === row.id"
@@ -589,7 +608,7 @@ function documentTone(doc: KnowledgeDoc): Tone {
                       删除
                     </el-button>
                     <span
-                      v-if="!canRetry(row) && !canDelete(row)"
+                      v-if="canManageDocuments && !canRetry(row) && !canDelete(row)"
                       class="knowledge-muted"
                     >
                       {{ row.status === 'DELETING' ? '清理中' : '已删除' }}
