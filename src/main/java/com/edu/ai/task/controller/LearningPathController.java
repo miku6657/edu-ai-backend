@@ -4,7 +4,6 @@ import com.edu.ai.common.BusinessException;
 import com.edu.ai.common.Result;
 import com.edu.ai.task.service.LearningPathService;
 import com.edu.ai.task.service.LearningPathService.PathResult;
-import com.edu.ai.task.service.LearningPathService.Point;
 
 import jakarta.validation.constraints.NotNull;
 import org.springframework.security.core.Authentication;
@@ -37,6 +36,14 @@ public class LearningPathController {
 
     public record MasteryRequest(
             @NotNull Integer level
+    ) {}
+
+    public record PointVO(
+            String id,
+            String courseId,
+            String title,
+            int estimatedMinutes,
+            int sortOrder
     ) {}
 
     private Long userId(Authentication auth) {
@@ -94,13 +101,35 @@ public class LearningPathController {
 
     // 教师及课程成员查看知识点
     @GetMapping("/courses/{courseId}/points")
-    public Result<List<Point>> listPoints(
+    public Result<List<PointVO>> listPoints(
             @PathVariable Long courseId,
             Authentication auth) {
 
         return Result.success(
-                service.listPoints(
-                        courseId, userId(auth))
+                service.listPoints(courseId, userId(auth))
+                        .stream()
+                        .map(point -> new PointVO(
+                                point.id().toString(),
+                                point.courseId().toString(),
+                                point.title(),
+                                point.estimatedMinutes(),
+                                point.sortOrder()
+                        ))
+                        .toList()
+        );
+    }
+
+    // 学生查看自己的掌握程度自评
+    @GetMapping("/courses/{courseId}/mastery")
+    public Result<Map<String, Integer>> myMastery(
+            @PathVariable Long courseId,
+            Authentication auth) {
+
+        return Result.success(
+                service.listMyMastery(
+                        courseId,
+                        userId(auth)
+                )
         );
     }
 
@@ -135,6 +164,22 @@ public class LearningPathController {
 
         return Result.success(
                 service.generate(goalId, userId(auth))
+        );
+    }
+
+    /**
+     * 查询目标已有路径，不触发生成。
+     */
+    @GetMapping("/goals/{goalId}")
+    public Result<PathResult> getByGoal(
+            @PathVariable Long goalId,
+            Authentication auth) {
+
+        return Result.success(
+                service.getByGoal(
+                        goalId,
+                        userId(auth)
+                )
         );
     }
 

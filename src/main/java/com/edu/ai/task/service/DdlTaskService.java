@@ -1,6 +1,7 @@
 package com.edu.ai.task.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.edu.ai.common.BusinessException;
 import com.edu.ai.task.dto.CreateDdlTaskRequest;
 import com.edu.ai.task.dto.DdlTaskBoardVO;
@@ -240,7 +241,40 @@ public class DdlTaskService {
             Long userId,
             boolean completed) {
 
-        DdlTask task = requireOwnedTask(taskId, userId);
+        // 第一次查询只用于识别路径关联，不进行写操作
+        DdlTask initial = requireOwnedTask(taskId, userId);
+
+        if (initial.getLearningPathItemId() != null) {
+
+            pathTaskSyncService.lockForCompletion(
+                    initial.getLearningPathItemId(),
+                    userId
+            );
+        }
+
+        // 锁定 DDL，并重新读取最新状态
+        DdlTask task = taskMapper.selectOne(
+                new LambdaQueryWrapper<DdlTask>()
+                        .eq(DdlTask::getId, taskId)
+                        .eq(DdlTask::getUserId, userId)
+                        .last("LIMIT 1 FOR UPDATE")
+        );
+
+        if (task == null) {
+            throw new BusinessException(
+                    404, "任务不存在或无权访问"
+            );
+        }
+
+        // 防止两次读取之间任务关联发生变化
+        if (!java.util.Objects.equals(
+                initial.getLearningPathItemId(),
+                task.getLearningPathItemId())) {
+
+            throw new BusinessException(
+                    409, "任务关联关系已变化，请重试"
+            );
+        }
 
         if ("CANCELED".equals(task.getStatus())) {
             throw new BusinessException(
@@ -254,7 +288,9 @@ public class DdlTaskService {
             task.setCompletedAt(null);
             task.setStatus(
                     determineInitialStatus(
-                            task, LocalDateTime.now())
+                            task,
+                            LocalDateTime.now()
+                    )
             );
         }
 
@@ -262,9 +298,10 @@ public class DdlTaskService {
 
         taskMapper.updateById(task);
 
-        // 普通个人 DDL 不会触发额外操作。
-        // 学习路径任务则同步更新阶段进度。
-        pathTaskSyncService.syncCompletion(task, completed);
+        pathTaskSyncService.syncCompletion(
+                task,
+                completed
+        );
 
         return task;
     }
@@ -459,17 +496,26 @@ public class DdlTaskService {
             DdlTask task,
             LocalDateTime now) {
 
-        if (!"ACTIVE".equals(task.getStatus())) {
+        if (!"ACTIVE".equals(task.getStatus())
+                || task.getDueAt() == null
+                || !task.getDueAt().isBefore(now)) {
             return;
         }
 
-        if (task.getDueAt() != null
-                && task.getDueAt().isBefore(now)) {
+        int updated = taskMapper.update(
+                null,
+                new LambdaUpdateWrapper<DdlTask>()
+                        .eq(DdlTask::getId, task.getId())
+                        .eq(DdlTask::getUserId, task.getUserId())
+                        .eq(DdlTask::getStatus, "ACTIVE")
+                        .eq(DdlTask::getDueAt, task.getDueAt())
+                        .set(DdlTask::getStatus, "OVERDUE")
+                        .set(DdlTask::getUpdatedAt, now)
+        );
 
+        if (updated == 1) {
             task.setStatus("OVERDUE");
             task.setUpdatedAt(now);
-
-            taskMapper.updateById(task);
         }
     }
 

@@ -12,7 +12,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.Statement;
 import java.time.LocalDate;
-import java.time.temporal.ChronoUnit;
 import java.util.*;
 
 @Service
@@ -267,6 +266,28 @@ public class LearningPathService {
         return result;
     }
 
+    public Map<String, Integer> listMyMastery(
+            Long courseId,
+            Long studentId) {
+
+        requireStudent(studentId);
+        permissions.requireActiveRead(courseId, studentId);
+
+        Map<Long, Integer> stored =
+                mastery(courseId, studentId);
+
+        Map<String, Integer> result = new LinkedHashMap<>();
+
+        for (Point point : points(courseId)) {
+            result.put(
+                    point.id().toString(),
+                    stored.getOrDefault(point.id(), 2)
+            );
+        }
+
+        return result;
+    }
+
     /**
      * 拓扑排序：
      * 先确保前置知识点排在后置知识点之前。
@@ -448,31 +469,45 @@ public class LearningPathService {
         int weeklyMinutes =
                 (Integer) goal.get("weeklyHours") * 60;
 
-        LocalDate start = LocalDate.now();
-        LocalDate target = (LocalDate) goal.get("targetDate");
+        LocalDate start = StudyWeekCapacity.today();
+        LocalDate target =
+                (LocalDate) goal.get("targetDate");
 
-        int availableWeeks = (int) (
-                ChronoUnit.DAYS.between(start, target) / 7
-        ) + 1;
-
-        if (availableWeeks < 1) {
+        if (weeklyMinutes <= 0 || target.isBefore(start)) {
             throw new BusinessException(
-                    409, "目标完成日期已过期");
+                    409, "每周学习时间或目标日期无效"
+            );
         }
+
+        int availableWeeks =
+                StudyWeekCapacity.availableWeeks(start, target);
 
         int totalMinutes = ordered.stream()
                 .mapToInt(p -> adjustedMinutes(p, mastery))
                 .sum();
 
-        int requiredWeeks = (int) Math.ceil(
-                totalMinutes / (double) weeklyMinutes);
+        int availableMinutes = 0;
+        int requiredWeeks = 0;
 
-        if (requiredWeeks > availableWeeks) {
+        for (int w = 1; w <= availableWeeks; w++) {
+            availableMinutes += StudyWeekCapacity.capacity(
+                    start, target, w, weeklyMinutes
+            );
+
+            requiredWeeks = w;
+
+            if (availableMinutes >= totalMinutes) {
+                break;
+            }
+        }
+
+        if (availableMinutes < totalMinutes) {
             throw new BusinessException(
                     409,
-                    "当前每周学习时间不足以完成计划，" +
-                    "预计需要" + requiredWeeks + "周，" +
-                    "请调整目标日期或每周学习时间"
+                    "目标日期前可用学习时间不足，" +
+                    "预计需要" + totalMinutes +
+                    "分钟，当前仅有" +
+                    availableMinutes + "分钟"
             );
         }
 
@@ -480,42 +515,56 @@ public class LearningPathService {
                 """
                 INSERT INTO student_learning_path
                     (goal_id, student_id, course_id,
-                     total_minutes, total_weeks, status)
-                VALUES (?, ?, ?, ?, ?, 'ACTIVE')
+                     total_minutes, total_weeks,
+                     status, create_time)
+                VALUES (?, ?, ?, ?, ?, 'ACTIVE', NOW())
                 """,
-                goalId, studentId, courseId,
-                totalMinutes, requiredWeeks
+                goalId,
+                studentId,
+                courseId,
+                totalMinutes,
+                requiredWeeks
         );
 
         int week = 1;
         int usedMinutes = 0;
         int sequence = 0;
 
-        for (Point p : ordered) {
-            int remaining = adjustedMinutes(p, mastery);
+        for (Point point : ordered) {
+
+            int remaining =
+                    adjustedMinutes(point, mastery);
             int segment = 0;
 
             while (remaining > 0) {
-                if (usedMinutes == weeklyMinutes) {
+
+                int capacity = StudyWeekCapacity.capacity(
+                        start, target, week, weeklyMinutes
+                );
+
+                if (capacity <= 0) {
+                    throw new BusinessException(
+                            409, "学习任务已超过目标完成日期"
+                    );
+                }
+
+                if (usedMinutes >= capacity) {
                     week++;
                     usedMinutes = 0;
+                    continue;
                 }
 
                 int assigned = Math.min(
-                        remaining,
-                        weeklyMinutes - usedMinutes
+                        remaining, capacity - usedMinutes
                 );
 
                 segment++;
                 sequence++;
 
-                LocalDate dueDate = start
-                        .plusWeeks(week - 1)
-                        .plusDays(6);
-
-                if (dueDate.isAfter(target)) {
-                    dueDate = target;
-                }
+                LocalDate due =
+                        StudyWeekCapacity.dueDate(
+                                start, target, week
+                        );
 
                 jdbc.update(
                         """
@@ -526,8 +575,13 @@ public class LearningPathService {
                              planned_due_date, status)
                         VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING')
                         """,
-                        pathId, p.id(), segment,
-                        sequence, week, assigned, dueDate
+                        pathId,
+                        point.id(),
+                        segment,
+                        sequence,
+                        week,
+                        assigned,
+                        due
                 );
 
                 remaining -= assigned;
@@ -605,5 +659,55 @@ public class LearningPathService {
                 (String) path.get("status"),
                 items
         );
+    }
+
+    /**
+     * 根据已确认的学习目标查询已有学习路径。
+     * 不存在时返回 null，不自动生成新路径。
+     */
+    public PathResult getByGoal(
+            Long goalId,
+            Long studentId) {
+
+        requireStudent(studentId);
+
+        List<Long> pathIds = jdbc.queryForList(
+                """
+                SELECT id
+                FROM student_learning_path
+                WHERE goal_id = ?
+                  AND student_id = ?
+                LIMIT 1
+                """,
+                Long.class,
+                goalId,
+                studentId
+        );
+
+        if (pathIds.isEmpty()) {
+            // 避免把他人的目标与不存在的目标都误当作
+            // 可以任意查询的记录。
+            Long count = jdbc.queryForObject(
+                    """
+                    SELECT COUNT(*)
+                    FROM student_learning_goal
+                    WHERE id = ?
+                      AND student_id = ?
+                    """,
+                    Long.class,
+                    goalId,
+                    studentId
+            );
+
+            if (count == null || count == 0) {
+                throw new BusinessException(
+                        404, "学习目标不存在"
+                );
+            }
+
+            return null;
+        }
+
+        return getPath(pathIds.get(0), studentId);
     }
 }

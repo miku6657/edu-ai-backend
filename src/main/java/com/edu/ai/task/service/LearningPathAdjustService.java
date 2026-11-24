@@ -136,6 +136,43 @@ public class LearningPathAdjustService {
         );
     }
 
+    /**
+     * 仅供确认调整时使用。
+     * 在路径行锁之后，按固定顺序锁定所有阶段项。
+     */
+    private List<Stage> loadStagesForUpdate(long pathId) {
+
+        return jdbc.query(
+                """
+                SELECT id, sequence_no, week_no,
+                       planned_minutes, planned_due_date,
+                       status, completed_at
+                FROM student_learning_path_item
+                WHERE path_id = ?
+                ORDER BY sequence_no, id
+                FOR UPDATE
+                """,
+                (rs, n) -> {
+                    var completed =
+                            rs.getTimestamp("completed_at");
+
+                    return new Stage(
+                            rs.getLong("id"),
+                            rs.getInt("sequence_no"),
+                            rs.getInt("week_no"),
+                            rs.getInt("planned_minutes"),
+                            rs.getDate("planned_due_date")
+                                    .toLocalDate(),
+                            rs.getString("status"),
+                            completed == null
+                                    ? null
+                                    : completed.toLocalDateTime()
+                    );
+                },
+                pathId
+        );
+    }
+
     private String fingerprint(
             long pathId,
             PathInfo path,
@@ -226,54 +263,81 @@ public class LearningPathAdjustService {
                 .sum();
 
         int week = currentWeek;
-        int used = Math.min(
-                weeklyCapacity, completedThisWeek
+
+        int currentCapacity = StudyWeekCapacity.capacity(
+                path.startDate(),
+                path.targetDate(),
+                week,
+                weeklyCapacity
         );
 
-        List<AdjustmentItem> changes =
-                new ArrayList<>();
+        int used = Math.min(
+                currentCapacity,
+                completedThisWeek
+        );
+
+        List<AdjustmentItem> changes = new ArrayList<>();
 
         for (Stage stage : stages) {
 
+            // 已完成任务保持历史安排
             if ("COMPLETED".equals(stage.status())) {
                 continue;
             }
 
             if (!"PENDING".equals(stage.status())) {
                 throw new BusinessException(
-                        409,
-                        "存在不支持调整的任务状态"
+                        409, "存在不支持调整的学习任务状态"
                 );
             }
 
+            // 当前版本不改变任务数量，也不再拆分阶段任务
             if (stage.minutes() <= 0
                     || stage.minutes() > weeklyCapacity) {
                 return new AdjustmentPreview(
-                        false, token,
-                        "某阶段任务超过每周可用时间，"
-                                + "需要重新拆分阶段任务",
-                        0, List.of()
+                        false,
+                        token,
+                        "存在超过每周学习容量的阶段任务，"
+                                + "需要重新拆分",
+                        0,
+                        List.of()
                 );
             }
 
-            // 每条阶段任务保持完整，不拆成多条。
-            if (used + stage.minutes() > weeklyCapacity) {
+            // 尝试安排到当前周；放不下则顺延到下一周
+            while (true) {
+
+                int capacity = StudyWeekCapacity.capacity(
+                        path.startDate(),
+                        path.targetDate(),
+                        week,
+                        weeklyCapacity
+                );
+
+                if (capacity <= 0) {
+                    return new AdjustmentPreview(
+                            false,
+                            token,
+                            "剩余学习时间不足，请延长目标日期"
+                                    + "或增加每周学习时间",
+                            0,
+                            List.of()
+                    );
+                }
+
+                if (used + stage.minutes() <= capacity) {
+                    break;
+                }
+
                 week++;
                 used = 0;
             }
 
-            LocalDate due = path.startDate()
-                    .plusWeeks(week - 1L)
-                    .plusDays(6);
-
-            if (due.isAfter(path.targetDate())) {
-                return new AdjustmentPreview(
-                        false, token,
-                        "剩余任务无法在目标日期前完成，"
-                                + "建议延长目标日期或增加每周学习时间",
-                        0, List.of()
-                );
-            }
+            LocalDate due = StudyWeekCapacity.dueDate(
+                    path.startDate(),
+                    path.targetDate(),
+                    week
+            );
 
             used += stage.minutes();
 
@@ -339,7 +403,7 @@ public class LearningPathAdjustService {
         }
 
         PathInfo path = loadPath(pathId, studentId);
-        List<Stage> stages = loadStages(pathId);
+        List<Stage> stages = loadStagesForUpdate(pathId);
 
         AdjustmentPreview preview =
                 calculate(pathId, path, stages);

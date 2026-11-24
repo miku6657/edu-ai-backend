@@ -252,4 +252,77 @@ public class LearningPathTaskSyncService {
             }
         }
     }
+
+    /**
+     * 修改学习路径任务前，统一锁定路径及阶段任务。
+     * 必须在调用方 @Transactional 事务中使用。
+     */
+    public void lockForCompletion(
+            Long itemId,
+            Long studentId) {
+
+        List<Long> pathIds = jdbc.queryForList(
+                """
+                SELECT p.id
+                FROM student_learning_path_item i
+                JOIN student_learning_path p
+                  ON p.id = i.path_id
+                WHERE i.id = ?
+                  AND p.student_id = ?
+                  AND p.status = 'ACTIVE'
+                """,
+                Long.class,
+                itemId,
+                studentId
+        );
+
+        if (pathIds.isEmpty()) {
+            throw new BusinessException(
+                    409, "学习路径不存在或已失效"
+            );
+        }
+
+        Long pathId = pathIds.get(0);
+
+        // 先锁学习路径
+        List<Long> lockedPaths = jdbc.queryForList(
+                """
+                SELECT id
+                FROM student_learning_path
+                WHERE id = ?
+                  AND student_id = ?
+                  AND status = 'ACTIVE'
+                FOR UPDATE
+                """,
+                Long.class,
+                pathId,
+                studentId
+        );
+
+        if (lockedPaths.isEmpty()) {
+            throw new BusinessException(
+                    409, "学习路径状态已变化"
+            );
+        }
+
+        // 再锁阶段项
+        List<Long> lockedItems = jdbc.queryForList(
+                """
+                SELECT id
+                FROM student_learning_path_item
+                WHERE id = ?
+                  AND path_id = ?
+                FOR UPDATE
+                """,
+                Long.class,
+                itemId,
+                pathId
+        );
+
+        if (lockedItems.isEmpty()) {
+            throw new BusinessException(
+                    409, "学习阶段任务不存在"
+            );
+        }
+    }
 }
