@@ -40,6 +40,7 @@ export interface DdlTask {
   task_id: BigIntId
   display_code: string
   course_id: BigIntId | null
+  learning_path_item_id: BigIntId | null
   course_name: string
   task_title: string
   deliverable_format: string | null

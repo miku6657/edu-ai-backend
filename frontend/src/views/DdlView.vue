@@ -80,6 +80,7 @@ import {
   type OriginalTimeInfo,
   type PendingCardInfo,
 } from '@/views/ddl/ddl-task'
+import StudentLearningGoalPanel from '@/views/ddl/StudentLearningGoalPanel.vue'
 
 /**
  * DDL 雷达工作台（`06` TASK-705、`04` §4.6）。
@@ -94,6 +95,7 @@ import {
 
 const board = ref(emptyBoard())
 const auth = useAuthStore()
+const studentGoalPanel = ref<InstanceType<typeof StudentLearningGoalPanel> | null>(null)
 const courses = ref<Course[]>([])
 const courseFilter = ref('')
 const loading = ref(true)
@@ -521,6 +523,9 @@ async function toggleCompletion(task: DdlTask, completed: boolean): Promise<void
         : `任务 ${updated.display_code} 已恢复为${statusLabel(updated.status)}。`,
     )
     await refreshAll()
+    if (auth.isStudent && task.learning_path_item_id) {
+      await studentGoalPanel.value?.refreshPathProgress()
+    }
   } catch (error) {
     notifyError(error)
   } finally {
@@ -782,6 +787,12 @@ async function showPublicProgress(
         </div>
       </div>
     </section>
+
+    <!-- F4-01：学生个人学习目标 -->
+    <StudentLearningGoalPanel
+      v-if="auth.isStudent"
+      ref="studentGoalPanel"
+    />
 
     <!-- 教师公共课程任务 / 学生课程任务 -->
     <BaseCard title="课程公共任务">
@@ -1079,6 +1090,14 @@ async function showPublicProgress(
               <div>
                 <span class="ddl-code">{{ row.display_code }}</span>
                 <strong>{{ row.task_title }}</strong>
+                <el-tag
+                  v-if="row.learning_path_item_id"
+                  type="success"
+                  size="small"
+                  style="margin-left: 8px"
+                >
+                  学习路径
+                </el-tag>
               </div>
               <div class="ddl-muted">{{ row.course_name }}</div>
             </template>
@@ -1111,10 +1130,17 @@ async function showPublicProgress(
           </el-table-column>
           <el-table-column label="操作" width="170" align="right" fixed="right">
             <template #default="{ row }">
-              <el-button text type="primary" size="small" @click="openEditDialog(row)">
+              <el-button
+                v-if="!row.learning_path_item_id"
+                text
+                type="primary"
+                size="small"
+                @click="openEditDialog(row)"
+              >
                 编辑
               </el-button>
               <el-button
+                v-if="!row.learning_path_item_id"
                 text
                 type="danger"
                 size="small"
@@ -1149,6 +1175,14 @@ async function showPublicProgress(
               <div>
                 <span class="ddl-code">{{ row.display_code }}</span>
                 <strong>{{ row.task_title }}</strong>
+                <el-tag
+                  v-if="row.learning_path_item_id"
+                  type="success"
+                  size="small"
+                  style="margin-left: 8px"
+                >
+                  学习路径
+                </el-tag>
               </div>
               <div class="ddl-muted">{{ row.course_name }}</div>
             </template>
@@ -1163,10 +1197,17 @@ async function showPublicProgress(
           </el-table-column>
           <el-table-column label="操作" width="170" align="right" fixed="right">
             <template #default="{ row }">
-              <el-button text type="primary" size="small" @click="openEditDialog(row)">
+              <el-button
+                v-if="!row.learning_path_item_id"
+                text
+                type="primary"
+                size="small"
+                @click="openEditDialog(row)"
+              >
                 编辑
               </el-button>
               <el-button
+                v-if="!row.learning_path_item_id"
                 text
                 type="danger"
                 size="small"

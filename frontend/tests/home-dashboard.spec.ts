@@ -42,6 +42,7 @@ function task(id: string, overrides: Partial<DdlTask> = {}): DdlTask {
     task_id: id,
     display_code: `T${id}`,
     course_id: 'c1',
+    learning_path_item_id: null,
     course_name: '数据结构',
     task_title: `任务 ${id}`,
     deliverable_format: null,

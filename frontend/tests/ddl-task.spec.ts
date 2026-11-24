@@ -50,6 +50,7 @@ function task(overrides: Partial<DdlTask> = {}): DdlTask {
     task_id: '102',
     display_code: '#T102',
     course_id: '2002',
+    learning_path_item_id: null,
     course_name: '操作系统原理',
     task_title: '提交实验二报告与源码',
     deliverable_format: '学号_姓名.zip',
