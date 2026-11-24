@@ -14,6 +14,8 @@ import {
   listWeakKnowledgePoints,
   previewLearningPathAdjustment,
   previewWeakReview,
+  previewWeakReviewPlan,
+  applyWeakReviewPlan,
   updateKnowledgeMastery,
   updateKnowledgePointKeywords,
 } from '@/api/learning-path'
@@ -106,6 +108,27 @@ describe('learning path API', () => {
         additionalMinutes: 45,
       }],
     }
+    const weakReviewPlan = {
+      feasible: true,
+      fingerprint: 'weak-review-456',
+      message: '复习计划可以执行',
+      additionalMinutes: 45,
+      moves: [{
+        itemId: LARGE_ID,
+        oldWeek: 1,
+        newWeek: 2,
+        oldDueDate: '2026-12-01',
+        newDueDate: '2026-12-08',
+      }],
+      additions: [{
+        pointId: LARGE_ID,
+        title: point.title,
+        segmentNo: 2,
+        weekNo: 2,
+        plannedMinutes: 45,
+        dueDate: '2026-12-08',
+      }],
+    }
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse([point]))
       .mockResolvedValueOnce(jsonResponse({ [LARGE_ID]: 3 }))
@@ -121,6 +144,8 @@ describe('learning path API', () => {
       .mockResolvedValueOnce(jsonResponse(adjustment))
       .mockResolvedValueOnce(jsonResponse(adjustment))
       .mockResolvedValueOnce(jsonResponse(weakReview))
+      .mockResolvedValueOnce(jsonResponse(weakReviewPlan))
+      .mockResolvedValueOnce(jsonResponse(weakReviewPlan))
     vi.stubGlobal('fetch', fetchMock)
 
     await expect(listKnowledgePoints(LARGE_ID)).resolves.toEqual([point])
@@ -160,6 +185,12 @@ describe('learning path API', () => {
       applyLearningPathAdjustment(LARGE_ID, adjustment.fingerprint),
     ).resolves.toEqual(adjustment)
     await expect(previewWeakReview(LARGE_ID)).resolves.toEqual(weakReview)
+    await expect(
+      previewWeakReviewPlan(LARGE_ID),
+    ).resolves.toEqual(weakReviewPlan)
+    await expect(
+      applyWeakReviewPlan(LARGE_ID, weakReviewPlan.fingerprint),
+    ).resolves.toEqual(weakReviewPlan)
 
     expect(fetchMock.mock.calls.map(([url, init]) => ({
       url: String(url),
@@ -243,6 +274,16 @@ describe('learning path API', () => {
         url: `/api/v1/learning-paths/${LARGE_ID}/weak-review-preview`,
         method: 'GET',
         body: undefined,
+      },
+      {
+        url: `/api/v1/learning-paths/${LARGE_ID}/weak-review-plan`,
+        method: 'GET',
+        body: undefined,
+      },
+      {
+        url: `/api/v1/learning-paths/${LARGE_ID}/apply-weak-review`,
+        method: 'POST',
+        body: JSON.stringify({ fingerprint: weakReviewPlan.fingerprint }),
       },
     ])
   })

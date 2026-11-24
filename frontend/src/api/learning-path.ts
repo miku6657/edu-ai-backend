@@ -230,3 +230,69 @@ export function previewWeakReview(
     `/v1/learning-paths/${encodeURIComponent(pathId)}/weak-review-preview`,
   )
 }
+
+/**
+ * 需要顺延的现有学习阶段任务
+ */
+export interface WeakReviewMove {
+  itemId: BigIntId
+  oldWeek: number
+  newWeek: number
+  oldDueDate: string
+  newDueDate: string
+}
+
+/**
+ * 需要新增的复习阶段任务
+ */
+export interface WeakReviewAddition {
+  pointId: BigIntId
+  title: string
+  segmentNo: number
+  weekNo: number
+  plannedMinutes: number
+  dueDate: string
+}
+
+/**
+ * 薄弱点实际排期预览
+ */
+export interface WeakReviewPlan {
+  feasible: boolean
+  fingerprint: string
+  message: string
+  additionalMinutes: number
+  moves: WeakReviewMove[]
+  additions: WeakReviewAddition[]
+}
+
+/**
+ * 预览追加复习任务的排期
+ *
+ * 不修改学习路径和DDL。
+ */
+export function previewWeakReviewPlan(
+  pathId: BigIntId,
+): Promise<WeakReviewPlan> {
+  return apiRequest<WeakReviewPlan>(
+    `/v1/learning-paths/${encodeURIComponent(pathId)}/weak-review-plan`,
+  )
+}
+
+/**
+ * 确认追加复习任务
+ *
+ * 后端负责校验指纹，并在事务内同步个人DDL。
+ */
+export function applyWeakReviewPlan(
+  pathId: BigIntId,
+  fingerprint: string,
+): Promise<WeakReviewPlan> {
+  return apiRequest<WeakReviewPlan>(
+    `/v1/learning-paths/${encodeURIComponent(pathId)}/apply-weak-review`,
+    {
+      method: 'POST',
+      body: { fingerprint },
+    },
+  )
+}

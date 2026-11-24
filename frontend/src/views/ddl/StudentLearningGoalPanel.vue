@@ -19,12 +19,15 @@ import {
   previewLearningPathAdjustment,
   applyLearningPathAdjustment,
   previewWeakReview,
+  previewWeakReviewPlan,
+  applyWeakReviewPlan,
 } from '@/api/learning-path'
 import type {
   AdjustmentPreview,
   LearningPath,
   LearningPathProgress,
   WeakReviewPreview,
+  WeakReviewPlan,
 } from '@/api/learning-path'
 import BaseCard from '@/components/ui/BaseCard.vue'
 import StudentKnowledgeMasteryPanel from '@/views/ddl/StudentKnowledgeMasteryPanel.vue'
@@ -49,7 +52,10 @@ const adjusting = ref(false)
 const adjustmentVisible = ref(false)
 const weakReview = ref<WeakReviewPreview | null>(null)
 const weakReviewLoading = ref(false)
+const weakPlan = ref<WeakReviewPlan | null>(null)
+const weakPlanLoading = ref(false)
 let weakReviewRequestVersion = 0
+let weakPlanRequestVersion = 0
 
 const currentWeekLabel = computed(() => {
   const path = generatedPath.value
@@ -87,8 +93,11 @@ watch(courseId, async (id) => {
   adjustment.value = null
   adjustmentVisible.value = false
   weakReview.value = null
+  weakPlan.value = null
   weakReviewRequestVersion++
+  weakPlanRequestVersion++
   weakReviewLoading.value = false
+  weakPlanLoading.value = false
   form.value = {
     goalText: '',
     weeklyHours: 6,
@@ -268,6 +277,9 @@ async function loadWeakReview(): Promise<void> {
   const pathId = generatedPath.value?.pathId
   if (!pathId) return
 
+  weakPlanRequestVersion++
+  weakPlan.value = null
+  weakPlanLoading.value = false
   const requestVersion = ++weakReviewRequestVersion
   weakReviewLoading.value = true
   weakReview.value = null
@@ -291,6 +303,131 @@ async function loadWeakReview(): Promise<void> {
   } finally {
     if (requestVersion === weakReviewRequestVersion) {
       weakReviewLoading.value = false
+    }
+  }
+}
+
+/**
+ * 预览系统新增复习任务后的实际排期
+ */
+async function previewWeakPlan(): Promise<void> {
+  const pathId = generatedPath.value?.pathId
+
+  if (!pathId) {
+    notifyWarning('请先生成学习路径')
+    return
+  }
+
+  const requestVersion = ++weakPlanRequestVersion
+  weakPlanLoading.value = true
+  weakPlan.value = null
+
+  try {
+    const result = await previewWeakReviewPlan(pathId)
+
+    if (
+      requestVersion !== weakPlanRequestVersion ||
+      generatedPath.value?.pathId !== pathId
+    ) {
+      return
+    }
+
+    weakPlan.value = result
+
+    if (!result.feasible) {
+      notifyWarning(result.message)
+    }
+  } catch (error) {
+    if (
+      requestVersion === weakPlanRequestVersion &&
+      generatedPath.value?.pathId === pathId
+    ) {
+      notifyError(error)
+    }
+  } finally {
+    if (requestVersion === weakPlanRequestVersion) {
+      weakPlanLoading.value = false
+    }
+  }
+}
+
+/**
+ * 学生确认追加复习任务
+ */
+async function confirmWeakPlan(): Promise<void> {
+  const pathId = generatedPath.value?.pathId
+  const plan = weakPlan.value
+
+  if (!pathId || !plan) {
+    return
+  }
+
+  if (!plan.feasible || plan.additionalMinutes <= 0) {
+    notifyWarning('当前没有可执行的复习计划')
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      `将新增 ${plan.additions.length} 个复习阶段，`
+        + `共 ${plan.additionalMinutes} 分钟。`
+        + `同时可能调整 ${plan.moves.length} 个未完成任务的截止日期。`
+        + '是否确认？',
+      '确认追加复习任务',
+      {
+        confirmButtonText: '确认添加',
+        cancelButtonText: '取消',
+        type: 'warning',
+      },
+    )
+  } catch {
+    return
+  }
+
+  if (
+    generatedPath.value?.pathId !== pathId ||
+    weakPlan.value?.fingerprint !== plan.fingerprint
+  ) {
+    return
+  }
+
+  const requestVersion = ++weakPlanRequestVersion
+  weakPlanLoading.value = true
+
+  try {
+    await applyWeakReviewPlan(
+      pathId,
+      plan.fingerprint,
+    )
+
+    if (
+      requestVersion !== weakPlanRequestVersion ||
+      generatedPath.value?.pathId !== pathId
+    ) {
+      return
+    }
+
+    weakPlan.value = null
+    adjustment.value = null
+
+    await refreshPathProgress()
+
+    if (generatedPath.value?.pathId !== pathId) return
+
+    weakPlanLoading.value = false
+    await loadWeakReview()
+    notifySuccess('复习阶段已加入个人DDL')
+  } catch (error) {
+    if (
+      requestVersion === weakPlanRequestVersion &&
+      generatedPath.value?.pathId === pathId
+    ) {
+      weakPlan.value = null
+      notifyError(error)
+    }
+  } finally {
+    if (requestVersion === weakPlanRequestVersion) {
+      weakPlanLoading.value = false
     }
   }
 }
@@ -365,7 +502,7 @@ defineExpose({ refreshPathProgress })
             v-model="courseId"
             placeholder="选择已加入课程"
             style="width: 100%"
-            :disabled="saving || generating || adjusting"
+            :disabled="saving || generating || adjusting || weakPlanLoading"
           >
             <el-option
               v-for="course in courses"
@@ -526,6 +663,7 @@ defineExpose({ refreshPathProgress })
         <div class="goal-weak-review__action">
           <el-button
             :loading="weakReviewLoading"
+            :disabled="weakPlanLoading"
             @click="loadWeakReview"
           >
             分析薄弱知识点
@@ -585,6 +723,151 @@ defineExpose({ refreshPathProgress })
           <p class="goal-weak-review__hint">
             此处为复习建议预览，尚未新增任务或改变 DDL 截止日期。
           </p>
+        </div>
+
+        <div
+          v-if="weakReview"
+          class="weak-review-plan"
+        >
+          <el-divider content-position="left">
+            自动生成复习任务
+          </el-divider>
+
+          <el-alert
+            title="系统会优先保留已有学习任务，再根据可用学习时间安排新增复习阶段。"
+            type="info"
+            :closable="false"
+          />
+
+          <div class="weak-review-plan__actions">
+            <el-button
+              type="primary"
+              plain
+              :loading="weakPlanLoading"
+              :disabled="weakReview.additionalTotalMinutes <= 0"
+              @click="previewWeakPlan"
+            >
+              预览实际排期
+            </el-button>
+          </div>
+
+          <div
+            v-if="weakPlan"
+            class="weak-review-plan__result"
+          >
+            <el-alert
+              :title="weakPlan.message"
+              :type="weakPlan.feasible ? 'success' : 'warning'"
+              :closable="false"
+              show-icon
+            />
+
+            <div
+              v-if="weakPlan.feasible"
+              class="weak-review-plan__summary"
+            >
+              <el-statistic
+                title="新增复习阶段"
+                :value="weakPlan.additions.length"
+              />
+
+              <el-statistic
+                title="新增学习时间（分钟）"
+                :value="weakPlan.additionalMinutes"
+              />
+
+              <el-statistic
+                title="需要顺延的任务"
+                :value="weakPlan.moves.length"
+              />
+            </div>
+
+            <template
+              v-if="weakPlan.feasible &&
+                weakPlan.additions.length > 0"
+            >
+              <h4>新增复习阶段</h4>
+
+              <el-table
+                :data="weakPlan.additions"
+                style="width: 100%"
+              >
+                <el-table-column
+                  prop="title"
+                  label="知识点"
+                  min-width="170"
+                />
+
+                <el-table-column
+                  prop="segmentNo"
+                  label="阶段"
+                  width="90"
+                />
+
+                <el-table-column
+                  prop="plannedMinutes"
+                  label="学习时间（分钟）"
+                  width="140"
+                />
+
+                <el-table-column
+                  prop="weekNo"
+                  label="安排周次"
+                  width="110"
+                />
+
+                <el-table-column
+                  prop="dueDate"
+                  label="截止日期"
+                  width="140"
+                />
+              </el-table>
+            </template>
+
+            <template
+              v-if="weakPlan.feasible &&
+                weakPlan.moves.length > 0"
+            >
+              <h4>现有任务调整</h4>
+
+              <el-table
+                :data="weakPlan.moves"
+                style="width: 100%"
+              >
+                <el-table-column
+                  prop="itemId"
+                  label="阶段任务ID"
+                  min-width="150"
+                />
+
+                <el-table-column
+                  prop="oldDueDate"
+                  label="原截止日期"
+                  width="140"
+                />
+
+                <el-table-column
+                  prop="newDueDate"
+                  label="新截止日期"
+                  width="140"
+                />
+              </el-table>
+            </template>
+
+            <div class="weak-review-plan__actions">
+              <el-button
+                type="primary"
+                :loading="weakPlanLoading"
+                :disabled="
+                  !weakPlan.feasible ||
+                  weakPlan.additionalMinutes <= 0
+                "
+                @click="confirmWeakPlan"
+              >
+                确认增加复习任务
+              </el-button>
+            </div>
+          </div>
         </div>
 
         <el-button
@@ -714,5 +997,29 @@ defineExpose({ refreshPathProgress })
 .goal-weak-review__hint {
   margin: 12px 0 0;
   font-size: 13px;
+}
+
+.weak-review-plan {
+  margin-top: 20px;
+  display: grid;
+  gap: 14px;
+}
+
+.weak-review-plan__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.weak-review-plan__result {
+  display: grid;
+  gap: 16px;
+}
+
+.weak-review-plan__summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 28px;
 }
 </style>
