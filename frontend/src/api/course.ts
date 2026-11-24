@@ -32,11 +32,33 @@ export interface UpdateCourseRequest {
   description?: string
 }
 
+export interface CourseMember {
+  studentId: BigIntId
+  username: string
+  nickname: string | null
+  joinTime: string
+}
+
+export interface JoinCourseRequest {
+  inviteCode: string
+}
+
+export interface CourseInviteCode {
+  inviteCode: string
+}
+
 /**
  * 查询我的课程
  */
 export function listCourses(): Promise<Course[]> {
   return apiRequest<Course[]>('/courses/mine')
+}
+
+/**
+ * 学生加入的课程
+ */
+export function listJoinedCourses(): Promise<Course[]> {
+  return apiRequest<Course[]>('/courses/joined')
 }
 
 /**
@@ -46,6 +68,18 @@ export function createCourse(
   request: CreateCourseRequest,
 ): Promise<Course> {
   return apiRequest<Course>('/courses', {
+    method: 'POST',
+    body: request,
+  })
+}
+
+/**
+ * 学生通过邀请码加入课程
+ */
+export function joinCourse(
+  request: JoinCourseRequest,
+): Promise<Course> {
+  return apiRequest<Course>('/courses/join', {
     method: 'POST',
     body: request,
   })
@@ -86,6 +120,57 @@ export function deleteCourse(
 ): Promise<void> {
   return apiRequest<void>(
     `/courses/${encodeURIComponent(courseId)}`,
+    {
+      method: 'DELETE',
+    },
+  )
+}
+
+/**
+ * 查看邀请码
+ */
+export function getCourseInviteCode(
+  courseId: BigIntId,
+): Promise<CourseInviteCode> {
+  return apiRequest<CourseInviteCode>(
+    `/courses/${encodeURIComponent(courseId)}/invite-code`,
+  )
+}
+
+/**
+ * 重新生成邀请码
+ */
+export function regenerateCourseInviteCode(
+  courseId: BigIntId,
+): Promise<CourseInviteCode> {
+  return apiRequest<CourseInviteCode>(
+    `/courses/${encodeURIComponent(courseId)}/invite-code`,
+    {
+      method: 'POST',
+    },
+  )
+}
+
+/**
+ * 查看课程成员
+ */
+export function listCourseStudents(
+  courseId: BigIntId,
+): Promise<CourseMember[]> {
+  return apiRequest<CourseMember[]>(
+    `/courses/${encodeURIComponent(courseId)}/students`,
+  )
+}
+
+/**
+ * 移除课程学生
+ */
+export function removeCourseStudent(
+  courseId: BigIntId,
+  studentId: BigIntId,
+): Promise<void> {
+  return apiRequest<void>(
+    `/courses/${encodeURIComponent(courseId)}/students/${encodeURIComponent(studentId)}`,
     {
       method: 'DELETE',
     },

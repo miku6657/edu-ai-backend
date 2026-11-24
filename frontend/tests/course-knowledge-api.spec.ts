@@ -1,6 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 
-import { deleteCourse, getCourseDetail, listCourses, updateCourse } from '@/api/course'
+import {
+  deleteCourse,
+  getCourseDetail,
+  getCourseInviteCode,
+  joinCourse,
+  listCourseStudents,
+  listCourses,
+  listJoinedCourses,
+  regenerateCourseInviteCode,
+  removeCourseStudent,
+  updateCourse,
+} from '@/api/course'
 import { deleteDoc, listDocs, retryDoc } from '@/api/knowledge'
 import { resetApiClient } from '@/api/client'
 
@@ -15,6 +26,19 @@ function jsonResponse(data: unknown): Response {
 
 function capturedUrls(fetchMock: Mock): string[] {
   return fetchMock.mock.calls.map((call) => String(call[0]))
+}
+
+function capturedRequests(fetchMock: Mock): Array<{
+  method?: string
+  body?: string
+}> {
+  return fetchMock.mock.calls.map((call) => {
+    const init = call[1] as RequestInit | undefined
+    return {
+      method: init?.method,
+      body: typeof init?.body === 'string' ? init.body : undefined,
+    }
+  })
 }
 
 describe('course and document BIGINT APIs', () => {
@@ -54,6 +78,57 @@ describe('course and document BIGINT APIs', () => {
       `/api/courses/${LARGE_ID}`,
       `/api/courses/${LARGE_ID}`,
       `/api/courses/${LARGE_ID}`,
+    ])
+  })
+
+  it('supports student course membership and teacher invite/member endpoints', async () => {
+    const course = {
+      id: LARGE_ID,
+      name: '数据库',
+      description: null,
+      ownerId: LARGE_ID,
+      status: 1,
+      createTime: '2026-11-14T10:00:00',
+      updateTime: '2026-11-14T10:00:00',
+    }
+    const inviteCode = { inviteCode: 'K7M9X2PA' }
+    const member = {
+      studentId: '9007199254740994',
+      username: 'student01',
+      nickname: '学生',
+      joinTime: '2026-11-14T10:00:00',
+    }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([course]))
+      .mockResolvedValueOnce(jsonResponse(course))
+      .mockResolvedValueOnce(jsonResponse(inviteCode))
+      .mockResolvedValueOnce(jsonResponse(inviteCode))
+      .mockResolvedValueOnce(jsonResponse([member]))
+      .mockResolvedValueOnce(jsonResponse(null))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(listJoinedCourses()).resolves.toEqual([course])
+    await expect(joinCourse({ inviteCode: 'K7M9X2PA' })).resolves.toEqual(course)
+    await expect(getCourseInviteCode(LARGE_ID)).resolves.toEqual(inviteCode)
+    await expect(regenerateCourseInviteCode(LARGE_ID)).resolves.toEqual(inviteCode)
+    await expect(listCourseStudents(LARGE_ID)).resolves.toEqual([member])
+    await removeCourseStudent(LARGE_ID, member.studentId)
+
+    expect(capturedUrls(fetchMock)).toEqual([
+      '/api/courses/joined',
+      '/api/courses/join',
+      `/api/courses/${LARGE_ID}/invite-code`,
+      `/api/courses/${LARGE_ID}/invite-code`,
+      `/api/courses/${LARGE_ID}/students`,
+      `/api/courses/${LARGE_ID}/students/${member.studentId}`,
+    ])
+    expect(capturedRequests(fetchMock)).toEqual([
+      { method: 'GET', body: undefined },
+      { method: 'POST', body: JSON.stringify({ inviteCode: 'K7M9X2PA' }) },
+      { method: 'GET', body: undefined },
+      { method: 'POST', body: undefined },
+      { method: 'GET', body: undefined },
+      { method: 'DELETE', body: undefined },
     ])
   })
 

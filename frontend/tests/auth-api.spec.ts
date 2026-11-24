@@ -35,7 +35,7 @@ const AUTH_RESPONSE = {
   tokenType: 'Bearer',
   userId: '10001',
   username: 'zhangsan_cs',
-  role: 'USER' as const,
+  role: 'STUDENT' as const,
 }
 
 describe('auth api', () => {
@@ -67,7 +67,7 @@ describe('auth api', () => {
       id: '10001',
       username: 'zhangsan_cs',
       nickname: '张三',
-      role: 'USER',
+      role: 'STUDENT',
     }
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(result(currentUser)))
     vi.stubGlobal('fetch', fetchMock)
@@ -108,7 +108,7 @@ describe('auth api', () => {
         user_id: '10001',
         username: 'zhangsan_cs',
         nickname: 'zhangsan_cs',
-        role: 'USER',
+        role: 'STUDENT',
       },
     })
   })

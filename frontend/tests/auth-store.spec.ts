@@ -11,7 +11,7 @@ const TEST_USER = {
   user_id: '10001',
   username: 'zhangsan_cs',
   nickname: '张三',
-  role: 'USER' as const,
+  role: 'STUDENT' as const,
 }
 
 /**
@@ -41,8 +41,10 @@ describe('useAuthStore', () => {
     expect(auth.isAuthenticated).toBe(true)
     expect(auth.getToken()).toBe('jwt-token-value')
     expect(auth.displayName).toBe('张三')
-    expect(auth.role).toBe('USER')
+    expect(auth.role).toBe('STUDENT')
     expect(auth.isUser).toBe(true)
+    expect(auth.isStudent).toBe(true)
+    expect(auth.isTeacher).toBe(false)
     expect(auth.isAdmin).toBe(false)
     expect(browserStorage.read<{ token: string }>(STORAGE_KEY)?.token).toBe('jwt-token-value')
   })
@@ -70,6 +72,26 @@ describe('useAuthStore', () => {
 
     expect(typeof auth.user?.user_id).toBe('string')
     expect(auth.user?.user_id).toBe('9007199254740993')
+  })
+
+  it('按当前会话角色判断管理员与教师身份', () => {
+    const auth = useAuthStore()
+
+    auth.setSession({
+      token: 't',
+      user: { ...TEST_USER, role: 'ADMIN' },
+    })
+    expect(auth.isAdmin).toBe(true)
+    expect(auth.isTeacher).toBe(false)
+    expect(auth.isStudent).toBe(false)
+
+    auth.setSession({
+      token: 't',
+      user: { ...TEST_USER, role: 'TEACHER' },
+    })
+    expect(auth.isAdmin).toBe(false)
+    expect(auth.isTeacher).toBe(true)
+    expect(auth.isStudent).toBe(false)
   })
 
   it('clearSession 清空内存状态与存储', () => {

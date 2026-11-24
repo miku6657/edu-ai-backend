@@ -1,9 +1,9 @@
 import { computed, ref } from 'vue'
-
 import { defineStore } from 'pinia'
 
 import type { BigIntId } from '@/api/types'
 import type { UserRole } from '@/api/auth'
+
 import { useCourseStore } from '@/stores/course'
 import { browserStorage } from '@/utils/browser-storage'
 
@@ -22,32 +22,65 @@ export interface AuthSession {
 const STORAGE_KEY = 'edu05.auth.session'
 
 export const useAuthStore = defineStore('auth', () => {
-  const restored = browserStorage.read<AuthSession>(STORAGE_KEY)
 
-  const token = ref<string | null>(restored?.token ?? null)
-  const user = ref<AuthUser | null>(restored?.user ?? null)
+  const restored =
+    browserStorage.read<AuthSession>(STORAGE_KEY)
 
-  const isAuthenticated = computed(() => Boolean(token.value))
-
-  const displayName = computed(
-    () => user.value?.nickname || user.value?.username || '未登录',
+  const token = ref<string | null>(
+    restored?.token ?? null
   )
 
-  const role = computed(() => user.value?.role ?? null)
+  const user = ref<AuthUser | null>(
+    restored?.user ?? null
+  )
 
-  const isAdmin = computed(() => role.value === 'ADMIN')
-  const isUser = computed(() => role.value === 'USER')
+  const isAuthenticated = computed(
+    () => Boolean(token.value)
+  )
+
+  const displayName = computed(
+    () => user.value?.nickname
+      || user.value?.username
+      || '未登录'
+  )
+
+  const role = computed(
+    () => user.value?.role ?? null
+  )
+
+  const isAdmin = computed(
+    () => role.value === 'ADMIN'
+  )
+
+  const isTeacher = computed(
+    () => role.value === 'TEACHER'
+  )
+
+  const isStudent = computed(
+    () => role.value === 'STUDENT'
+  )
+
+  // 兼容旧组件，后续统一使用 isStudent
+  const isUser = isStudent
 
   function setSession(session: AuthSession): void {
+
     token.value = session.token
     user.value = session.user
-    browserStorage.write(STORAGE_KEY, session)
+
+    browserStorage.write(
+      STORAGE_KEY,
+      session
+    )
   }
 
   function clearSession(): void {
+
     token.value = null
     user.value = null
+
     browserStorage.remove(STORAGE_KEY)
+
     useCourseStore().clear()
   }
 
@@ -59,10 +92,15 @@ export const useAuthStore = defineStore('auth', () => {
     token,
     user,
     role,
+
     isAuthenticated,
     displayName,
+
     isAdmin,
+    isTeacher,
+    isStudent,
     isUser,
+
     setSession,
     clearSession,
     getToken,
