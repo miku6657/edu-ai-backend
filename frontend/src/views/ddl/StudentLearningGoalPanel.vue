@@ -18,14 +18,17 @@ import {
   getLearningPathProgress,
   previewLearningPathAdjustment,
   applyLearningPathAdjustment,
+  previewWeakReview,
 } from '@/api/learning-path'
 import type {
   AdjustmentPreview,
   LearningPath,
   LearningPathProgress,
+  WeakReviewPreview,
 } from '@/api/learning-path'
 import BaseCard from '@/components/ui/BaseCard.vue'
 import StudentKnowledgeMasteryPanel from '@/views/ddl/StudentKnowledgeMasteryPanel.vue'
+import StudentWeakPointPanel from '@/views/ddl/StudentWeakPointPanel.vue'
 import {
   notifyError,
   notifySuccess,
@@ -44,6 +47,9 @@ const learningPathProgress = ref<LearningPathProgress | null>(null)
 const adjustment = ref<AdjustmentPreview | null>(null)
 const adjusting = ref(false)
 const adjustmentVisible = ref(false)
+const weakReview = ref<WeakReviewPreview | null>(null)
+const weakReviewLoading = ref(false)
+let weakReviewRequestVersion = 0
 
 const currentWeekLabel = computed(() => {
   const path = generatedPath.value
@@ -80,6 +86,9 @@ watch(courseId, async (id) => {
   learningPathProgress.value = null
   adjustment.value = null
   adjustmentVisible.value = false
+  weakReview.value = null
+  weakReviewRequestVersion++
+  weakReviewLoading.value = false
   form.value = {
     goalText: '',
     weeklyHours: 6,
@@ -255,6 +264,37 @@ async function refreshPathProgress(): Promise<void> {
   }
 }
 
+async function loadWeakReview(): Promise<void> {
+  const pathId = generatedPath.value?.pathId
+  if (!pathId) return
+
+  const requestVersion = ++weakReviewRequestVersion
+  weakReviewLoading.value = true
+  weakReview.value = null
+
+  try {
+    const result = await previewWeakReview(pathId)
+
+    if (
+      requestVersion !== weakReviewRequestVersion ||
+      generatedPath.value?.pathId !== pathId
+    ) return
+
+    weakReview.value = result
+  } catch (error) {
+    if (
+      requestVersion === weakReviewRequestVersion &&
+      generatedPath.value?.pathId === pathId
+    ) {
+      notifyError(error)
+    }
+  } finally {
+    if (requestVersion === weakReviewRequestVersion) {
+      weakReviewLoading.value = false
+    }
+  }
+}
+
 async function previewAdjustment(): Promise<void> {
   const pathId = generatedPath.value?.pathId
   if (!pathId) return
@@ -410,6 +450,11 @@ defineExpose({ refreshPathProgress })
         :course-id="courseId"
       />
 
+      <StudentWeakPointPanel
+        v-if="courseId"
+        :course-id="courseId"
+      />
+
       <el-button
         v-if="goal?.status === 'CONFIRMED' && !generatedPath"
         type="primary"
@@ -467,6 +512,80 @@ defineExpose({ refreshPathProgress })
             </div>
           </el-timeline-item>
         </el-timeline>
+
+        <el-divider content-position="left">
+          高频提问复习建议
+        </el-divider>
+
+        <el-alert
+          type="info"
+          :closable="false"
+          title="系统根据最近30天的提问频率，分析可能需要加强复习的知识点。该结果仅供学习规划参考。"
+        />
+
+        <div class="goal-weak-review__action">
+          <el-button
+            :loading="weakReviewLoading"
+            @click="loadWeakReview"
+          >
+            分析薄弱知识点
+          </el-button>
+        </div>
+
+        <div
+          v-if="weakReview"
+          class="goal-weak-review__result"
+        >
+          <el-alert
+            :title="weakReview.message"
+            :closable="false"
+            type="warning"
+          />
+
+          <el-table
+            :data="weakReview.items"
+            empty-text="当前没有需要追加时间的复习建议"
+          >
+            <el-table-column
+              prop="title"
+              label="知识点"
+              min-width="160"
+            />
+
+            <el-table-column
+              prop="effectiveCount"
+              label="有效提问"
+              width="100"
+            />
+
+            <el-table-column
+              prop="currentMinutes"
+              label="已安排(分钟)"
+              width="130"
+            />
+
+            <el-table-column
+              prop="recommendedMinutes"
+              label="建议总时长(分钟)"
+              width="150"
+            />
+
+            <el-table-column
+              label="建议增加"
+              width="120"
+            >
+              <template #default="{ row }">
+                <el-tag type="warning">
+                  +{{ row.additionalMinutes }} 分钟
+                </el-tag>
+              </template>
+            </el-table-column>
+          </el-table>
+
+          <p class="goal-weak-review__hint">
+            此处为复习建议预览，尚未新增任务或改变 DDL 截止日期。
+          </p>
+        </div>
 
         <el-button
           :icon="RefreshCw"
@@ -585,5 +704,15 @@ defineExpose({ refreshPathProgress })
 .goal-path-progress__item span {
   color: var(--sc-text-secondary);
   font-size: 12px;
+}
+
+.goal-weak-review__action,
+.goal-weak-review__result {
+  margin-top: 12px;
+}
+
+.goal-weak-review__hint {
+  margin: 12px 0 0;
+  font-size: 13px;
 }
 </style>

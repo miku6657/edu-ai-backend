@@ -11,8 +11,11 @@ import {
   getLearningPathProgress,
   getMyKnowledgeMastery,
   listKnowledgePoints,
+  listWeakKnowledgePoints,
   previewLearningPathAdjustment,
+  previewWeakReview,
   updateKnowledgeMastery,
+  updateKnowledgePointKeywords,
 } from '@/api/learning-path'
 
 const LARGE_ID = '9223372036854775807'
@@ -39,8 +42,16 @@ describe('learning path API', () => {
       id: LARGE_ID,
       courseId: LARGE_ID,
       title: 'Java 集合',
+      matchKeywords: 'HashMap,ArrayList',
       estimatedMinutes: 120,
       sortOrder: 1,
+    }
+    const weakPoint = {
+      pointId: LARGE_ID,
+      title: point.title,
+      effectiveCount: 8,
+      sessionCount: 3,
+      inferredLevel: 1,
     }
     const path = {
       pathId: LARGE_ID,
@@ -79,18 +90,37 @@ describe('learning path API', () => {
         newDueDate: '2026-12-08',
       }],
     }
+    const weakReview = {
+      pathId: LARGE_ID,
+      additionalTotalMinutes: 45,
+      message: '建议增加复习时间',
+      items: [{
+        pointId: LARGE_ID,
+        title: point.title,
+        effectiveCount: 8,
+        sessionCount: 3,
+        manualLevel: 2,
+        inferredLevel: 1,
+        currentMinutes: 60,
+        recommendedMinutes: 105,
+        additionalMinutes: 45,
+      }],
+    }
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse([point]))
       .mockResolvedValueOnce(jsonResponse({ [LARGE_ID]: 3 }))
       .mockResolvedValueOnce(jsonResponse({ pointId: LARGE_ID }))
       .mockResolvedValueOnce(jsonResponse('依赖已添加'))
       .mockResolvedValueOnce(jsonResponse('掌握度已更新'))
+      .mockResolvedValueOnce(jsonResponse('关键词已更新'))
+      .mockResolvedValueOnce(jsonResponse([weakPoint]))
       .mockResolvedValueOnce(jsonResponse(path))
       .mockResolvedValueOnce(jsonResponse(null))
       .mockResolvedValueOnce(jsonResponse(path))
       .mockResolvedValueOnce(jsonResponse(progress))
       .mockResolvedValueOnce(jsonResponse(adjustment))
       .mockResolvedValueOnce(jsonResponse(adjustment))
+      .mockResolvedValueOnce(jsonResponse(weakReview))
     vi.stubGlobal('fetch', fetchMock)
 
     await expect(listKnowledgePoints(LARGE_ID)).resolves.toEqual([point])
@@ -102,6 +132,7 @@ describe('learning path API', () => {
         title: point.title,
         estimatedMinutes: 120,
         sortOrder: 1,
+        matchKeywords: 'HashMap,ArrayList',
       }),
     ).resolves.toEqual({ pointId: LARGE_ID })
     await expect(
@@ -110,6 +141,14 @@ describe('learning path API', () => {
     await expect(
       updateKnowledgeMastery(LARGE_ID, LARGE_ID, 3),
     ).resolves.toBe('掌握度已更新')
+    await expect(
+      updateKnowledgePointKeywords(
+        LARGE_ID,
+        LARGE_ID,
+        'HashMap,ArrayList',
+      ),
+    ).resolves.toBe('关键词已更新')
+    await expect(listWeakKnowledgePoints(LARGE_ID)).resolves.toEqual([weakPoint])
     await expect(generateLearningPath(LARGE_ID)).resolves.toEqual(path)
     await expect(getLearningPathByGoal(LARGE_ID)).resolves.toBeNull()
     await expect(getLearningPath(LARGE_ID)).resolves.toEqual(path)
@@ -120,6 +159,7 @@ describe('learning path API', () => {
     await expect(
       applyLearningPathAdjustment(LARGE_ID, adjustment.fingerprint),
     ).resolves.toEqual(adjustment)
+    await expect(previewWeakReview(LARGE_ID)).resolves.toEqual(weakReview)
 
     expect(fetchMock.mock.calls.map(([url, init]) => ({
       url: String(url),
@@ -143,6 +183,7 @@ describe('learning path API', () => {
           title: point.title,
           estimatedMinutes: 120,
           sortOrder: 1,
+          matchKeywords: 'HashMap,ArrayList',
         }),
       },
       {
@@ -157,6 +198,16 @@ describe('learning path API', () => {
         url: `/api/v1/learning-paths/courses/${LARGE_ID}/points/${LARGE_ID}/mastery`,
         method: 'PUT',
         body: JSON.stringify({ level: 3 }),
+      },
+      {
+        url: `/api/v1/learning-paths/courses/${LARGE_ID}/points/${LARGE_ID}/keywords`,
+        method: 'PUT',
+        body: JSON.stringify({ matchKeywords: 'HashMap,ArrayList' }),
+      },
+      {
+        url: `/api/v1/learning-paths/courses/${LARGE_ID}/weak-points`,
+        method: 'GET',
+        body: undefined,
       },
       {
         url: `/api/v1/learning-paths/goals/${LARGE_ID}/generate`,
@@ -187,6 +238,11 @@ describe('learning path API', () => {
         url: `/api/v1/learning-paths/${LARGE_ID}/adjust`,
         method: 'POST',
         body: JSON.stringify({ fingerprint: adjustment.fingerprint }),
+      },
+      {
+        url: `/api/v1/learning-paths/${LARGE_ID}/weak-review-preview`,
+        method: 'GET',
+        body: undefined,
       },
     ])
   })

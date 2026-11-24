@@ -7,6 +7,7 @@ import {
   addKnowledgeDependency,
   addKnowledgePoint,
   listKnowledgePoints,
+  updateKnowledgePointKeywords,
 } from '@/api/learning-path'
 import type { KnowledgePoint } from '@/api/learning-path'
 import BaseCard from '@/components/ui/BaseCard.vue'
@@ -27,7 +28,11 @@ const pointForm = ref({
   title: '',
   estimatedMinutes: 60,
   sortOrder: 0,
+  matchKeywords: '',
 })
+
+const editingPointId = ref('')
+const editingKeywords = ref('')
 
 const dependencyForm = ref({
   pointId: '',
@@ -52,6 +57,8 @@ watch(courseId, async (id) => {
     pointId: '',
     prerequisiteId: '',
   }
+  editingPointId.value = ''
+  editingKeywords.value = ''
 
   if (!id) {
     loading.value = false
@@ -117,12 +124,48 @@ async function createPoint(): Promise<void> {
       title,
       estimatedMinutes: pointForm.value.estimatedMinutes,
       sortOrder: pointForm.value.sortOrder,
+      matchKeywords: pointForm.value.matchKeywords.trim(),
     })
 
     notifySuccess('知识点已添加')
     pointForm.value.title = ''
+    pointForm.value.matchKeywords = ''
 
     await refreshPoints()
+  } catch (error) {
+    notifyError(error)
+  } finally {
+    saving.value = false
+  }
+}
+
+function startEditKeywords(point: KnowledgePoint): void {
+  editingPointId.value = String(point.id)
+  editingKeywords.value = point.matchKeywords ?? ''
+}
+
+async function saveKeywords(): Promise<void> {
+  const selectedCourse = courseId.value
+  const pointId = editingPointId.value
+
+  if (!selectedCourse || !pointId) return
+
+  saving.value = true
+
+  try {
+    await updateKnowledgePointKeywords(
+      selectedCourse,
+      pointId,
+      editingKeywords.value.trim(),
+    )
+
+    if (courseId.value === selectedCourse) {
+      editingPointId.value = ''
+      editingKeywords.value = ''
+      await refreshPoints()
+    }
+
+    notifySuccess('匹配关键词已更新')
   } catch (error) {
     notifyError(error)
   } finally {
@@ -191,6 +234,21 @@ async function createDependency(): Promise<void> {
           />
         </el-form-item>
 
+        <el-form-item label="匹配关键词">
+          <el-input
+            v-model="pointForm.matchKeywords"
+            type="textarea"
+            :rows="2"
+            maxlength="500"
+            show-word-limit
+            placeholder="例如：HashMap,ArrayList,LinkedList,ConcurrentHashMap"
+          />
+          <div class="keyword-hint">
+            多个关键词用逗号分隔。学生在 AI 问答中提到这些关键词时，
+            系统会尝试关联当前知识点。
+          </div>
+        </el-form-item>
+
         <el-form-item label="预计学习时间（分钟）">
           <el-input-number
             v-model="pointForm.estimatedMinutes"
@@ -226,6 +284,52 @@ async function createDependency(): Promise<void> {
           label="知识点"
           min-width="180"
         />
+        <el-table-column
+          label="匹配关键词"
+          min-width="240"
+        >
+          <template #default="{ row }">
+            <div v-if="editingPointId === String(row.id)">
+              <el-input
+                v-model="editingKeywords"
+                type="textarea"
+                :rows="2"
+                maxlength="500"
+                :disabled="saving"
+              />
+              <div class="keyword-actions">
+                <el-button
+                  type="primary"
+                  size="small"
+                  :loading="saving"
+                  @click="saveKeywords"
+                >
+                  保存
+                </el-button>
+                <el-button
+                  size="small"
+                  :disabled="saving"
+                  @click="editingPointId = ''"
+                >
+                  取消
+                </el-button>
+              </div>
+            </div>
+
+            <div v-else>
+              <span>{{ row.matchKeywords || '未配置' }}</span>
+              <el-button
+                link
+                type="primary"
+                size="small"
+                :disabled="saving"
+                @click="startEditKeywords(row)"
+              >
+                编辑
+              </el-button>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column label="预计学时" width="120">
           <template #default="{ row }">
             {{ (row.estimatedMinutes / 60).toFixed(1) }} 小时
@@ -301,5 +405,18 @@ async function createDependency(): Promise<void> {
 
 .knowledge-panel :deep(.el-form-item) {
   margin-bottom: 14px;
+}
+
+.keyword-hint {
+  margin-top: 6px;
+  color: var(--sc-text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.keyword-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
 }
 </style>

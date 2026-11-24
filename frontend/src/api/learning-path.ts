@@ -5,8 +5,36 @@ export interface KnowledgePoint {
   id: BigIntId
   courseId: BigIntId
   title: string
+  matchKeywords: string | null
   estimatedMinutes: number
   sortOrder: number
+}
+
+export interface WeakKnowledgePoint {
+  pointId: BigIntId
+  title: string
+  effectiveCount: number
+  sessionCount: number
+  inferredLevel: number
+}
+
+export interface WeakReviewItem {
+  pointId: BigIntId
+  title: string
+  effectiveCount: number
+  sessionCount: number
+  manualLevel: number
+  inferredLevel: number
+  currentMinutes: number
+  recommendedMinutes: number
+  additionalMinutes: number
+}
+
+export interface WeakReviewPreview {
+  pathId: BigIntId
+  additionalTotalMinutes: number
+  message: string
+  items: WeakReviewItem[]
 }
 
 export interface LearningPathItem {
@@ -67,6 +95,7 @@ export function addKnowledgePoint(
     title: string
     estimatedMinutes: number
     sortOrder: number
+    matchKeywords?: string
   },
 ): Promise<{ pointId: BigIntId }> {
   return apiRequest<{ pointId: BigIntId }>(
@@ -97,6 +126,20 @@ export function updateKnowledgeMastery(
   return apiRequest<string>(
     `/v1/learning-paths/courses/${encodeURIComponent(courseId)}/points/${encodeURIComponent(pointId)}/mastery`,
     { method: 'PUT', body: { level } },
+  )
+}
+
+export function updateKnowledgePointKeywords(
+  courseId: BigIntId,
+  pointId: BigIntId,
+  matchKeywords: string,
+): Promise<string> {
+  return apiRequest<string>(
+    `/v1/learning-paths/courses/${encodeURIComponent(courseId)}/points/${encodeURIComponent(pointId)}/keywords`,
+    {
+      method: 'PUT',
+      body: { matchKeywords },
+    },
   )
 }
 
@@ -165,5 +208,25 @@ export function getMyKnowledgeMastery(
 ): Promise<Record<string, number>> {
   return apiRequest<Record<string, number>>(
     `/v1/learning-paths/courses/${encodeURIComponent(courseId)}/mastery`,
+  )
+}
+
+export function listWeakKnowledgePoints(
+  courseId: BigIntId,
+): Promise<WeakKnowledgePoint[]> {
+  return apiRequest<WeakKnowledgePoint[]>(
+    `/v1/learning-paths/courses/${encodeURIComponent(courseId)}/weak-points`,
+  )
+}
+
+/**
+ * 查看高频提问带来的额外复习时间建议。
+ * 此接口不修改学习路径。
+ */
+export function previewWeakReview(
+  pathId: BigIntId,
+): Promise<WeakReviewPreview> {
+  return apiRequest<WeakReviewPreview>(
+    `/v1/learning-paths/${encodeURIComponent(pathId)}/weak-review-preview`,
   )
 }
