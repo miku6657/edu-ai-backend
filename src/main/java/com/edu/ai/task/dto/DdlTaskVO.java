@@ -92,6 +92,10 @@ public class DdlTaskVO {
     @JsonProperty("source_platform")
     private String sourcePlatform;
 
+    @JsonProperty("learning_path_item_id")
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long learningPathItemId;
+
     @JsonProperty("completed_at")
     private LocalDateTime completedAt;
 
@@ -143,6 +147,7 @@ public class DdlTaskVO {
         vo.setRemindedOverdue(task.getRemindedOverdue());
 
         vo.setSourcePlatform(task.getSourcePlatform());
+        vo.setLearningPathItemId(task.getLearningPathItemId());
         vo.setCompletedAt(task.getCompletedAt());
 
         vo.setCreatedAt(task.getCreatedAt());

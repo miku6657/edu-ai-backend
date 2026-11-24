@@ -25,17 +25,20 @@ public class DdlTaskService {
     private final TaskChangeDraftService draftService;
     private final DdlDisplayCodeGenerator displayCodeGenerator;
     private final DdlTaskStatusResolver statusResolver;
+    private final LearningPathTaskSyncService pathTaskSyncService;
 
     public DdlTaskService(
             DdlTaskMapper taskMapper,
             TaskChangeDraftService draftService,
             DdlDisplayCodeGenerator displayCodeGenerator,
-            DdlTaskStatusResolver statusResolver) {
+            DdlTaskStatusResolver statusResolver,
+            LearningPathTaskSyncService pathTaskSyncService) {
 
         this.taskMapper = taskMapper;
         this.draftService = draftService;
         this.displayCodeGenerator = displayCodeGenerator;
         this.statusResolver = statusResolver;
+        this.pathTaskSyncService = pathTaskSyncService;
     }
 
     /**
@@ -163,6 +166,13 @@ public class DdlTaskService {
 
         DdlTask task = requireOwnedTask(taskId, userId);
 
+        if (task.getLearningPathItemId() != null) {
+            throw new BusinessException(
+                    409,
+                    "学习路径任务不能直接编辑，请通过学习计划调整"
+            );
+        }
+
         if ("COMPLETED".equals(task.getStatus())
                 || "CANCELED".equals(task.getStatus())) {
             throw new BusinessException(
@@ -252,6 +262,10 @@ public class DdlTaskService {
 
         taskMapper.updateById(task);
 
+        // 普通个人 DDL 不会触发额外操作。
+        // 学习路径任务则同步更新阶段进度。
+        pathTaskSyncService.syncCompletion(task, completed);
+
         return task;
     }
 
@@ -266,6 +280,13 @@ public class DdlTaskService {
             Long userId) {
 
         DdlTask task = requireOwnedTask(taskId, userId);
+
+        if (task.getLearningPathItemId() != null) {
+            throw new BusinessException(
+                    409,
+                    "学习路径任务不能直接删除，请通过学习计划调整"
+            );
+        }
 
         if ("CANCELED".equals(task.getStatus())) {
             throw new BusinessException(

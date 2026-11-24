@@ -432,6 +432,13 @@ public class TaskChangeDraftService {
 
             case "CONFIRM_UPDATE" -> {
 
+                if (original.getLearningPathItemId() != null) {
+                    throw new BusinessException(
+                            409,
+                            "学习路径任务不能直接编辑，请通过学习计划调整"
+                    );
+                }
+
                 applyDraft(original, draft, now);
 
                 taskMapper.updateById(original);

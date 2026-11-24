@@ -73,6 +73,9 @@ public class DdlTask {
 
     private String sourcePlatform;
 
+    @TableField("learning_path_item_id")
+    private Long learningPathItemId;
+
     private LocalDateTime completedAt;
 
     private LocalDateTime createdAt;
