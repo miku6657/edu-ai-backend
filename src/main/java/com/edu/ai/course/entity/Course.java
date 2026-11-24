@@ -28,10 +28,10 @@ public class Course {
     private String description;
 
     /**
-     * 数据库实际字段 owner_id
+     * 数据库实际字段 user_id
      * 保留原来的 userId 命名，避免影响其他业务代码
      */
-    @TableField("owner_id")
+    @TableField("user_id")
     @JsonProperty("ownerId")
     @JsonSerialize(using = ToStringSerializer.class)
     private Long userId;
