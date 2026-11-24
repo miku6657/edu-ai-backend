@@ -4,6 +4,8 @@ import tools.jackson.databind.ObjectMapper;
 
 import com.edu.ai.common.Result;
 
+import jakarta.servlet.DispatcherType;
+
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
@@ -85,9 +87,19 @@ public class SecurityConfig {
                 // URL 权限
                 .authorizeHttpRequests(auth -> auth
 
-                        // 允许跨域预检
+                        // 放行 Servlet 错误分发
+                        // 防止 /error 二次鉴权导致响应已提交异常
+                        .dispatcherTypeMatchers(
+                                DispatcherType.ERROR
+                        ).permitAll()
+
+                        // 放行跨域预检
                         .requestMatchers(
-                                HttpMethod.OPTIONS, "/**")
+                                HttpMethod.OPTIONS, "/**"
+                        ).permitAll()
+
+                        // 放行 Spring Boot 错误处理路径
+                        .requestMatchers("/error")
                         .permitAll()
 
                         // 登录和注册公开
@@ -100,7 +112,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/admin/**")
                         .hasRole("ADMIN")
 
-                        // 其他接口必须登录
+                        // 其余接口必须登录
                         .anyRequest()
                         .authenticated()
                 )
@@ -110,6 +122,10 @@ public class SecurityConfig {
 
                         .authenticationEntryPoint(
                                 (request, response, error) -> {
+
+                                    if (response.isCommitted()) {
+                                        return;
+                                    }
 
                                     response.setStatus(401);
                                     response.setCharacterEncoding("UTF-8");
@@ -129,6 +145,10 @@ public class SecurityConfig {
 
                         .accessDeniedHandler(
                                 (request, response, error) -> {
+
+                                    if (response.isCommitted()) {
+                                        return;
+                                    }
 
                                     response.setStatus(403);
                                     response.setCharacterEncoding("UTF-8");
