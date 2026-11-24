@@ -2,8 +2,7 @@ package com.edu.ai.document.service;
 
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.edu.ai.common.BusinessException;
-import com.edu.ai.course.entity.Course;
-import com.edu.ai.course.mapper.CourseMapper;
+import com.edu.ai.course.service.CoursePermissionService;
 import com.edu.ai.document.entity.CourseDocument;
 import com.edu.ai.document.mapper.CourseDocumentMapper;
 
@@ -34,7 +33,7 @@ public class DocumentLifecycleService {
             Set.of("UPLOADED", "READY", "FAILED");
 
     private final CourseDocumentMapper documentMapper;
-    private final CourseMapper courseMapper;
+    private final CoursePermissionService coursePermissionService;
     private final DocumentIndexTask indexTask;
     private final CourseIndexLease courseIndexLease;
     private final HttpClient httpClient;
@@ -45,7 +44,7 @@ public class DocumentLifecycleService {
 
     public DocumentLifecycleService(
             CourseDocumentMapper documentMapper,
-            CourseMapper courseMapper,
+            CoursePermissionService coursePermissionService,
             DocumentIndexTask indexTask,
             CourseIndexLease courseIndexLease,
             @Value("${ai.service.url}") String aiUrl,
@@ -53,7 +52,7 @@ public class DocumentLifecycleService {
             @Value("${app.storage.pdf-dir}") String pdfDir) {
 
         this.documentMapper = documentMapper;
-        this.courseMapper = courseMapper;
+        this.coursePermissionService = coursePermissionService;
         this.indexTask = indexTask;
         this.courseIndexLease = courseIndexLease;
 
@@ -444,31 +443,16 @@ public class DocumentLifecycleService {
     }
 
     /**
-     * 文档管理权限：只有课程创建者可以管理课程内的文件。
+     * 文档管理权限：课程创建教师或管理员。
      */
     private void requireDocumentManagePermission(
             CourseDocument document,
             Long userId) {
 
-        Course course = courseMapper.selectById(
-                document.getCourseId()
+        coursePermissionService.requireManage(
+                document.getCourseId(),
+                userId
         );
-
-        if (course == null) {
-            throw new BusinessException(
-                    404,
-                    "所属课程不存在"
-            );
-        }
-
-        if (userId == null ||
-                !userId.equals(course.getUserId())) {
-
-            throw new BusinessException(
-                    403,
-                    "无权管理其他用户课程中的文件"
-            );
-        }
     }
 
     private Path safeFilePath(String storageName) {

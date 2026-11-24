@@ -257,23 +257,15 @@ public class UserModelConfigService {
                 """
                 SELECT
                     (SELECT COUNT(*)
-                     FROM course_embedding_profile p
-                     JOIN course c ON c.id = p.course_id
-                     WHERE c.user_id = ?)
+                     FROM course_embedding_profile)
                   + (SELECT COUNT(*)
-                     FROM course_document d
-                     JOIN course c ON c.id = d.course_id
-                     WHERE c.user_id = ?
-                       AND d.status = 'READY')
+                     FROM course_document
+                     WHERE status = 'READY')
                   + (SELECT COUNT(*)
-                     FROM course_embedding_migration m
-                     WHERE m.user_id = ?
-                       AND m.status IN ('PENDING', 'RUNNING'))
+                     FROM course_embedding_migration
+                     WHERE status IN ('PENDING', 'RUNNING'))
                 """,
-                Long.class,
-                userId,
-                userId,
-                userId
+                Long.class
         );
 
         boolean hasBoundIndex =

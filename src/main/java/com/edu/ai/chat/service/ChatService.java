@@ -9,6 +9,7 @@ import com.edu.ai.chat.mapper.ChatSessionMapper;
 import com.edu.ai.common.BusinessException;
 import com.edu.ai.course.entity.Course;
 import com.edu.ai.course.mapper.CourseMapper;
+import com.edu.ai.course.service.CoursePermissionService;
 import com.edu.ai.system.service.UserModelResolver;
 
 import tools.jackson.databind.JsonNode;
@@ -46,6 +47,7 @@ ChatService {
     private final ChatSessionMapper sessionMapper;
     private final ChatMessageMapper messageMapper;
     private final CourseMapper courseMapper;
+    private final CoursePermissionService coursePermissionService;
     private final UserModelResolver userModelResolver;
     private final ThreadPoolTaskExecutor executor;
     private final ObjectMapper objectMapper;
@@ -60,6 +62,7 @@ ChatService {
             ChatMessageMapper messageMapper,
             CourseMapper courseMapper,
             UserModelResolver userModelResolver,
+            CoursePermissionService coursePermissionService,
             @Qualifier("chatStreamExecutor")
             ThreadPoolTaskExecutor executor,
             ObjectMapper objectMapper,
@@ -71,6 +74,7 @@ ChatService {
         this.messageMapper = messageMapper;
         this.courseMapper = courseMapper;
         this.userModelResolver = userModelResolver;
+        this.coursePermissionService = coursePermissionService;
         this.executor = executor;
         this.objectMapper = objectMapper;
         this.streamRegistry = streamRegistry;
@@ -84,35 +88,15 @@ ChatService {
     }
 
     /**
-     * 个人课程空间权限：
-     * 只能使用自己创建且正常开放的课程知识库。
+     * 课程访问权限：
+     * 管理员、课程教师、已加入且课程正常开放的学生。
      */
     private void checkAccess(Long courseId, Long userId) {
 
-        Course course = courseMapper.selectById(courseId);
-
-        if (course == null) {
-            throw new BusinessException(
-                    404,
-                    "课程不存在"
-            );
-        }
-
-        if (userId == null ||
-                !userId.equals(course.getUserId())) {
-
-            throw new BusinessException(
-                    403,
-                    "无权访问其他用户的课程知识库"
-            );
-        }
-
-        if (!Integer.valueOf(1).equals(course.getStatus())) {
-            throw new BusinessException(
-                    403,
-                    "课程已停用"
-            );
-        }
+        coursePermissionService.requireActiveRead(
+                courseId,
+                userId
+        );
     }
 
     // 获取或新建会话
@@ -243,11 +227,11 @@ ChatService {
                         ? 1
                         : course.getEmbeddingVersion();
 
-        // 对话模型用用户当前配置；
+        // 对话模型统一用课程创建教师的配置；
         // Embedding 模型用课程活动索引版本对应的固定配置。
         UserModelResolver.UserModelConfig modelConfig =
                 userModelResolver.resolveForCourse(
-                        userId,
+                        course.getUserId(),
                         request.getCourseId(),
                         embeddingVersion
                 );

@@ -16,15 +16,18 @@ public class UserModelResolver {
     private final UserConfigMapper configMapper;
     private final ConfigCryptoService cryptoService;
     private final CourseEmbeddingProfileService profileService;
+    private final PlatformModelOwnerService platformModelOwnerService;
 
     public UserModelResolver(
             UserConfigMapper configMapper,
             ConfigCryptoService cryptoService,
-            CourseEmbeddingProfileService profileService) {
+            CourseEmbeddingProfileService profileService,
+            PlatformModelOwnerService platformModelOwnerService) {
 
         this.configMapper = configMapper;
         this.cryptoService = cryptoService;
         this.profileService = profileService;
+        this.platformModelOwnerService = platformModelOwnerService;
     }
 
     public UserModelConfig resolve(Long userId) {
@@ -33,9 +36,12 @@ public class UserModelResolver {
             throw new BusinessException(400, "用户ID不合法");
         }
 
+        Long platformUserId =
+                platformModelOwnerService.requirePlatformUserId();
+
         UserConfig config = configMapper.selectOne(
                 new LambdaQueryWrapper<UserConfig>()
-                        .eq(UserConfig::getUserId, userId)
+                        .eq(UserConfig::getUserId, platformUserId)
                         .last("LIMIT 1")
         );
 
@@ -171,14 +177,18 @@ public class UserModelResolver {
 
         UserConfig config = configMapper.selectOne(
                 new LambdaQueryWrapper<UserConfig>()
-                        .eq(UserConfig::getUserId, userId)
+                        .eq(
+                                UserConfig::getUserId,
+                                platformModelOwnerService
+                                        .requirePlatformUserId()
+                        )
                         .last("LIMIT 1")
         );
 
         if (config == null) {
             throw new BusinessException(
                     400,
-                    "请先配置个人Chat模型"
+                    "平台尚未配置Chat模型，请联系管理员"
             );
         }
 

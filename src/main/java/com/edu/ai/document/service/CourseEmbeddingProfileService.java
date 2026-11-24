@@ -9,6 +9,7 @@ import com.edu.ai.document.mapper.CourseEmbeddingProfileMapper;
 import com.edu.ai.system.entity.UserConfig;
 import com.edu.ai.system.mapper.UserConfigMapper;
 import com.edu.ai.system.security.ConfigCryptoService;
+import com.edu.ai.system.service.PlatformModelOwnerService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -21,17 +22,20 @@ public class CourseEmbeddingProfileService {
     private final CourseDocumentMapper documentMapper;
     private final UserConfigMapper configMapper;
     private final ConfigCryptoService crypto;
+    private final PlatformModelOwnerService platformModelOwnerService;
 
     public CourseEmbeddingProfileService(
             CourseEmbeddingProfileMapper profileMapper,
             CourseDocumentMapper documentMapper,
             UserConfigMapper configMapper,
-            ConfigCryptoService crypto) {
+            ConfigCryptoService crypto,
+            PlatformModelOwnerService platformModelOwnerService) {
 
         this.profileMapper = profileMapper;
         this.documentMapper = documentMapper;
         this.configMapper = configMapper;
         this.crypto = crypto;
+        this.platformModelOwnerService = platformModelOwnerService;
     }
 
     public CourseEmbeddingProfile require(
@@ -125,7 +129,11 @@ public class CourseEmbeddingProfileService {
 
         UserConfig config = configMapper.selectOne(
                 new LambdaQueryWrapper<UserConfig>()
-                        .eq(UserConfig::getUserId, userId)
+                        .eq(
+                                UserConfig::getUserId,
+                                platformModelOwnerService
+                                        .requirePlatformUserId()
+                        )
         );
 
         if (config == null

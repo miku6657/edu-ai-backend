@@ -4,7 +4,7 @@ package com.edu.ai.document.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.edu.ai.common.BusinessException;
 import com.edu.ai.course.entity.Course;
-import com.edu.ai.course.mapper.CourseMapper;
+import com.edu.ai.course.service.CoursePermissionService;
 import com.edu.ai.document.dto.DocumentVO;
 import com.edu.ai.document.entity.CourseDocument;
 import com.edu.ai.document.mapper.CourseDocumentMapper;
@@ -32,16 +32,16 @@ public class DocumentServiceImpl implements DocumentService {
     private static final long MAX_FILE_SIZE = 30L * 1024 * 1024;
 
     private final CourseDocumentMapper documentMapper;
-    private final CourseMapper courseMapper;
+    private final CoursePermissionService coursePermissionService;
     private final Path storageRoot;
 
     public DocumentServiceImpl(
             CourseDocumentMapper documentMapper,
-            CourseMapper courseMapper,
+            CoursePermissionService coursePermissionService,
             @Value("${app.storage.pdf-dir}") String storageDir) {
 
         this.documentMapper = documentMapper;
-        this.courseMapper = courseMapper;
+        this.coursePermissionService = coursePermissionService;
 
         this.storageRoot = Paths.get(storageDir)
                 .toAbsolutePath()
@@ -58,7 +58,9 @@ public class DocumentServiceImpl implements DocumentService {
             Long userId,
             MultipartFile file) {
 
-        Course course = requireMyCourse(courseId, userId);
+        Course course = coursePermissionService.requireManage(
+                courseId, userId
+        );
 
         if (!Integer.valueOf(1).equals(course.getStatus())) {
             throw new BusinessException(400, "课程已停用");
@@ -129,7 +131,9 @@ public class DocumentServiceImpl implements DocumentService {
             Long courseId,
             Long userId) {
 
-        requireMyCourse(courseId, userId);
+        coursePermissionService.requireActiveRead(
+                courseId, userId
+        );
 
         LambdaQueryWrapper<CourseDocument> query =
                 new LambdaQueryWrapper<CourseDocument>()
@@ -184,7 +188,19 @@ public class DocumentServiceImpl implements DocumentService {
             throw new BusinessException(404, "该资料已删除或正在删除");
         }
 
-        requireMyCourse(doc.getCourseId(), userId);
+        coursePermissionService.requireActiveRead(
+                doc.getCourseId(), userId
+        );
+
+        if (!"READY".equals(doc.getStatus())
+                && !coursePermissionService.canManage(
+                        doc.getCourseId(), userId
+                )) {
+            throw new BusinessException(
+                    403,
+                    "该资料尚未完成处理"
+            );
+        }
 
         String storageName = doc.getStorageName();
 
@@ -213,40 +229,6 @@ public class DocumentServiceImpl implements DocumentService {
                 new FileSystemResource(target),
                 doc.getOriginalName()
         );
-    }
-
-    /**
-     * 查询课程
-     */
-    private Course getCourse(Long courseId) {
-
-        Course course = courseMapper.selectById(courseId);
-
-        if (course == null) {
-            throw new BusinessException(404, "课程不存在");
-        }
-
-        return course;
-    }
-
-    /**
-     * 个人课程空间权限检查：
-     * 当前登录用户只能访问自己创建的课程。
-     */
-    private Course requireMyCourse(Long courseId, Long userId) {
-
-        Course course = getCourse(courseId);
-
-        if (userId == null ||
-                !userId.equals(course.getUserId())) {
-
-            throw new BusinessException(
-                    403,
-                    "无权访问其他用户的课程资料"
-            );
-        }
-
-        return course;
     }
 
     /**

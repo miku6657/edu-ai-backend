@@ -26,6 +26,7 @@ ai:
   service:
     url: ${AI_SERVICE_URL:http://127.0.0.1:8001}
     internal-key: ${AI_INTERNAL_KEY}
+  platform-config-user-id: ${AI_PLATFORM_CONFIG_USER_ID:0}
   model:
     ollama-allowed-hosts: ${OLLAMA_ALLOWED_HOSTS:localhost,127.0.0.1}
 

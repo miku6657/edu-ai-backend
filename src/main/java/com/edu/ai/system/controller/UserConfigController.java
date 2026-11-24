@@ -4,10 +4,12 @@ import com.edu.ai.common.BusinessException;
 import com.edu.ai.common.Result;
 import com.edu.ai.system.dto.PreferencesUpdateRequest;
 import com.edu.ai.system.dto.UserConfigVO;
+import com.edu.ai.system.service.PlatformModelOwnerService;
 import com.edu.ai.system.service.UserConfigService;
 
 import jakarta.validation.Valid;
 
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
@@ -16,24 +18,30 @@ import org.springframework.web.bind.annotation.*;
 public class UserConfigController {
 
     private final UserConfigService userConfigService;
+    private final PlatformModelOwnerService platformOwner;
 
     public UserConfigController(
-            UserConfigService userConfigService) {
+            UserConfigService userConfigService,
+            PlatformModelOwnerService platformOwner) {
 
         this.userConfigService = userConfigService;
+        this.platformOwner = platformOwner;
     }
 
     /**
      * GET /api/v1/user/config
      */
     @GetMapping("/config")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<UserConfigVO> getConfig(
             Authentication authentication) {
 
-        Long userId = getUserId(authentication);
+        getUserId(authentication);
 
         return Result.success(
-                userConfigService.getConfig(userId)
+                userConfigService.getConfig(
+                        platformOwner.requirePlatformUserId()
+                )
         );
     }
 
