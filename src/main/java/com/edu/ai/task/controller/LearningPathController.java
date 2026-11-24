@@ -4,6 +4,7 @@ import com.edu.ai.common.BusinessException;
 import com.edu.ai.common.Result;
 import com.edu.ai.course.service.CoursePermissionService;
 import com.edu.ai.task.service.LearningPathService;
+import com.edu.ai.task.service.LearningPathService.PathProgress;
 import com.edu.ai.task.service.LearningPathService.PathResult;
 import com.edu.ai.task.service.QuestionKnowledgeService;
 
@@ -246,6 +247,24 @@ public class LearningPathController {
 
         return Result.success(
                 service.getPath(pathId, userId(auth))
+        );
+    }
+
+    /**
+     * 学生查询个人学习路径完成进度。
+     *
+     * GET /api/v1/learning-paths/{pathId}/progress
+     */
+    @GetMapping("/{pathId}/progress")
+    public Result<PathProgress> getProgress(
+            @PathVariable Long pathId,
+            Authentication auth) {
+
+        return Result.success(
+                service.getProgress(
+                        pathId,
+                        userId(auth)
+                )
         );
     }
 }

@@ -67,6 +67,47 @@ public class LearningPathService {
             List<PathItem> items
     ) {}
 
+    /**
+     * 学习路径阶段完成进度。
+     * 与前端 LearningPathProgress 类型对应。
+     */
+    public record PathProgress(
+            int total,
+            int completed,
+            int percentage
+    ) {}
+
+    /**
+     * 查询当前学生自己的学习路径进度。
+     */
+    public PathProgress getProgress(
+            Long pathId,
+            Long studentId) {
+
+        // 复用已有的学生身份、路径归属和课程权限检查
+        PathResult path = getPath(pathId, studentId);
+
+        int total = path.items().size();
+
+        int completed = (int) path.items()
+                .stream()
+                .filter(item ->
+                        "COMPLETED".equals(item.status()))
+                .count();
+
+        int percentage = total == 0
+                ? 0
+                : (int) Math.round(
+                        completed * 100.0 / total
+                );
+
+        return new PathProgress(
+                total,
+                completed,
+                percentage
+        );
+    }
+
     private void requireStudent(Long userId) {
         User user = userMapper.selectById(userId);
         if (user == null
