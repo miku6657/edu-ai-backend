@@ -4,8 +4,8 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { CalendarDays, ClipboardPaste, List, Plus, RefreshCw } from '@lucide/vue'
 import { ElMessageBox } from 'element-plus'
 
-import { listCourses } from '@/api/course'
 import type { Course } from '@/api/course'
+import { listAccessibleCourses } from '@/api/course-access'
 import {
   createDdlTask,
   decideDdlDraft,
@@ -17,11 +17,24 @@ import {
 } from '@/api/ddl'
 import type { DdlTask, DraftDecision, TaskChangeDraft } from '@/api/ddl'
 import { ApiError } from '@/api/error'
+import {
+  cancelCourseLearningTask,
+  createCourseLearningTask,
+  getCourseLearningTaskProgress,
+  listCourseLearningTasks,
+  setCourseLearningTaskCompletion,
+  updateCourseLearningTask,
+} from '@/api/learning-task'
+import type {
+  LearningTaskProgress,
+  StudentLearningTask,
+} from '@/api/learning-task'
 import DdlCalendar from '@/components/home/DdlCalendar.vue'
 import BaseCard from '@/components/ui/BaseCard.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import StatCard from '@/components/ui/StatCard.vue'
 import TagBadge from '@/components/ui/TagBadge.vue'
+import { useAuthStore } from '@/stores/auth'
 import { notifyError, notifySuccess, notifyWarning } from '@/utils/notify'
 import {
   DEFAULT_TIMEZONE,
@@ -80,6 +93,7 @@ import {
  */
 
 const board = ref(emptyBoard())
+const auth = useAuthStore()
 const courses = ref<Course[]>([])
 const courseFilter = ref('')
 const loading = ref(true)
@@ -87,6 +101,26 @@ const loadError = ref('')
 const busyTaskId = ref<string | null>(null)
 const nowMs = ref(Date.now())
 let clockTimer: number | null = null
+let publicLoadVersion = 0
+
+const publicTasks = ref<StudentLearningTask[]>([])
+const publicLoading = ref(false)
+const publicError = ref('')
+const publicBusyId = ref<string | null>(null)
+
+const publicFormVisible = ref(false)
+const publicSaving = ref(false)
+const editingPublicTask = ref<StudentLearningTask | null>(null)
+const publicForm = ref({
+  courseId: '',
+  title: '',
+  description: '',
+  deadline: '',
+})
+const publicProgress = ref<Record<string, LearningTaskProgress>>({})
+const canManagePublic = computed(
+  () => auth.isTeacher || auth.isAdmin,
+)
 
 const counts = computed(() => boardCounts(board.value))
 const countdowns = computed<Record<string, Countdown | null>>(() => {
@@ -166,6 +200,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  publicLoadVersion++
   if (clockTimer !== null) {
     window.clearInterval(clockTimer)
     clockTimer = null
@@ -174,14 +209,20 @@ onUnmounted(() => {
 
 async function loadCourses(): Promise<void> {
   try {
-    courses.value = await listCourses()
+    courses.value = await listAccessibleCourses()
+    await loadPublicTasks()
   } catch (error) {
     // 课程列表失败不阻断看板：任务里自带 course_name 文本，仍可完整管理
+    publicLoadVersion++
+    publicLoading.value = false
+    publicTasks.value = []
+    publicError.value = '课程列表加载失败，无法获取公共课程任务'
     notifyError(error)
   }
 }
 
-async function loadBoard(): Promise<void> {  loadError.value = ''
+async function loadBoard(): Promise<void> {
+  loadError.value = ''
   try {
     board.value = await listDdlTasks({
       statusGroup: 'ALL',
@@ -197,7 +238,10 @@ async function loadBoard(): Promise<void> {  loadError.value = ''
 }
 
 async function refreshAll(): Promise<void> {
-  await loadBoard()
+  await Promise.all([
+    loadBoard(),
+    loadPublicTasks(),
+  ])
 }
 
 /* ------------------------------ 通知文本提取 ------------------------------ */
@@ -505,6 +549,210 @@ async function cancelTask(task: DdlTask): Promise<void> {
     busyTaskId.value = null
   }
 }
+
+/* ------------------ 公共课程任务 ------------------ */
+
+async function loadPublicTasks(): Promise<void> {
+  const version = ++publicLoadVersion
+  publicLoading.value = true
+  publicError.value = ''
+
+  const selected = courses.value.filter(
+    (course) =>
+      courseFilter.value === '' ||
+      String(course.id) === courseFilter.value,
+  )
+
+  try {
+    const tasks: StudentLearningTask[] = []
+    const failures: string[] = []
+
+    for (let i = 0; i < selected.length; i += 5) {
+      const batch = selected.slice(i, i + 5)
+      const results = await Promise.allSettled(
+        batch.map((course) =>
+          listCourseLearningTasks(course.id),
+        ),
+      )
+
+      if (version !== publicLoadVersion) return
+
+      results.forEach((result, index) => {
+        if (result.status === 'fulfilled') {
+          tasks.push(...result.value)
+        } else {
+          failures.push(batch[index]?.name ?? '未知课程')
+        }
+      })
+    }
+
+    if (version !== publicLoadVersion) return
+
+    publicTasks.value = tasks.sort(
+      (a, b) => a.deadline.localeCompare(b.deadline),
+    )
+
+    if (failures.length > 0) {
+      publicError.value =
+        `以下课程任务加载失败：${failures.join('、')}`
+    }
+  } finally {
+    if (version === publicLoadVersion) {
+      publicLoading.value = false
+    }
+  }
+}
+
+function publicCourseName(courseId: string): string {
+  return courses.value.find(
+    (course) => String(course.id) === String(courseId),
+  )?.name ?? '未知课程'
+}
+
+function formatPublicDeadline(value: string): string {
+  return value.replace('T', ' ').slice(0, 16)
+}
+
+function openPublicCreate(): void {
+  editingPublicTask.value = null
+
+  publicForm.value = {
+    courseId:
+      courseFilter.value ||
+      String(courses.value[0]?.id ?? ''),
+    title: '',
+    description: '',
+    deadline: '',
+  }
+
+  publicFormVisible.value = true
+}
+
+function openPublicEdit(task: StudentLearningTask): void {
+  editingPublicTask.value = task
+
+  publicForm.value = {
+    courseId: String(task.courseId),
+    title: task.title,
+    description: task.description ?? '',
+    deadline: task.deadline.replace('T', ' ').slice(0, 16),
+  }
+
+  publicFormVisible.value = true
+}
+
+async function savePublicTask(): Promise<void> {
+  const form = publicForm.value
+
+  if (!form.courseId || !form.title.trim() || !form.deadline) {
+    notifyWarning('请选择课程并填写标题和截止时间')
+    return
+  }
+
+  const deadline = form.deadline.replace(' ', 'T') + ':00'
+  const payload = {
+    title: form.title.trim(),
+    description: form.description.trim() || null,
+    deadline,
+  }
+
+  publicSaving.value = true
+
+  try {
+    if (editingPublicTask.value !== null) {
+      await updateCourseLearningTask(
+        editingPublicTask.value.id,
+        payload,
+      )
+      notifySuccess('公共课程任务已更新')
+    } else {
+      await createCourseLearningTask(
+        form.courseId,
+        payload,
+      )
+      notifySuccess('公共课程任务已发布')
+    }
+
+    publicFormVisible.value = false
+    await loadPublicTasks()
+  } catch (error) {
+    notifyError(error)
+  } finally {
+    publicSaving.value = false
+  }
+}
+
+async function removePublicTask(
+  task: StudentLearningTask,
+): Promise<void> {
+  try {
+    await ElMessageBox.confirm(
+      `确定取消公共任务《${task.title}》？`,
+      '取消课程任务',
+      {
+        type: 'warning',
+        confirmButtonText: '确定取消',
+        cancelButtonText: '返回',
+      },
+    )
+  } catch {
+    return
+  }
+
+  publicBusyId.value = String(task.id)
+
+  try {
+    await cancelCourseLearningTask(task.id)
+    notifySuccess('公共任务已取消')
+    await loadPublicTasks()
+  } catch (error) {
+    notifyError(error)
+  } finally {
+    publicBusyId.value = null
+  }
+}
+
+async function togglePublicCompleted(
+  task: StudentLearningTask,
+): Promise<void> {
+  publicBusyId.value = String(task.id)
+
+  try {
+    await setCourseLearningTaskCompletion(
+      task.id,
+      !task.completed,
+    )
+
+    notifySuccess(
+      task.completed ? '已取消完成状态' : '任务已完成',
+    )
+
+    await loadPublicTasks()
+  } catch (error) {
+    notifyError(error)
+  } finally {
+    publicBusyId.value = null
+  }
+}
+
+async function showPublicProgress(
+  task: StudentLearningTask,
+): Promise<void> {
+  try {
+    const data = await getCourseLearningTaskProgress(task.id)
+    publicProgress.value[String(task.id)] = data
+
+    await ElMessageBox.alert(
+      `全班 ${data.totalStudents} 人，` +
+      `已完成 ${data.completedStudents} 人，` +
+      `未完成 ${data.pendingStudents} 人，` +
+      `完成率 ${data.completionRate}%`,
+      `《${task.title}》完成统计`,
+    )
+  } catch (error) {
+    notifyError(error)
+  }
+}
 </script>
 
 <template>
@@ -535,6 +783,131 @@ async function cancelTask(task: DdlTask): Promise<void> {
       </div>
     </section>
 
+    <!-- 教师公共课程任务 / 学生课程任务 -->
+    <BaseCard title="课程公共任务">
+      <div class="ddl-public-header">
+        <span class="ddl-muted">
+          教师发布的任务对课程内所有学生可见，
+          每个学生独立记录完成状态。
+        </span>
+
+        <el-button
+          v-if="canManagePublic"
+          type="primary"
+          :icon="Plus"
+          @click="openPublicCreate"
+        >
+          发布公共任务
+        </el-button>
+      </div>
+
+      <el-alert
+        v-if="publicError"
+        type="warning"
+        :closable="false"
+        :title="publicError"
+        show-icon
+      />
+
+      <el-table
+        v-loading="publicLoading"
+        :data="publicTasks"
+        empty-text="暂无课程公共任务"
+        style="width: 100%"
+      >
+        <el-table-column label="任务名称" min-width="200">
+          <template #default="{ row }">
+            <div class="ddl-public-title">
+              {{ row.title }}
+            </div>
+            <div v-if="row.description" class="ddl-muted">
+              {{ row.description }}
+            </div>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="课程" min-width="120">
+          <template #default="{ row }">
+            {{ publicCourseName(row.courseId) }}
+          </template>
+        </el-table-column>
+
+        <el-table-column label="截止时间" min-width="150">
+          <template #default="{ row }">
+            {{ formatPublicDeadline(row.deadline) }}
+          </template>
+        </el-table-column>
+
+        <el-table-column label="状态" width="110">
+          <template #default="{ row }">
+            <el-tag
+              :type="
+                auth.isStudent && row.completed
+                  ? 'success'
+                  : row.overdue
+                    ? 'danger'
+                    : 'warning'
+              "
+            >
+              {{
+                auth.isStudent && row.completed
+                  ? '已完成'
+                  : row.overdue
+                    ? '已逾期'
+                    : auth.isStudent
+                      ? '待完成'
+                      : '进行中'
+              }}
+            </el-tag>
+          </template>
+        </el-table-column>
+
+        <el-table-column
+          label="操作"
+          min-width="240"
+          fixed="right"
+        >
+          <template #default="{ row }">
+            <el-button
+              v-if="auth.isStudent"
+              link
+              type="primary"
+              :loading="publicBusyId === String(row.id)"
+              @click="togglePublicCompleted(row)"
+            >
+              {{ row.completed ? '撤销完成' : '标记完成' }}
+            </el-button>
+
+            <template v-if="canManagePublic">
+              <el-button
+                link
+                type="primary"
+                @click="showPublicProgress(row)"
+              >
+                查看进度
+              </el-button>
+
+              <el-button
+                link
+                @click="openPublicEdit(row)"
+              >
+                编辑
+              </el-button>
+
+              <el-button
+                link
+                type="danger"
+                :loading="publicBusyId === String(row.id)"
+                @click="removePublicTask(row)"
+              >
+                取消
+              </el-button>
+            </template>
+          </template>
+        </el-table-column>
+      </el-table>
+    </BaseCard>
+
     <div class="ddl-metrics">
       <StatCard label="待确认" :value="counts.pending" tone="warning" hint="待补充时间" />
       <StatCard label="变更草案" :value="counts.drafts" tone="primary" hint="需确认后生效" />
@@ -552,7 +925,7 @@ async function cancelTask(task: DdlTask): Promise<void> {
             filterable
             placeholder="全部课程"
             class="ddl-toolbar__select"
-            @change="loadBoard"
+            @change="refreshAll"
           >
             <el-option
               v-for="course in courses"
@@ -561,7 +934,7 @@ async function cancelTask(task: DdlTask): Promise<void> {
               :value="course.id"
             />
           </el-select>
-          <el-button :icon="RefreshCw" :loading="loading" @click="loadBoard">刷新</el-button>
+          <el-button :icon="RefreshCw" :loading="loading" @click="refreshAll">刷新</el-button>
         </div>
 
         <div class="ddl-view-toggle" role="group" aria-label="视图切换">
@@ -1017,6 +1390,76 @@ async function cancelTask(task: DdlTask): Promise<void> {
         <el-button type="primary" :loading="editBusy" @click="submitEdit(false)">保存</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog
+      v-model="publicFormVisible"
+      :title="editingPublicTask ? '编辑公共课程任务' : '发布公共课程任务'"
+      width="560px"
+      destroy-on-close
+    >
+      <el-form label-position="top">
+        <el-form-item label="所属课程" required>
+          <el-select
+            v-model="publicForm.courseId"
+            placeholder="请选择课程"
+            style="width: 100%"
+            :disabled="editingPublicTask !== null"
+          >
+            <el-option
+              v-for="course in courses"
+              :key="course.id"
+              :label="course.name"
+              :value="String(course.id)"
+            />
+          </el-select>
+        </el-form-item>
+
+        <el-form-item label="任务标题" required>
+          <el-input
+            v-model="publicForm.title"
+            maxlength="100"
+            show-word-limit
+            placeholder="例如：提交 Java 课程设计报告"
+          />
+        </el-form-item>
+
+        <el-form-item label="任务描述">
+          <el-input
+            v-model="publicForm.description"
+            type="textarea"
+            :rows="4"
+            maxlength="10000"
+            show-word-limit
+            placeholder="任务要求、参考资料、提交说明等"
+          />
+        </el-form-item>
+
+        <el-form-item label="截止时间" required>
+          <el-date-picker
+            v-model="publicForm.deadline"
+            type="datetime"
+            value-format="YYYY-MM-DD HH:mm"
+            format="YYYY-MM-DD HH:mm"
+            placeholder="选择截止时间"
+            style="width: 100%"
+          />
+        </el-form-item>
+      </el-form>
+
+      <template #footer>
+        <el-button @click="publicFormVisible = false">
+          取消
+        </el-button>
+
+        <el-button
+          type="primary"
+          :loading="publicSaving"
+          @click="savePublicTask"
+        >
+          {{ editingPublicTask ? '保存修改' : '发布任务' }}
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -1116,6 +1559,20 @@ async function cancelTask(task: DdlTask): Promise<void> {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 12px;
+}
+
+.ddl-public-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.ddl-public-title {
+  font-weight: 600;
+  color: var(--sc-text);
+  overflow-wrap: anywhere;
 }
 
 .ddl-toolbar {
