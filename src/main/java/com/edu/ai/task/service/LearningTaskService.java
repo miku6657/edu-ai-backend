@@ -5,7 +5,13 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 
 import com.edu.ai.common.BusinessException;
 import com.edu.ai.course.entity.Course;
+import com.edu.ai.course.entity.CourseStudent;
 import com.edu.ai.course.mapper.CourseMapper;
+import com.edu.ai.course.mapper.CourseStudentMapper;
+import com.edu.ai.course.service.CoursePermissionService;
+import com.edu.ai.system.entity.User;
+import com.edu.ai.system.enums.UserRole;
+import com.edu.ai.system.mapper.UserMapper;
 
 import com.edu.ai.task.dto.LearningTaskRequest;
 import com.edu.ai.task.dto.StudentTaskVO;
@@ -28,15 +34,24 @@ public class LearningTaskService {
     private final LearningTaskMapper taskMapper;
     private final TaskStudentMapper taskStudentMapper;
     private final CourseMapper courseMapper;
+    private final CourseStudentMapper courseStudentMapper;
+    private final CoursePermissionService coursePermissionService;
+    private final UserMapper userMapper;
 
     public LearningTaskService(
             LearningTaskMapper taskMapper,
             TaskStudentMapper taskStudentMapper,
-            CourseMapper courseMapper) {
+            CourseMapper courseMapper,
+            CourseStudentMapper courseStudentMapper,
+            CoursePermissionService coursePermissionService,
+            UserMapper userMapper) {
 
         this.taskMapper = taskMapper;
         this.taskStudentMapper = taskStudentMapper;
         this.courseMapper = courseMapper;
+        this.courseStudentMapper = courseStudentMapper;
+        this.coursePermissionService = coursePermissionService;
+        this.userMapper = userMapper;
     }
 
     // 创建课程任务
@@ -171,12 +186,27 @@ public class LearningTaskService {
             boolean completed) {
 
         LearningTask task = requireTask(taskId);
+
         requireActiveTask(task);
 
-        // 课程创建者或已加入课程的用户均可操作
-        requireCourseAccess(task.getCourseId(), userId);
+        // 必须是当前课程的有效成员
+        coursePermissionService.requireActiveRead(
+                task.getCourseId(),
+                userId
+        );
 
-        // 使用 MySQL 原子 upsert，避免并发产生重复记录
+        User user = userMapper.selectById(userId);
+
+        if (user == null
+                || !UserRole.STUDENT.name().equals(user.getRole())) {
+
+            throw new BusinessException(
+                    403,
+                    "只有学生可以修改课程任务完成状态"
+            );
+        }
+
+        // 保留原有的原子 Upsert，防止并发重复记录
         taskStudentMapper.upsertCompletion(
                 taskId,
                 userId,
@@ -185,33 +215,63 @@ public class LearningTaskService {
         );
     }
 
-    // 查看任务完成统计（仅课程创建者）
+    /**
+     * 教师查看公共课程任务的全班完成进度。
+     *
+     * 统计范围：当前仍然加入课程的学生。
+     * 没有 task_student 记录的学生视为未完成。
+     */
     public Map<String, Object> progress(
             Long taskId,
             Long userId) {
 
         LearningTask task = requireTask(taskId);
 
+        // 只有课程教师或管理员可以查看全班统计
         requireCourseOwner(task.getCourseId(), userId);
 
-        TaskStudent record = taskStudentMapper.selectOne(
-                new LambdaQueryWrapper<TaskStudent>()
-                        .eq(TaskStudent::getTaskId, taskId)
-                        .eq(TaskStudent::getStudentId, userId)
-        );
+        Long courseId = task.getCourseId();
 
-        boolean completed = record != null
-                && Integer.valueOf(1)
-                        .equals(record.getCompleted());
+        // 当前课程的全部学生 ID
+        List<Long> studentIds = courseStudentMapper.selectList(
+                new LambdaQueryWrapper<CourseStudent>()
+                        .eq(CourseStudent::getCourseId, courseId)
+                        .select(CourseStudent::getStudentId)
+        ).stream()
+         .map(CourseStudent::getStudentId)
+         .distinct()
+         .toList();
+
+        int totalStudents = studentIds.size();
+
+        long completedStudents = 0;
+
+        if (!studentIds.isEmpty()) {
+            completedStudents = taskStudentMapper.selectCount(
+                    new LambdaQueryWrapper<TaskStudent>()
+                            .eq(TaskStudent::getTaskId, taskId)
+                            .eq(TaskStudent::getCompleted, 1)
+                            .in(TaskStudent::getStudentId, studentIds)
+            );
+        }
+
+        long pendingStudents =
+                totalStudents - completedStudents;
+
+        double completionRate = totalStudents == 0
+                ? 0.0
+                : Math.round(
+                    completedStudents * 10000.0 / totalStudents
+                  ) / 100.0;
 
         Map<String, Object> result = new HashMap<>();
 
         result.put("taskId", taskId);
-        result.put("completed", completed);
-        result.put(
-                "completedTime",
-                record == null ? null : record.getCompletedTime()
-        );
+        result.put("courseId", courseId);
+        result.put("totalStudents", totalStudents);
+        result.put("completedStudents", completedStudents);
+        result.put("pendingStudents", pendingStudents);
+        result.put("completionRate", completionRate);
 
         return result;
     }
@@ -253,19 +313,20 @@ public class LearningTaskService {
             Long courseId,
             Long userId) {
 
-        Course course = requireCourse(courseId);
-
-        if (!userId.equals(course.getUserId())) {
-            throw new BusinessException(
-                    403, "无权管理其他用户课程中的任务");
-        }
+        coursePermissionService.requireManage(
+                courseId,
+                userId
+        );
     }
 
     private void requireCourseAccess(
             Long courseId,
             Long userId) {
 
-        requireCourseOwner(courseId, userId);
+        coursePermissionService.requireActiveRead(
+                courseId,
+                userId
+        );
     }
 
     private void validateRequest(LearningTaskRequest request) {
