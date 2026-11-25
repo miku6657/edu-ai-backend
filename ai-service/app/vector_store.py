@@ -514,14 +514,33 @@ def delete_document_vectors_all_versions(
 def search_course_by_collection(
     collection_name_value: str,
     query: str,
+    allowed_document_ids: list[str],
     top_k: int = 5,
     model: str | None = None,
     api_key: str | None = None,
     base_url: str | None = None,
 ) -> list[dict]:
-    """按 CourseEmbeddingProfile 中保存的 Collection 名称检索。"""
+    """按指定Collection检索当前生效的课程资源。
+
+    必须同时满足：
+    1. 向量处于active状态。
+    2. 文档ID属于Java提供的当前生效版本白名单。
+    """
     if not collection_name_value:
         raise ValueError("Collection名称不能为空")
+
+    # 去重，同时统一为字符串类型。
+    allowed_ids = sorted({
+        str(document_id)
+        for document_id in allowed_document_ids
+    })
+
+    # 空白名单直接返回，不能退化为全量检索。
+    if not allowed_ids:
+        return []
+
+    if top_k <= 0:
+        return []
 
     collection = client.get_collection(
         name=collection_name_value,
@@ -547,7 +566,12 @@ def search_course_by_collection(
     result = collection.query(
         query_embeddings=[query_embedding],
         n_results=min(top_k, collection.count()),
-        where={"active": "1"},
+        where={
+            "$and": [
+                {"active": "1"},
+                {"document_id": {"$in": allowed_ids}},
+            ]
+        },
         include=[
             "documents",
             "metadatas",

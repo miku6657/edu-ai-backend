@@ -124,11 +124,15 @@ public class EmbeddingMigrationService {
 
         int targetVersion = sourceVersion + 1;
 
-        // 只迁移正常完成索引的文档。
+        // 只迁移当前生效且已完成索引的资源版本。
         long totalDocuments = documentMapper.selectCount(
                 new LambdaQueryWrapper<CourseDocument>()
                         .eq(CourseDocument::getCourseId, courseId)
                         .eq(CourseDocument::getStatus, "READY")
+                        .eq(
+                                CourseDocument::getVersionStatus,
+                                "CURRENT"
+                        )
         );
 
         if (totalDocuments == 0) {

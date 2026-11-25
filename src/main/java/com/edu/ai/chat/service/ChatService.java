@@ -10,6 +10,7 @@ import com.edu.ai.common.BusinessException;
 import com.edu.ai.course.entity.Course;
 import com.edu.ai.course.mapper.CourseMapper;
 import com.edu.ai.course.service.CoursePermissionService;
+import com.edu.ai.document.mapper.CourseDocumentMapper;
 import com.edu.ai.system.service.UserModelResolver;
 import com.edu.ai.task.service.QuestionKnowledgeService;
 
@@ -54,6 +55,7 @@ ChatService {
     private final ChatSessionMapper sessionMapper;
     private final ChatMessageMapper messageMapper;
     private final CourseMapper courseMapper;
+    private final CourseDocumentMapper documentMapper;
     private final CoursePermissionService coursePermissionService;
     private final UserModelResolver userModelResolver;
     private final ThreadPoolTaskExecutor executor;
@@ -69,6 +71,7 @@ ChatService {
             ChatSessionMapper sessionMapper,
             ChatMessageMapper messageMapper,
             CourseMapper courseMapper,
+            CourseDocumentMapper documentMapper,
             UserModelResolver userModelResolver,
             CoursePermissionService coursePermissionService,
             @Qualifier("chatStreamExecutor")
@@ -82,6 +85,7 @@ ChatService {
         this.sessionMapper = sessionMapper;
         this.messageMapper = messageMapper;
         this.courseMapper = courseMapper;
+        this.documentMapper = documentMapper;
         this.userModelResolver = userModelResolver;
         this.coursePermissionService = coursePermissionService;
         this.executor = executor;
@@ -348,6 +352,20 @@ ChatService {
 
             body.put("course_id", session.getCourseId());
             body.put("question", question);
+
+            // 查询当前课程所有已经生效的资源版本。
+            // 白名单必须由Java后端生成，不能由前端指定。
+            List<Long> allowedDocumentIds =
+                    documentMapper.selectReadyDocumentIds(
+                            session.getCourseId()
+                    );
+
+            ArrayNode allowedDocuments =
+                    body.putArray("allowed_document_ids");
+
+            for (Long documentId : allowedDocumentIds) {
+                allowedDocuments.add(documentId.toString());
+            }
 
             body.put(
                     "embedding_version",

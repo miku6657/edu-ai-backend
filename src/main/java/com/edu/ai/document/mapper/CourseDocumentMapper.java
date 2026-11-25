@@ -14,13 +14,16 @@ public interface CourseDocumentMapper
         extends BaseMapper<CourseDocument> {
 
     /**
-     * 查询课程中所有已经完成索引的文档。
+     * 查询课程中已完成索引且当前生效的文档。
+     *
+     * 用于Embedding迁移，排除历史版本和待生效版本。
      */
     @Select("""
             SELECT *
             FROM course_document
             WHERE course_id = #{courseId}
               AND status = 'READY'
+              AND version_status = 'CURRENT'
             ORDER BY id ASC
             """)
     List<CourseDocument> selectReadyByCourseId(
@@ -28,13 +31,18 @@ public interface CourseDocumentMapper
     );
 
     /**
-     * 查询课程中所有已完成索引的文档 ID，用于集合一致性校验。
+     * 查询当前课程生效文档ID。
+     *
+     * 用途：
+     * 1. RAG检索文档白名单。
+     * 2. Embedding迁移集合一致性校验。
      */
     @Select("""
             SELECT id
             FROM course_document
             WHERE course_id = #{courseId}
               AND status = 'READY'
+              AND version_status = 'CURRENT'
             ORDER BY id ASC
             """)
     List<Long> selectReadyDocumentIds(

@@ -19,7 +19,6 @@ from .vector_store import (
     delete_document_vectors_all_versions,
     get_or_create_index_collection,
     index_document_into_collection,
-    search_course,
 )
 
 logger = logging.getLogger(__name__)
@@ -79,12 +78,6 @@ class IndexRequest(BaseModel):
     )
 
 
-class SearchRequest(BaseModel):
-    course_id: int
-    query: str
-    top_k: int = Field(5, ge=1, le=50)
-
-
 class HistoryMessage(BaseModel):
     role: str
     content: str = Field(
@@ -95,6 +88,7 @@ class HistoryMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     course_id: int = Field(gt=0)
+    allowed_document_ids: list[str]
     question: str = Field(
         min_length=1,
         max_length=2000,
@@ -271,12 +265,6 @@ def internal_index(req: IndexRequest, _: None = Depends(require_internal)):
     }
 
 
-@app.post("/internal/search")
-def internal_search(req: SearchRequest, _: None = Depends(require_internal)):
-    results = search_course(req.course_id, req.query, req.top_k)
-    return {"results": results}
-
-
 @app.post(
     "/internal/chat/stream",
     dependencies=[Depends(require_internal)],
@@ -296,6 +284,7 @@ def chat_stream_api(request: ChatRequest):
             course_id=request.course_id,
             question=request.question.strip(),
             history=history,
+            allowed_document_ids=request.allowed_document_ids,
             embedding_version=request.embedding_version,
             collection_name_value=request.collection_name,
             chat_model=request.chat_model,

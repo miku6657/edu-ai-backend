@@ -36,6 +36,15 @@ public interface DocumentService {
             String sourceInfo
     );
 
+    /**
+     * 为当前生效的资源上传一个新版本。
+     */
+    DocumentVO uploadNewVersion(
+            Long documentId,
+            Long userId,
+            MultipartFile file
+    );
+
     List<DocumentVO> listByCourse(
             Long courseId,
             Long userId

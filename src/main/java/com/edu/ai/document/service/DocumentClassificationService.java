@@ -281,16 +281,23 @@ public class DocumentClassificationService {
 
         permissions.requireActiveRead(courseId, userId);
 
-        // 与原有 DocumentServiceImpl.listByCourse()
-        // 使用相同的文档可见性规则。
+        boolean canManage =
+                permissions.canManage(courseId, userId);
+
         List<String> documentIds = jdbc.queryForList(
                 """
                 SELECT CAST(id AS CHAR)
                 FROM course_document
                 WHERE course_id = ?
                   AND (
-                      status = 'READY'
-                      OR uploader_id = ?
+                      (
+                          version_status = 'CURRENT'
+                          AND status = 'READY'
+                      )
+                      OR (
+                          version_status = 'PENDING'
+                          AND ? = 1
+                      )
                   )
                   AND status NOT IN (
                       'DELETING',
@@ -301,7 +308,7 @@ public class DocumentClassificationService {
                 """,
                 String.class,
                 courseId,
-                userId
+                canManage ? 1 : 0
         );
 
         Map<String, List<ClassificationTag>> chapterMap =
@@ -478,7 +485,7 @@ public class DocumentClassificationService {
             boolean forUpdate) {
 
         String sql = """
-                SELECT course_id, uploader_id, status
+                SELECT course_id, uploader_id, status, version_status
                 FROM course_document
                 WHERE id = ?
                 """
@@ -511,6 +518,16 @@ public class DocumentClassificationService {
         ).contains(status)) {
             throw new BusinessException(
                     409, "已删除或删除中的文档不能分类"
+            );
+        }
+
+        if (forUpdate
+                && "HISTORY".equals(
+                        row.get("version_status"))) {
+
+            throw new BusinessException(
+                    409,
+                    "历史版本的分类不能直接修改"
             );
         }
 

@@ -1,5 +1,6 @@
 package com.edu.ai.document.service;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.edu.ai.common.BusinessException;
 import com.edu.ai.course.service.CoursePermissionService;
@@ -114,6 +115,8 @@ public class DocumentLifecycleService {
                     requireDocument(documentId);
 
             requireDocumentManagePermission(latest, userId);
+
+            requireVersionDeletable(latest);
 
             if ("DELETED".equals(latest.getStatus())) {
                 return;
@@ -453,6 +456,61 @@ public class DocumentLifecycleService {
                 document.getCourseId(),
                 userId
         );
+    }
+
+    /**
+     * 防止普通删除操作破坏资源版本历史。
+     */
+    private void requireVersionDeletable(
+            CourseDocument document) {
+
+        // 历史版本需要保留，不能直接通过普通删除接口删除。
+        if ("HISTORY".equals(document.getVersionStatus())) {
+
+            throw new BusinessException(
+                    409,
+                    "历史版本需要保留，不能直接删除"
+            );
+        }
+
+        // 待处理版本可以沿用原有删除逻辑。
+        if ("PENDING".equals(document.getVersionStatus())) {
+            return;
+        }
+
+        // 已经存在其他版本的资源不能单独删除当前版本，
+        // 否则可能导致资源失去生效版本。
+        if ("CURRENT".equals(document.getVersionStatus())
+                && document.getResourceId() != null) {
+
+            Long count = documentMapper.selectCount(
+                    new LambdaQueryWrapper<CourseDocument>()
+                            .eq(
+                                    CourseDocument::getResourceId,
+                                    document.getResourceId()
+                            )
+                            .eq(
+                                    CourseDocument::getCourseId,
+                                    document.getCourseId()
+                            )
+                            .ne(
+                                    CourseDocument::getId,
+                                    document.getId()
+                            )
+                            .ne(
+                                    CourseDocument::getStatus,
+                                    "DELETED"
+                            )
+            );
+
+            if (count != null && count > 0) {
+
+                throw new BusinessException(
+                        409,
+                        "该资源存在其他版本，暂不支持单独删除当前版本"
+                );
+            }
+        }
     }
 
     private Path safeFilePath(String storageName) {

@@ -2,11 +2,16 @@ package com.edu.ai.document.controller;
 
 import com.edu.ai.common.BusinessException;
 import com.edu.ai.common.Result;
+import com.edu.ai.course.service.CoursePermissionService;
 import com.edu.ai.document.dto.DocumentVO;
+import com.edu.ai.document.entity.CourseDocument;
+import com.edu.ai.document.mapper.CourseDocumentMapper;
+import com.edu.ai.document.service.CourseIndexLease;
 import com.edu.ai.document.service.DocumentService;
 import com.edu.ai.document.service.DocumentIndexTask;
 import com.edu.ai.document.service.DocumentLifecycleService;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
@@ -28,15 +33,27 @@ public class DocumentController {
     private final DocumentService documentService;
     private final DocumentIndexTask indexTask;
     private final DocumentLifecycleService lifecycleService;
+    private final CourseIndexLease courseIndexLease;
+    private final CourseDocumentMapper documentMapper;
+    private final CoursePermissionService permissions;
+
+    @Value("${ai.document.version-upload-enabled:false}")
+    private boolean versionUploadEnabled;
 
     public DocumentController(
             DocumentService documentService,
             DocumentIndexTask indexTask,
-            DocumentLifecycleService lifecycleService) {
+            DocumentLifecycleService lifecycleService,
+            CourseIndexLease courseIndexLease,
+            CourseDocumentMapper documentMapper,
+            CoursePermissionService permissions) {
 
         this.documentService = documentService;
         this.indexTask = indexTask;
         this.lifecycleService = lifecycleService;
+        this.courseIndexLease = courseIndexLease;
+        this.documentMapper = documentMapper;
+        this.permissions = permissions;
     }
 
     // 上传课件
@@ -78,6 +95,75 @@ public class DocumentController {
         indexTask.process(document.getId());
 
         return Result.success(document);
+    }
+
+    /**
+     * 上传课程资源的新版本。
+     */
+    @PostMapping(
+            value = "/{documentId}/versions",
+            consumes = MediaType.MULTIPART_FORM_DATA_VALUE
+    )
+    public Result<DocumentVO> uploadVersion(
+            @PathVariable Long documentId,
+            @RequestParam("file") MultipartFile file,
+            Authentication authentication) {
+
+        Long userId = getUserId(authentication);
+
+        if (!versionUploadEnabled) {
+            throw new BusinessException(
+                    409, "资源版本上传功能暂未启用"
+            );
+        }
+
+        CourseDocument source =
+                documentMapper.selectById(documentId);
+
+        if (source == null) {
+            throw new BusinessException(
+                    404, "资源不存在"
+            );
+        }
+
+        permissions.requireManage(
+                source.getCourseId(),
+                userId
+        );
+
+        CourseIndexLease.Handle lease =
+                courseIndexLease.tryOpen(
+                        source.getCourseId(),
+                        "DOCUMENT_VERSION_UPLOAD"
+                );
+
+        if (lease == null) {
+            throw new BusinessException(
+                    409,
+                    "课程正在索引或迁移，请稍后重试"
+            );
+        }
+
+        DocumentVO created;
+
+        try (lease) {
+
+            lease.assertValid();
+
+            created = documentService.uploadNewVersion(
+                    documentId,
+                    userId,
+                    file
+            );
+
+            lease.assertValid();
+        }
+
+        // 必须先释放课程锁，
+        // 再启动索引任务，因为索引任务也需要获取该锁。
+        indexTask.process(created.getId());
+
+        return Result.success(created);
     }
 
     // 查看课程课件

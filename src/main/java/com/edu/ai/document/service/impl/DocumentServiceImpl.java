@@ -14,8 +14,11 @@ import com.edu.ai.document.service.DocumentService;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.FileSystemResource;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
@@ -36,15 +39,18 @@ public class DocumentServiceImpl implements DocumentService {
 
     private final CourseDocumentMapper documentMapper;
     private final CoursePermissionService coursePermissionService;
+    private final JdbcTemplate jdbc;
     private final Path storageRoot;
 
     public DocumentServiceImpl(
             CourseDocumentMapper documentMapper,
             CoursePermissionService coursePermissionService,
+            JdbcTemplate jdbc,
             @Value("${app.storage.pdf-dir}") String storageDir) {
 
         this.documentMapper = documentMapper;
         this.coursePermissionService = coursePermissionService;
+        this.jdbc = jdbc;
 
         this.storageRoot = Paths.get(storageDir)
                 .toAbsolutePath()
@@ -52,8 +58,7 @@ public class DocumentServiceImpl implements DocumentService {
     }
 
     /**
-     * 上传 PDF
-     * 所有登录用户均可上传
+     * 首次上传一份课程资源。
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -63,6 +68,32 @@ public class DocumentServiceImpl implements DocumentService {
             MultipartFile file,
             String resourceType,
             String sourceInfo) {
+
+        return saveDocument(
+                courseId,
+                userId,
+                file,
+                resourceType,
+                sourceInfo,
+                null,
+                1
+        );
+    }
+
+    /**
+     * 普通上传与版本上传共用的文件保存逻辑。
+     *
+     * resourceId为null：创建新的独立资源。
+     * resourceId非null：在已有资源下创建新版本。
+     */
+    private DocumentVO saveDocument(
+            Long courseId,
+            Long userId,
+            MultipartFile file,
+            String resourceType,
+            String sourceInfo,
+            Long resourceId,
+            int versionNo) {
 
         Course course = coursePermissionService.requireManage(
                 courseId, userId
@@ -77,15 +108,12 @@ public class DocumentServiceImpl implements DocumentService {
         String originalName =
                 cleanFilename(file.getOriginalFilename());
 
-        // 教师明确选择类型时使用指定类型；
-        // AUTO 时按文件名规则识别。
         String resolvedType =
                 DocumentResourceType.resolve(
                         resourceType,
                         originalName
                 );
 
-        // 不允许来源字段无限长。
         String resolvedSource =
                 sourceInfo == null
                         ? null
@@ -93,7 +121,6 @@ public class DocumentServiceImpl implements DocumentService {
 
         if (resolvedSource != null
                 && resolvedSource.length() > 255) {
-
             throw new BusinessException(
                     400, "资源来源不能超过255个字符"
             );
@@ -101,53 +128,65 @@ public class DocumentServiceImpl implements DocumentService {
 
         if (resolvedSource != null
                 && resolvedSource.isBlank()) {
-
             resolvedSource = null;
         }
 
         String storageName = UUID.randomUUID() + ".pdf";
 
-        Path target = storageRoot.resolve(storageName).normalize();
+        Path target = storageRoot
+                .resolve(storageName)
+                .normalize();
 
         if (!target.startsWith(storageRoot)) {
-            throw new BusinessException(400, "非法文件路径");
+            throw new BusinessException(
+                    400, "非法文件路径"
+            );
         }
 
         try {
             Files.createDirectories(storageRoot);
 
-            // 保存 PDF 文件
             try (InputStream input = file.getInputStream()) {
                 Files.copy(input, target);
             }
+
+            // 文件已写入，但数据库事务尚未提交。
+            // 如果后续插入、复制分类或事务提交失败，
+            // 回滚时删除本次新上传的文件。
+            registerRollbackCleanup(target);
 
             CourseDocument doc = new CourseDocument();
 
             doc.setCourseId(courseId);
             doc.setUploaderId(userId);
+
             doc.setOriginalName(originalName);
             doc.setStorageName(storageName);
             doc.setFileSize(file.getSize());
             doc.setContentType("application/pdf");
 
-            // 新增教学资源元数据
             doc.setResourceType(resolvedType);
             doc.setSourceInfo(resolvedSource);
 
-            doc.setStatus("UPLOADED");
-            doc.setVersionNo(1);
+            doc.setResourceId(resourceId);
+            doc.setVersionNo(versionNo);
             doc.setVersionStatus("PENDING");
+
+            doc.setStatus("UPLOADED");
+
             doc.setCreateTime(LocalDateTime.now());
             doc.setUpdateTime(LocalDateTime.now());
 
-            try {
-                documentMapper.insert(doc);
+            documentMapper.insert(doc);
 
-                if (doc.getId() == null) {
-                    throw new IllegalStateException(
-                            "文档保存后未获得ID"
-                    );
-                }
+            if (doc.getId() == null) {
+                throw new IllegalStateException(
+                        "文档保存后未获得ID"
+                );
+            }
+
+            // 首次上传时，使用文档自己的ID作为资源ID。
+            if (resourceId == null) {
 
                 int updated = documentMapper.update(
                         null,
@@ -169,16 +208,6 @@ public class DocumentServiceImpl implements DocumentService {
                 }
 
                 doc.setResourceId(doc.getId());
-
-            } catch (RuntimeException e) {
-
-                try {
-                    Files.deleteIfExists(target);
-                } catch (IOException cleanupError) {
-                    e.addSuppressed(cleanupError);
-                }
-
-                throw e;
             }
 
             return DocumentVO.from(doc);
@@ -191,15 +220,232 @@ public class DocumentServiceImpl implements DocumentService {
                 e.addSuppressed(cleanupError);
             }
 
-            throw new BusinessException(500, "PDF 文件保存失败");
+            throw new BusinessException(
+                    500, "PDF 文件保存失败"
+            );
+
+        } catch (RuntimeException e) {
+
+            try {
+                Files.deleteIfExists(target);
+            } catch (IOException cleanupError) {
+                e.addSuppressed(cleanupError);
+            }
+
+            throw e;
         }
     }
 
     /**
-     * 查询课程资料
+     * 注册事务回滚文件清理。
+     */
+    private void registerRollbackCleanup(Path target) {
+
+        if (!TransactionSynchronizationManager
+                .isSynchronizationActive()) {
+
+            throw new IllegalStateException(
+                    "文档保存必须在事务中执行"
+            );
+        }
+
+        TransactionSynchronizationManager
+                .registerSynchronization(
+                        new TransactionSynchronization() {
+
+                            @Override
+                            public void afterCompletion(int status) {
+
+                                if (status != STATUS_ROLLED_BACK) {
+                                    return;
+                                }
+
+                                try {
+                                    Files.deleteIfExists(target);
+                                } catch (IOException e) {
+
+                                    org.slf4j.LoggerFactory
+                                            .getLogger(
+                                                    DocumentServiceImpl.class
+                                            )
+                                            .error(
+                                                    "事务回滚后清理PDF失败: {}",
+                                                    target,
+                                                    e
+                                            );
+                                }
+                            }
+                        }
+                );
+    }
+
+    /**
+     * 上传已有资源的新版本。
      *
-     * 所有用户都能查看 READY 文档；
-     * 上传者还可以查看自己尚未处理完成的文档。
+     * 新版本索引完成之前，原版本继续生效。
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public DocumentVO uploadNewVersion(
+            Long documentId,
+            Long userId,
+            MultipartFile file) {
+
+        CourseDocument source =
+                documentMapper.selectById(documentId);
+
+        if (source == null) {
+            throw new BusinessException(
+                    404, "原始资源不存在"
+            );
+        }
+
+        coursePermissionService.requireManage(
+                source.getCourseId(),
+                userId
+        );
+
+        Long courseId = source.getCourseId();
+        Long resourceId = source.getResourceId();
+
+        if (resourceId == null) {
+            throw new BusinessException(
+                    409, "资源尚未完成版本初始化"
+            );
+        }
+
+        // 与DocumentVersionService使用相同的根记录锁。
+        List<Long> roots = jdbc.queryForList(
+                """
+                SELECT id
+                FROM course_document
+                WHERE id = ?
+                  AND course_id = ?
+                FOR UPDATE
+                """,
+                Long.class,
+                resourceId,
+                courseId
+        );
+
+        if (roots.isEmpty()) {
+            throw new BusinessException(
+                    409, "资源根记录不存在"
+            );
+        }
+
+        // 加锁后重新读取当前资源，防止替换已经过期的版本。
+        List<Long> currentIds = jdbc.queryForList(
+                """
+                SELECT id
+                FROM course_document
+                WHERE resource_id = ?
+                  AND course_id = ?
+                  AND version_status = 'CURRENT'
+                  AND status = 'READY'
+                FOR UPDATE
+                """,
+                Long.class,
+                resourceId,
+                courseId
+        );
+
+        if (currentIds.size() != 1
+                || !documentId.equals(currentIds.get(0))) {
+
+            throw new BusinessException(
+                    409, "资源当前版本已经变化，请刷新后重试"
+            );
+        }
+
+        // 同一资源最多允许一个尚未处理完成的新版本。
+        // FAILED版本需要先重试或删除。
+        List<Long> pendingIds = jdbc.queryForList(
+                """
+                SELECT id
+                FROM course_document
+                WHERE resource_id = ?
+                  AND course_id = ?
+                  AND version_status = 'PENDING'
+                  AND status <> 'DELETED'
+                FOR UPDATE
+                """,
+                Long.class,
+                resourceId,
+                courseId
+        );
+
+        if (!pendingIds.isEmpty()) {
+            throw new BusinessException(
+                    409,
+                    "已有待处理的新版本，请先完成处理或删除失败版本"
+            );
+        }
+
+        // 包括已经删除的版本，保证版本号永不重复。
+        List<Integer> versions = jdbc.queryForList(
+                """
+                SELECT version_no
+                FROM course_document
+                WHERE resource_id = ?
+                  AND course_id = ?
+                ORDER BY version_no DESC
+                LIMIT 1
+                FOR UPDATE
+                """,
+                Integer.class,
+                resourceId,
+                courseId
+        );
+
+        int nextVersion = versions.isEmpty()
+                ? 1
+                : Math.addExact(versions.get(0), 1);
+
+        // 继承原资源的类型和来源。
+        DocumentVO created = saveDocument(
+                courseId,
+                userId,
+                file,
+                source.getResourceType(),
+                source.getSourceInfo(),
+                resourceId,
+                nextVersion
+        );
+
+        Long newDocumentId = created.getId();
+
+        // 继承原有章节关联。
+        jdbc.update(
+                """
+                INSERT INTO course_document_chapter
+                    (document_id, chapter_id)
+                SELECT ?, chapter_id
+                FROM course_document_chapter
+                WHERE document_id = ?
+                """,
+                newDocumentId,
+                documentId
+        );
+
+        // 继承原有知识点关联。
+        jdbc.update(
+                """
+                INSERT INTO course_document_knowledge_point
+                    (document_id, point_id)
+                SELECT ?, point_id
+                FROM course_document_knowledge_point
+                WHERE document_id = ?
+                """,
+                newDocumentId,
+                documentId
+        );
+
+        return created;
+    }
+
+    /**
+     * 查询课程资料。
      */
     @Override
     public List<DocumentVO> listByCourse(
@@ -210,27 +456,49 @@ public class DocumentServiceImpl implements DocumentService {
                 courseId, userId
         );
 
+        boolean canManage =
+                coursePermissionService.canManage(
+                        courseId,
+                        userId
+                );
+
         LambdaQueryWrapper<CourseDocument> query =
                 new LambdaQueryWrapper<CourseDocument>()
-                        .eq(CourseDocument::getCourseId, courseId)
-                        .and(wrapper ->
-                                wrapper.eq(
-                                                CourseDocument::getStatus,
-                                                "READY"
-                                        )
-                                        .or()
-                                        .eq(
-                                                CourseDocument::getUploaderId,
-                                                userId
-                                        )
+                        .eq(
+                                CourseDocument::getCourseId,
+                                courseId
                         )
+                        .and(wrapper -> {
+
+                            // 所有课程成员查看当前生效版本。
+                            wrapper.nested(current ->
+                                    current.eq(
+                                            CourseDocument::getVersionStatus,
+                                            "CURRENT"
+                                    ).eq(
+                                            CourseDocument::getStatus,
+                                            "READY"
+                                    )
+                            );
+
+                            // 教师和管理员还可以查看待处理版本，
+                            // 以便处理失败、重试或删除。
+                            if (canManage) {
+                                wrapper.or().eq(
+                                        CourseDocument::getVersionStatus,
+                                        "PENDING"
+                                );
+                            }
+                        })
                         .notIn(
                                 CourseDocument::getStatus,
                                 "DELETING",
                                 "DELETE_FAILED",
                                 "DELETED"
                         )
-                        .orderByDesc(CourseDocument::getCreateTime);
+                        .orderByDesc(
+                                CourseDocument::getCreateTime
+                        );
 
         return documentMapper.selectList(query)
                 .stream()

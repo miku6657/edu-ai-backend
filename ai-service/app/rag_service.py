@@ -32,7 +32,8 @@ def build_context(sources: list[dict]) -> str:
 def build_system_prompt(context: str) -> str:
     """根据检索到的课程资料构建系统提示词。"""
     return (
-        "你是一名课程助教，请严格依据下面的课程资料回答学生的问题。\n"
+        "你是一名课程助教，请严格依据下面的当前课程资料回答学生的问题。\n"
+        "请以当前提供的资料为准，不要使用资料之外或历史对话中的信息。\n"
         "如果资料中没有相关内容，请直接说明“资料中未找到相关内容”，不要编造。\n\n"
         f"【课程资料】\n{context}"
     )
@@ -42,6 +43,7 @@ def rag_stream(
     course_id: int,
     question: str,
     history: list[dict],
+    allowed_document_ids: list[str],
     embedding_version: int = 1,
     collection_name_value: str | None = None,
     embedding_model: str | None = None,
@@ -61,25 +63,41 @@ def rag_stream(
     课程当前生效的 Embedding 版本与模型，以及用户自己的 Chat 模型，
     都由 Java 通过可信的内部请求传入，不能直接信任前端参数。
     """
-    # 1. 检索课程知识库：只按 Profile 指定的 Collection 检索。
+    # 1. 空白名单直接拒答，不调用 Embedding 与 LLM。
+    if not allowed_document_ids:
+        yield sse_event("sources", {"sources": []})
+        yield sse_event("token", {"content": "当前课程暂无可检索的生效资料。"})
+        yield sse_event("done", {})
+        return
+
+    # 2. 检索课程知识库：只按 Profile 指定的 Collection 检索，
+    #    并且只允许白名单中的当前生效文档。
     sources = search_course_by_collection(
         collection_name_value=collection_name_value,
         query=question,
+        allowed_document_ids=allowed_document_ids,
         top_k=RAG_TOP_K,
         model=embedding_model,
         api_key=embedding_api_key,
         base_url=embedding_base_url,
     )
 
-    # 2. 返回命中的资料来源
+    # 3. 检索不到切片时直接拒答，避免模型编造答案。
+    if not sources:
+        yield sse_event("sources", {"sources": []})
+        yield sse_event("token", {"content": "资料中未找到相关内容。"})
+        yield sse_event("done", {})
+        return
+
+    # 4. 返回命中的资料来源（documentId 使用字符串，避免前端精度丢失）
     yield sse_event("sources", {
         "sources": [
-            {"documentId": int(item["document_id"]), "page": int(item["page"])}
+            {"documentId": str(item["document_id"]), "page": int(item["page"])}
             for item in sources
         ]
     })
 
-    # 3. 构建 Prompt
+    # 5. 构建 Prompt
     context = build_context(sources)
     messages = [
         {"role": "system", "content": build_system_prompt(context)},
@@ -87,7 +105,7 @@ def rag_stream(
         {"role": "user", "content": question},
     ]
 
-    # 4. 调用用户自己的 Chat 模型并逐段输出
+    # 6. 调用用户自己的 Chat 模型并逐段输出
     for token in chat_stream(
         messages,
         model=chat_model,
@@ -96,5 +114,5 @@ def rag_stream(
     ):
         yield sse_event("token", {"content": token})
 
-    # 5. 结束事件
+    # 7. 结束事件
     yield sse_event("done", {})
