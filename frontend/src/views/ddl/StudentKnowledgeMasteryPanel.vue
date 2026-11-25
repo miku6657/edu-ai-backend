@@ -2,12 +2,17 @@
 import { ref, watch } from 'vue'
 
 import {
+  getCourseKnowledgeMap,
   getMyKnowledgeMastery,
   listKnowledgePoints,
   updateKnowledgeMastery,
 } from '@/api/learning-path'
-import type { KnowledgePoint } from '@/api/learning-path'
+import type {
+  CourseKnowledgeMap,
+  KnowledgePoint,
+} from '@/api/learning-path'
 import { notifyError, notifySuccess } from '@/utils/notify'
+import CourseKnowledgeMapView from '@/views/ddl/CourseKnowledgeMap.vue'
 
 const props = defineProps<{
   courseId: string
@@ -17,8 +22,12 @@ const points = ref<KnowledgePoint[]>([])
 const levels = ref<Record<string, number>>({})
 const loading = ref(false)
 const savingId = ref<string | null>(null)
+const mapVisible = ref(false)
+const mapLoading = ref(false)
+const knowledgeMap = ref<CourseKnowledgeMap | null>(null)
 
 let version = 0
+let mapRequestVersion = 0
 
 watch(
   () => props.courseId,
@@ -52,6 +61,55 @@ watch(
   },
   { immediate: true },
 )
+
+async function openKnowledgeMap(): Promise<void> {
+  const id = props.courseId
+
+  if (!id || mapLoading.value) return
+
+  const current = ++mapRequestVersion
+  mapVisible.value = true
+  mapLoading.value = true
+  knowledgeMap.value = null
+
+  try {
+    const result = await getCourseKnowledgeMap(id)
+
+    if (
+      mapRequestVersion === current
+      && props.courseId === id
+      && mapVisible.value
+    ) {
+      knowledgeMap.value = result
+    }
+  } catch (error) {
+    if (mapRequestVersion === current) {
+      notifyError(error)
+    }
+  } finally {
+    if (mapRequestVersion === current) {
+      mapLoading.value = false
+    }
+  }
+}
+
+watch(
+  () => props.courseId,
+  () => {
+    mapRequestVersion++
+    mapVisible.value = false
+    mapLoading.value = false
+    knowledgeMap.value = null
+  },
+)
+
+watch(mapVisible, visible => {
+  if (!visible) {
+    mapRequestVersion++
+    mapLoading.value = false
+    knowledgeMap.value = null
+  }
+})
 
 async function changeLevel(
   point: KnowledgePoint,
@@ -90,6 +148,17 @@ async function changeLevel(
       知识点掌握程度
     </el-divider>
 
+    <div class="student-map-actions">
+      <el-button
+        type="primary"
+        plain
+        :disabled="!courseId"
+        @click="openKnowledgeMap"
+      >
+        查看课程知识地图
+      </el-button>
+    </div>
+
     <el-alert
       type="info"
       :closable="false"
@@ -125,6 +194,27 @@ async function changeLevel(
         <el-option label="熟练" :value="3" />
       </el-select>
     </div>
+
+    <el-dialog
+      v-model="mapVisible"
+      title="课程知识地图"
+      width="min(1100px, 95vw)"
+      append-to-body
+    >
+      <div
+        v-loading="mapLoading"
+        style="min-height: 240px"
+      >
+        <CourseKnowledgeMapView
+          v-if="knowledgeMap"
+          :data="knowledgeMap"
+        />
+        <el-empty
+          v-else-if="!mapLoading"
+          description="暂无知识地图数据"
+        />
+      </div>
+    </el-dialog>
   </section>
 </template>
 
@@ -152,5 +242,10 @@ async function changeLevel(
 .mastery-item__info span {
   font-size: 12px;
   color: var(--sc-text-secondary);
+}
+
+.student-map-actions {
+  display: flex;
+  justify-content: flex-end;
 }
 </style>

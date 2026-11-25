@@ -5,18 +5,23 @@ import {
   addKnowledgeDependency,
   addKnowledgePoint,
   applyLearningPathAdjustment,
+  deleteKnowledgePoint,
   generateLearningPath,
+  getCourseKnowledgeMap,
   getLearningPath,
   getLearningPathByGoal,
   getLearningPathProgress,
   getMyKnowledgeMastery,
+  knowledgeDifficultyLabel,
   listKnowledgePoints,
   listWeakKnowledgePoints,
   previewLearningPathAdjustment,
   previewWeakReview,
   previewWeakReviewPlan,
   applyWeakReviewPlan,
+  removeKnowledgeDependency,
   updateKnowledgeMastery,
+  updateKnowledgePoint,
   updateKnowledgePointKeywords,
 } from '@/api/learning-path'
 
@@ -44,6 +49,9 @@ describe('learning path API', () => {
       id: LARGE_ID,
       courseId: LARGE_ID,
       title: 'Java 集合',
+      chapterId: null,
+      parentId: null,
+      difficulty: 2,
       matchKeywords: 'HashMap,ArrayList',
       estimatedMinutes: 120,
       sortOrder: 1,
@@ -158,6 +166,9 @@ describe('learning path API', () => {
         estimatedMinutes: 120,
         sortOrder: 1,
         matchKeywords: 'HashMap,ArrayList',
+        chapterId: null,
+        parentId: null,
+        difficulty: 2,
       }),
     ).resolves.toEqual({ pointId: LARGE_ID })
     await expect(
@@ -215,6 +226,9 @@ describe('learning path API', () => {
           estimatedMinutes: 120,
           sortOrder: 1,
           matchKeywords: 'HashMap,ArrayList',
+          chapterId: null,
+          parentId: null,
+          difficulty: 2,
         }),
       },
       {
@@ -286,5 +300,103 @@ describe('learning path API', () => {
         body: JSON.stringify({ fingerprint: weakReviewPlan.fingerprint }),
       },
     ])
+  })
+
+  it('updates and deletes knowledge points, dependencies, and loads the knowledge map', async () => {
+    const map = {
+      courseId: LARGE_ID,
+      chapters: [{
+        id: LARGE_ID,
+        name: '第一章',
+        sortOrder: 1,
+      }],
+      points: [{
+        id: LARGE_ID,
+        title: 'Java 集合',
+        chapterId: LARGE_ID,
+        parentId: null,
+        difficulty: 2,
+        estimatedMinutes: 120,
+        sortOrder: 1,
+        matchKeywords: 'HashMap,ArrayList',
+      }],
+      dependencies: [{
+        pointId: LARGE_ID,
+        prerequisiteId: '9223372036854775806',
+      }],
+      statistics: {
+        chapterCount: 1,
+        pointCount: 1,
+        dependencyCount: 1,
+        unclassifiedCount: 0,
+        basicCount: 0,
+        intermediateCount: 1,
+        advancedCount: 0,
+        totalEstimatedMinutes: 120,
+      },
+    }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse('知识点修改成功'))
+      .mockResolvedValueOnce(jsonResponse('知识点删除成功'))
+      .mockResolvedValueOnce(jsonResponse('依赖已解除'))
+      .mockResolvedValueOnce(jsonResponse(map))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(updateKnowledgePoint(LARGE_ID, LARGE_ID, {
+      title: 'Java 集合',
+      estimatedMinutes: 120,
+      sortOrder: 1,
+      matchKeywords: 'HashMap,ArrayList',
+      chapterId: LARGE_ID,
+      parentId: null,
+      difficulty: 2,
+    })).resolves.toBe('知识点修改成功')
+    await expect(deleteKnowledgePoint(LARGE_ID, LARGE_ID))
+      .resolves.toBe('知识点删除成功')
+    await expect(removeKnowledgeDependency(
+      LARGE_ID,
+      LARGE_ID,
+      '9223372036854775806',
+    )).resolves.toBe('依赖已解除')
+    await expect(getCourseKnowledgeMap(LARGE_ID)).resolves.toEqual(map)
+
+    expect(fetchMock.mock.calls.map(([url, init]) => ({
+      url: String(url),
+      method: (init as RequestInit | undefined)?.method,
+      body: (init as RequestInit | undefined)?.body,
+    }))).toEqual([
+      {
+        url: `/api/v1/learning-paths/courses/${LARGE_ID}/points/${LARGE_ID}`,
+        method: 'PUT',
+        body: JSON.stringify({
+          title: 'Java 集合',
+          estimatedMinutes: 120,
+          sortOrder: 1,
+          matchKeywords: 'HashMap,ArrayList',
+          chapterId: LARGE_ID,
+          parentId: null,
+          difficulty: 2,
+        }),
+      },
+      {
+        url: `/api/v1/learning-paths/courses/${LARGE_ID}/points/${LARGE_ID}`,
+        method: 'DELETE',
+        body: undefined,
+      },
+      {
+        url: `/api/v1/learning-paths/courses/${LARGE_ID}/dependencies/${LARGE_ID}/9223372036854775806`,
+        method: 'DELETE',
+        body: undefined,
+      },
+      {
+        url: `/api/v1/learning-paths/courses/${LARGE_ID}/knowledge-map`,
+        method: 'GET',
+        body: undefined,
+      },
+    ])
+    expect(knowledgeDifficultyLabel(1)).toBe('基础')
+    expect(knowledgeDifficultyLabel(2)).toBe('中等')
+    expect(knowledgeDifficultyLabel(3)).toBe('进阶')
+    expect(knowledgeDifficultyLabel(0)).toBe('未知')
   })
 })

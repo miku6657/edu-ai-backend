@@ -5,6 +5,9 @@ export interface KnowledgePoint {
   id: BigIntId
   courseId: BigIntId
   title: string
+  chapterId: BigIntId | null
+  parentId: BigIntId | null
+  difficulty: number
   matchKeywords: string | null
   estimatedMinutes: number
   sortOrder: number
@@ -96,6 +99,9 @@ export function addKnowledgePoint(
     estimatedMinutes: number
     sortOrder: number
     matchKeywords?: string
+    chapterId?: BigIntId | null
+    parentId?: BigIntId | null
+    difficulty?: number
   },
 ): Promise<{ pointId: BigIntId }> {
   return apiRequest<{ pointId: BigIntId }>(
@@ -295,4 +301,150 @@ export function applyWeakReviewPlan(
       body: { fingerprint },
     },
   )
+}
+
+/**
+ * 知识地图章节节点。
+ */
+export interface KnowledgeMapChapter {
+  id: BigIntId
+  name: string
+  sortOrder: number
+}
+
+/**
+ * 知识地图知识点节点。
+ */
+export interface KnowledgeMapPoint {
+  id: BigIntId
+  title: string
+  chapterId: BigIntId | null
+  parentId: BigIntId | null
+  difficulty: number
+  estimatedMinutes: number
+  sortOrder: number
+  matchKeywords: string
+}
+
+/**
+ * 知识点先修依赖关系。
+ */
+export interface KnowledgeMapDependency {
+  pointId: BigIntId
+  prerequisiteId: BigIntId
+}
+
+/**
+ * 知识地图统计信息。
+ */
+export interface KnowledgeMapStatistics {
+  chapterCount: number
+  pointCount: number
+  dependencyCount: number
+  unclassifiedCount: number
+  basicCount: number
+  intermediateCount: number
+  advancedCount: number
+  totalEstimatedMinutes: number
+}
+
+/**
+ * 完整课程知识地图。
+ */
+export interface CourseKnowledgeMap {
+  courseId: BigIntId
+  chapters: KnowledgeMapChapter[]
+  points: KnowledgeMapPoint[]
+  dependencies: KnowledgeMapDependency[]
+  statistics: KnowledgeMapStatistics
+}
+
+/**
+ * 知识点完整维护请求。
+ */
+export interface UpdateKnowledgePointRequest {
+  title: string
+  estimatedMinutes: number
+  sortOrder: number
+  matchKeywords: string
+  chapterId: BigIntId | null
+  parentId: BigIntId | null
+  difficulty: number
+}
+
+/**
+ * 修改知识点。
+ */
+export function updateKnowledgePoint(
+  courseId: BigIntId,
+  pointId: BigIntId,
+  data: UpdateKnowledgePointRequest,
+): Promise<string> {
+  return apiRequest<string>(
+    `/v1/learning-paths/courses/${encodeURIComponent(courseId)}/points/${encodeURIComponent(pointId)}`,
+    {
+      method: 'PUT',
+      body: data,
+    },
+  )
+}
+
+/**
+ * 删除知识点。
+ */
+export function deleteKnowledgePoint(
+  courseId: BigIntId,
+  pointId: BigIntId,
+): Promise<string> {
+  return apiRequest<string>(
+    `/v1/learning-paths/courses/${encodeURIComponent(courseId)}/points/${encodeURIComponent(pointId)}`,
+    {
+      method: 'DELETE',
+    },
+  )
+}
+
+/**
+ * 解除知识点先修关系。
+ */
+export function removeKnowledgeDependency(
+  courseId: BigIntId,
+  pointId: BigIntId,
+  prerequisiteId: BigIntId,
+): Promise<string> {
+  return apiRequest<string>(
+    `/v1/learning-paths/courses/${encodeURIComponent(courseId)}/dependencies/${encodeURIComponent(pointId)}/${encodeURIComponent(prerequisiteId)}`,
+    {
+      method: 'DELETE',
+    },
+  )
+}
+
+/**
+ * 查询课程知识地图。
+ */
+export function getCourseKnowledgeMap(
+  courseId: BigIntId,
+): Promise<CourseKnowledgeMap> {
+  return apiRequest<CourseKnowledgeMap>(
+    `/v1/learning-paths/courses/${encodeURIComponent(courseId)}/knowledge-map`,
+  )
+}
+
+/**
+ * 知识点难度显示。
+ */
+export function knowledgeDifficultyLabel(
+  difficulty: number,
+): string {
+  switch (difficulty) {
+    case 1:
+      return '基础'
+    case 2:
+      return '中等'
+    case 3:
+      return '进阶'
+    default:
+      return '未知'
+  }
 }
