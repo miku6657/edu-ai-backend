@@ -4,7 +4,9 @@ import time
 from contextlib import asynccontextmanager
 from threading import Lock
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -44,6 +46,29 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="edu05-ai-service", lifespan=lifespan)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(
+    request: Request,
+    exc: RequestValidationError,
+):
+    logger.warning(
+        "请求参数校验失败: path=%s, errors=%s",
+        request.url.path,
+        [
+            {
+                "loc": item.get("loc"),
+                "type": item.get("type"),
+                "msg": item.get("msg"),
+            }
+            for item in exc.errors()
+        ],
+    )
+    return await request_validation_exception_handler(
+        request,
+        exc,
+    )
 
 
 class IndexRequest(BaseModel):
