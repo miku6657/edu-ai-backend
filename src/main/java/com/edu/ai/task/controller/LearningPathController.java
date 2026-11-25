@@ -3,6 +3,7 @@ package com.edu.ai.task.controller;
 import com.edu.ai.common.BusinessException;
 import com.edu.ai.common.Result;
 import com.edu.ai.course.service.CoursePermissionService;
+import com.edu.ai.task.dto.KnowledgeMapVO;
 import com.edu.ai.task.service.LearningPathService;
 import com.edu.ai.task.service.LearningPathService.PathProgress;
 import com.edu.ai.task.service.LearningPathService.PathResult;
@@ -37,7 +38,10 @@ public class LearningPathController {
             String title,
             Integer estimatedMinutes,
             Integer sortOrder,
-            String matchKeywords
+            String matchKeywords,
+            Long chapterId,
+            Long parentId,
+            Integer difficulty
     ) {}
 
     public record DependencyRequest(
@@ -55,7 +59,10 @@ public class LearningPathController {
             String title,
             int estimatedMinutes,
             int sortOrder,
-            String matchKeywords
+            String matchKeywords,
+            String chapterId,
+            String parentId,
+            int difficulty
     ) {}
 
     public record KeywordsRequest(String matchKeywords) {}
@@ -70,7 +77,9 @@ public class LearningPathController {
         return id;
     }
 
-    // 教师添加课程知识点
+    /**
+     * 教师创建课程知识点。
+     */
     @PostMapping("/courses/{courseId}/points")
     public Result<Map<String, String>> addPoint(
             @PathVariable Long courseId,
@@ -83,11 +92,103 @@ public class LearningPathController {
                 request.title(),
                 request.estimatedMinutes(),
                 request.sortOrder(),
-                request.matchKeywords()
+                request.matchKeywords(),
+                request.chapterId(),
+                request.parentId(),
+                request.difficulty()
         );
 
         return Result.success(
                 Map.of("pointId", id.toString())
+        );
+    }
+
+    /**
+     * 教师修改知识点完整信息。
+     */
+    @PutMapping("/courses/{courseId}/points/{pointId}")
+    public Result<String> updatePoint(
+            @PathVariable Long courseId,
+            @PathVariable Long pointId,
+            @RequestBody PointRequest request,
+            Authentication auth) {
+
+        service.updatePoint(
+                courseId,
+                pointId,
+                userId(auth),
+                request.title(),
+                request.estimatedMinutes(),
+                request.sortOrder(),
+                request.matchKeywords(),
+                request.chapterId(),
+                request.parentId(),
+                request.difficulty()
+        );
+
+        return Result.success(
+                "知识点修改成功"
+        );
+    }
+
+    /**
+     * 教师安全删除课程知识点。
+     */
+    @DeleteMapping("/courses/{courseId}/points/{pointId}")
+    public Result<String> deletePoint(
+            @PathVariable Long courseId,
+            @PathVariable Long pointId,
+            Authentication auth) {
+
+        service.deletePoint(
+                courseId,
+                pointId,
+                userId(auth)
+        );
+
+        return Result.success(
+                "知识点删除成功"
+        );
+    }
+
+    /**
+     * 教师解除知识点先修依赖。
+     */
+    @DeleteMapping(
+            "/courses/{courseId}/dependencies/"
+            + "{pointId}/{prerequisiteId}"
+    )
+    public Result<String> removeDependency(
+            @PathVariable Long courseId,
+            @PathVariable Long pointId,
+            @PathVariable Long prerequisiteId,
+            Authentication auth) {
+
+        service.removeDependency(
+                courseId,
+                userId(auth),
+                pointId,
+                prerequisiteId
+        );
+
+        return Result.success(
+                "先修依赖关系已解除"
+        );
+    }
+
+    /**
+     * 查询课程知识地图。
+     */
+    @GetMapping("/courses/{courseId}/knowledge-map")
+    public Result<KnowledgeMapVO> getKnowledgeMap(
+            @PathVariable Long courseId,
+            Authentication auth) {
+
+        return Result.success(
+                service.getKnowledgeMap(
+                        courseId,
+                        userId(auth)
+                )
         );
     }
 
@@ -132,24 +233,45 @@ public class LearningPathController {
         return Result.success("知识点匹配关键词已更新");
     }
 
-    // 教师及课程成员查看知识点
+    /**
+     * 课程成员查询知识点体系。
+     */
     @GetMapping("/courses/{courseId}/points")
     public Result<List<PointVO>> listPoints(
             @PathVariable Long courseId,
             Authentication auth) {
 
         return Result.success(
-                service.listPoints(courseId, userId(auth))
-                        .stream()
-                        .map(point -> new PointVO(
-                                point.id().toString(),
-                                point.courseId().toString(),
-                                point.title(),
-                                point.estimatedMinutes(),
-                                point.sortOrder(),
-                                point.matchKeywords()
-                        ))
-                        .toList()
+                service.listPoints(
+                        courseId,
+                        userId(auth)
+                )
+                .stream()
+                .map(point -> new PointVO(
+
+                        point.id().toString(),
+
+                        point.courseId().toString(),
+
+                        point.title(),
+
+                        point.estimatedMinutes(),
+
+                        point.sortOrder(),
+
+                        point.matchKeywords(),
+
+                        point.chapterId() == null
+                                ? null
+                                : point.chapterId().toString(),
+
+                        point.parentId() == null
+                                ? null
+                                : point.parentId().toString(),
+
+                        point.difficulty()
+                ))
+                .toList()
         );
     }
 

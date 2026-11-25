@@ -93,10 +93,17 @@ public class AiEmbeddingMigrationClient {
                     "documents",
                     documents.stream()
                             .map(document -> Map.of(
+
                                     "document_id",
                                     document.getId(),
+
                                     "storage_name",
-                                    document.getStorageName()
+                                    document.getStorageName(),
+
+                                    "chunking_version",
+                                    document.getChunkingVersion() == null
+                                            ? 1
+                                            : document.getChunkingVersion()
                             ))
                             .toList()
             );

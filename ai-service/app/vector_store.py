@@ -202,12 +202,27 @@ def index_document_into_collection(
             f"{document_id}:{chunk['page']}:{chunk['chunk_index']}"
         )
         documents.append(chunk["text"])
-        metadatas.append({
+        metadata = {
             "document_id": str(document_id),
             "page": chunk["page"],
             "chunk_index": chunk["chunk_index"],
             "active": active,
-        })
+        }
+        section_title = chunk.get("section_title")
+        if section_title:
+            metadata["section_title"] = section_title
+        metadatas.append(metadata)
+
+    previous = collection.get(
+        where={
+            "document_id": str(document_id),
+        },
+        include=[],
+    )
+    previous_ids = set(
+        previous.get("ids") or []
+    )
+    new_ids = set(ids)
 
     collection.upsert(
         ids=ids,
@@ -215,6 +230,12 @@ def index_document_into_collection(
         documents=documents,
         metadatas=metadatas,
     )
+
+    stale_ids = sorted(
+        previous_ids - new_ids
+    )
+    if stale_ids:
+        collection.delete(ids=stale_ids)
 
     return len(ids)
 
@@ -606,8 +627,109 @@ def search_course_by_collection(
             "document_id": document_id,
             "page": page,
             "chunk_index": meta.get("chunk_index"),
+            "section_title": meta.get("section_title"),
             "text": doc,
             "score": round(1.0 - float(dist), 4),
         })
 
     return hits
+
+
+def read_document_chunks(
+    collection_name_value: str,
+    course_id: int,
+    document_id: int,
+) -> list[dict]:
+    """从现有Collection读取指定文档的生效切片。
+
+    仅用于业务切片补录：
+    不重新解析PDF；
+    不调用Embedding；
+    不修改向量数据。
+    """
+    if course_id <= 0 or document_id <= 0:
+        raise ValueError("课程或文档ID不合法")
+
+    collection = get_collection_by_name(
+        collection_name_value
+    )
+
+    # 校验Collection所属课程。
+    prefix = f"course_{course_id}"
+    metadata = collection.metadata or {}
+    is_regular = (
+        collection_name_value == prefix
+        or collection_name_value.startswith(
+            prefix + "_v"
+        )
+    )
+    is_migration = (
+        collection_name_value.startswith("mig_")
+        and str(metadata.get("course_id"))
+        == str(course_id)
+    )
+    if not is_regular and not is_migration:
+        raise ValueError(
+            "Collection不属于指定课程"
+        )
+
+    chunks = []
+    visited = set()
+
+    # 兼容历史document_id为整数或字符串的情况。
+    for value in (
+        str(document_id),
+        document_id,
+    ):
+        offset = 0
+        limit = 200
+
+        while True:
+            result = collection.get(
+                where={
+                    "$and": [
+                        {"document_id": value},
+                        {"active": "1"},
+                    ]
+                },
+                include=["documents", "metadatas"],
+                offset=offset,
+                limit=limit,
+            )
+
+            ids = result.get("ids") or []
+            documents = result.get("documents") or []
+            metadatas = result.get("metadatas") or []
+
+            if not ids:
+                break
+
+            for chunk_id, text, meta in zip(
+                ids,
+                documents,
+                metadatas,
+            ):
+                if chunk_id in visited:
+                    continue
+                visited.add(chunk_id)
+
+                page = meta.get("page")
+                chunk_index = meta.get("chunk_index")
+                section_title = meta.get("section_title")
+
+                if page is None or chunk_index is None:
+                    continue
+
+                chunks.append({
+                    "page": page,
+                    "chunk_index": chunk_index,
+                    "section_title": section_title,
+                    "text": text,
+                })
+
+            if len(ids) < limit:
+                break
+
+            offset += limit
+
+    return chunks

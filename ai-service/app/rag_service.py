@@ -17,13 +17,24 @@ def sse_event(event: str, data: dict) -> str:
     )
 
 
-def build_context(sources: list[dict]) -> str:
+def build_context(
+    sources: list[dict],
+) -> str:
     parts = []
-    for index, item in enumerate(sources, start=1):
+    for index, item in enumerate(
+        sources,
+        start=1,
+    ):
+        section = (
+            item.get("section_title")
+            or "未标注章节"
+        )
         parts.append(
             f"[资料{index}]\n"
             f"文档ID：{item['document_id']}\n"
             f"页码：{item['page']}\n"
+            f"章节：{section}\n"
+            f"切片序号：{item.get('chunk_index', 0)}\n"
             f"内容：{item['text']}"
         )
     return "\n\n".join(parts)

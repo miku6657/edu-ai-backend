@@ -167,10 +167,10 @@ public class DocumentClassificationService {
     }
 
     /**
-     * 删除指定课程章节。
+     * 删除课程章节。
      *
-     * 仅删除章节及文档与章节的关联，
-     * 不删除PDF、知识点或向量索引。
+     * 存在所属知识点时禁止直接删除，
+     * 防止知识点体系出现无效章节引用。
      */
     @Transactional(rollbackFor = Exception.class)
     public void deleteChapter(
@@ -178,8 +178,101 @@ public class DocumentClassificationService {
             Long chapterId,
             Long userId) {
 
-        permissions.requireManage(courseId, userId);
-        permissions.requireActiveRead(courseId, userId);
+        permissions.requireManage(
+                courseId,
+                userId
+        );
+
+        // 与LearningPathService保持相同的加锁顺序：
+        // 课程 -> 章节 -> 知识点
+        List<Integer> statuses = jdbc.queryForList(
+                """
+                SELECT status
+                FROM course
+                WHERE id = ?
+                FOR UPDATE
+                """,
+                Integer.class,
+                courseId
+        );
+
+        if (statuses.isEmpty()) {
+
+            throw new BusinessException(
+                    404, "课程不存在"
+            );
+        }
+
+        if (!Integer.valueOf(1).equals(
+                statuses.get(0))) {
+
+            throw new BusinessException(
+                    403, "课程已停用"
+            );
+        }
+
+        List<Long> chapters = jdbc.queryForList(
+                """
+                SELECT id
+                FROM course_chapter
+                WHERE id = ?
+                  AND course_id = ?
+                FOR UPDATE
+                """,
+                Long.class,
+                chapterId,
+                courseId
+        );
+
+        if (chapters.isEmpty()) {
+
+            throw new BusinessException(
+                    404,
+                    "当前课程中不存在该章节"
+            );
+        }
+
+        List<Long> linkedPoints = jdbc.queryForList(
+                """
+                SELECT id
+                FROM course_knowledge_point
+                WHERE course_id = ?
+                  AND chapter_id = ?
+                FOR UPDATE
+                """,
+                Long.class,
+                courseId,
+                chapterId
+        );
+
+        if (!linkedPoints.isEmpty()) {
+
+            throw new BusinessException(
+                    409,
+                    "该章节包含知识点，请先调整知识点所属章节"
+            );
+        }
+
+        Long linkedChunks = jdbc.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM course_document_chunk
+                WHERE course_id = ?
+                  AND chapter_id = ?
+                """,
+                Long.class,
+                courseId,
+                chapterId
+        );
+
+        if (linkedChunks != null
+                && linkedChunks > 0) {
+
+            throw new BusinessException(
+                    409,
+                    "该章节已关联知识切片，请先解除切片章节关联"
+            );
+        }
 
         int deleted = jdbc.update(
                 """
@@ -194,7 +287,8 @@ public class DocumentClassificationService {
         if (deleted != 1) {
 
             throw new BusinessException(
-                    404, "当前课程中不存在该章节"
+                    409,
+                    "章节删除失败，请刷新后重试"
             );
         }
     }

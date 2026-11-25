@@ -22,6 +22,7 @@ from .vector_store import (
     delete_document_vectors_all_versions,
     get_or_create_index_collection,
     index_document_into_collection,
+    read_document_chunks,
 )
 
 logger = logging.getLogger(__name__)
@@ -77,6 +78,11 @@ class IndexRequest(BaseModel):
     storage_name: str = Field(
         min_length=1,
         max_length=100,
+    )
+    chunking_version: int = Field(
+        default=1,
+        ge=1,
+        le=2,
     )
     embedding_version: int = Field(
         default=1,
@@ -257,7 +263,10 @@ def internal_index(req: IndexRequest, _: None = Depends(require_internal)):
         raise HTTPException(status_code=404, detail="PDF 文件不存在")
 
     try:
-        chunks = parse_pdf(pdf_path)
+        chunks = parse_pdf(
+            pdf_path,
+            chunking_version=req.chunking_version,
+        )
         if not chunks:
             raise ValueError("未从 PDF 提取到文本")
 
@@ -294,7 +303,9 @@ def internal_index(req: IndexRequest, _: None = Depends(require_internal)):
 
     return {
         "document_id": req.document_id,
+        "chunking_version": req.chunking_version,
         "indexed_chunks": indexed,
+        "chunks": chunks,
     }
 
 
@@ -340,6 +351,11 @@ class MigrationDocument(BaseModel):
     storage_name: str = Field(
         min_length=1,
         max_length=100,
+    )
+    chunking_version: int = Field(
+        default=1,
+        ge=1,
+        le=2,
     )
 
 
@@ -487,4 +503,62 @@ def internal_merge_pdf(
         raise HTTPException(
             status_code=500,
             detail="PDF合并失败",
+        )
+
+
+class ReadDocumentChunksRequest(BaseModel):
+    course_id: int = Field(gt=0)
+    document_id: int = Field(gt=0)
+    collection_name: str = Field(
+        min_length=1,
+        max_length=63,
+    )
+    chunking_version: int = Field(
+        default=1,
+        ge=1,
+        le=2,
+    )
+
+
+@app.post(
+    "/internal/documents/chunks",
+    dependencies=[Depends(require_internal)],
+)
+def internal_read_document_chunks(
+    request: ReadDocumentChunksRequest,
+    _: None = Depends(require_internal),
+):
+    try:
+        chunks = read_document_chunks(
+            collection_name_value=(
+                request.collection_name
+            ),
+            course_id=request.course_id,
+            document_id=request.document_id,
+        )
+        if not chunks:
+            raise HTTPException(
+                status_code=404,
+                detail="当前知识库没有可补录的文档切片",
+            )
+
+        return {
+            "document_id": request.document_id,
+            "chunking_version": request.chunking_version,
+            "indexed_chunks": len(chunks),
+            "chunks": chunks,
+        }
+
+    except HTTPException:
+        raise
+    except (ValueError, FileNotFoundError) as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc),
+        )
+    except Exception:
+        logger.exception("读取文档切片失败")
+        raise HTTPException(
+            status_code=500,
+            detail="读取文档切片失败",
         )

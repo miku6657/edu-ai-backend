@@ -53,6 +53,14 @@ public class CourseDocument {
      */
     private String versionStatus;
 
+    /**
+     * 切片算法版本。
+     *
+     * 1：固定字符窗口切片。
+     * 2：段落感知切片。
+     */
+    private Integer chunkingVersion;
+
     private String status;
     private String errorMessage;
 

@@ -182,6 +182,7 @@ public class DocumentServiceImpl implements DocumentService {
             doc.setResourceId(resourceId);
             doc.setVersionNo(versionNo);
             doc.setVersionStatus("PENDING");
+            doc.setChunkingVersion(2);
 
             doc.setStatus("UPLOADED");
 

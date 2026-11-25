@@ -9,6 +9,7 @@ import com.edu.ai.document.entity.CourseDocument;
 import com.edu.ai.document.entity.CourseEmbeddingProfile;
 import com.edu.ai.document.mapper.CourseDocumentMapper;
 
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 import org.slf4j.Logger;
@@ -26,6 +27,7 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -42,6 +44,7 @@ public class DocumentIndexTask {
     private final CourseIndexLease courseIndexLease;
     private final CourseEmbeddingProfileService profileService;
     private final DocumentVersionService documentVersionService;
+    private final DocumentChunkService chunkService;
     private final ObjectMapper objectMapper;
 
     private final HttpClient httpClient;
@@ -54,6 +57,7 @@ public class DocumentIndexTask {
             CourseIndexLease courseIndexLease,
             CourseEmbeddingProfileService profileService,
             DocumentVersionService documentVersionService,
+            DocumentChunkService chunkService,
             ObjectMapper objectMapper,
             @Value("${ai.service.url}") String serviceUrl,
             @Value("${ai.service.internal-key}") String internalKey) {
@@ -63,6 +67,7 @@ public class DocumentIndexTask {
         this.courseIndexLease = courseIndexLease;
         this.profileService = profileService;
         this.documentVersionService = documentVersionService;
+        this.chunkService = chunkService;
         this.objectMapper = objectMapper;
 
         this.serviceUrl = serviceUrl;
@@ -219,6 +224,24 @@ public class DocumentIndexTask {
             payload.put("document_id", documentId);
             payload.put("storage_name", doc.getStorageName());
 
+            int chunkingVersion =
+                    doc.getChunkingVersion() == null
+                            ? 1
+                            : doc.getChunkingVersion();
+
+            if (chunkingVersion != 1
+                    && chunkingVersion != 2) {
+
+                throw new IllegalStateException(
+                        "文档切片算法版本不合法"
+                );
+            }
+
+            payload.put(
+                    "chunking_version",
+                    chunkingVersion
+            );
+
             payload.put("embedding_version", embeddingVersion);
             payload.put(
                     "collection_name",
@@ -284,9 +307,36 @@ public class DocumentIndexTask {
 
             lease.assertValid();
 
+            // 解析Python索引结果。
+            JsonNode indexResult =
+                    objectMapper.readTree(
+                            response.body()
+                    );
+
+            // 校验向量数量、切片数量、文档ID
+            // 以及切片算法版本是否一致。
+            List<DocumentChunkService.ChunkData> chunks =
+                    chunkService.parseIndexResult(
+                            documentId,
+                            chunkingVersion,
+                            indexResult
+                    );
+
+            lease.assertValid();
+
+            // 同一事务内完成切片保存及文档生效。
             documentVersionService.finishIndexAndActivate(
                     documentId,
-                    token
+                    token,
+                    chunks
+            );
+
+            log.info(
+                    "PDF索引完成，documentId={}, "
+                            + "chunkingVersion={}, chunkCount={}",
+                    documentId,
+                    chunkingVersion,
+                    chunks.size()
             );
 
         } catch (Exception e) {

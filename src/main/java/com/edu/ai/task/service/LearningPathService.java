@@ -5,9 +5,12 @@ import com.edu.ai.course.service.CoursePermissionService;
 import com.edu.ai.system.entity.User;
 import com.edu.ai.system.enums.UserRole;
 import com.edu.ai.system.mapper.UserMapper;
+import com.edu.ai.task.dto.KnowledgeMapVO;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.Statement;
@@ -42,7 +45,22 @@ public class LearningPathService {
             String title,
             int estimatedMinutes,
             int sortOrder,
-            String matchKeywords
+            String matchKeywords,
+
+            // F2知识点体系新增字段
+            Long chapterId,
+            Long parentId,
+            int difficulty
+    ) {}
+
+    private record PointInput(
+            String title,
+            int estimatedMinutes,
+            int sortOrder,
+            String matchKeywords,
+            Long chapterId,
+            Long parentId,
+            int difficulty
     ) {}
 
     public record PathItem(
@@ -118,15 +136,247 @@ public class LearningPathService {
         }
     }
 
+    /**
+     * 查询指定课程的全部知识点。
+     *
+     * 同时供知识点体系维护、学习路径生成、
+     * 先修依赖校验等功能使用。
+     */
     private List<Point> points(Long courseId) {
+
         return jdbc.query(
                 """
-                SELECT id, course_id, title,
-                       estimated_minutes, sort_order,
-                       match_keywords
+                SELECT
+                    id,
+                    course_id,
+                    title,
+                    estimated_minutes,
+                    sort_order,
+                    match_keywords,
+                    chapter_id,
+                    parent_id,
+                    difficulty
                 FROM course_knowledge_point
                 WHERE course_id = ?
                 ORDER BY sort_order, id
+                """,
+                (rs, rowNum) -> new Point(
+
+                        rs.getLong("id"),
+
+                        rs.getLong("course_id"),
+
+                        rs.getString("title"),
+
+                        rs.getInt("estimated_minutes"),
+
+                        rs.getInt("sort_order"),
+
+                        rs.getString("match_keywords"),
+
+                        rs.getObject(
+                                "chapter_id",
+                                Long.class
+                        ),
+
+                        rs.getObject(
+                                "parent_id",
+                                Long.class
+                        ),
+
+                        rs.getInt("difficulty")
+                ),
+                courseId
+        );
+    }
+
+    /**
+     * 统一校验知识点新增及修改参数。
+     */
+    private PointInput validatePointInput(
+            String title,
+            Integer estimatedMinutes,
+            Integer sortOrder,
+            String matchKeywords,
+            Long chapterId,
+            Long parentId,
+            Integer difficulty) {
+
+        if (title == null
+                || title.isBlank()
+                || title.trim().length() > 200) {
+
+            throw new BusinessException(
+                    400,
+                    "知识点名称不能为空且不能超过200个字符"
+            );
+        }
+
+        if (estimatedMinutes == null
+                || estimatedMinutes < 1
+                || estimatedMinutes > 10080) {
+
+            throw new BusinessException(
+                    400,
+                    "预计学习时间必须在1至10080分钟之间"
+            );
+        }
+
+        int order = sortOrder == null
+                ? 0
+                : sortOrder;
+
+        if (order < 0) {
+
+            throw new BusinessException(
+                    400, "知识点排序不能小于0"
+            );
+        }
+
+        String keywords = matchKeywords == null
+                ? ""
+                : matchKeywords.trim();
+
+        if (keywords.length() > 500) {
+
+            throw new BusinessException(
+                    400,
+                    "知识点匹配关键词不能超过500字"
+            );
+        }
+
+        int level = difficulty == null
+                ? 2
+                : difficulty;
+
+        if (level < 1 || level > 3) {
+
+            throw new BusinessException(
+                    400,
+                    "知识点难度必须在1至3之间"
+            );
+        }
+
+        if (chapterId != null && chapterId <= 0) {
+
+            throw new BusinessException(
+                    400, "章节ID不合法"
+            );
+        }
+
+        if (parentId != null && parentId <= 0) {
+
+            throw new BusinessException(
+                    400, "父级知识点ID不合法"
+            );
+        }
+
+        return new PointInput(
+                title.trim(),
+                estimatedMinutes,
+                order,
+                keywords,
+                chapterId,
+                parentId,
+                level
+        );
+    }
+
+    /**
+     * 校验课程管理权限，并锁定课程记录。
+     *
+     * 所有修改知识点层级的业务必须在事务内调用。
+     */
+    private void lockPointCourse(
+            Long courseId,
+            Long userId) {
+
+        permissions.requireManage(
+                courseId,
+                userId
+        );
+
+        List<Integer> statuses = jdbc.queryForList(
+                """
+                SELECT status
+                FROM course
+                WHERE id = ?
+                FOR UPDATE
+                """,
+                Integer.class,
+                courseId
+        );
+
+        if (statuses.isEmpty()) {
+
+            throw new BusinessException(
+                    404, "课程不存在"
+            );
+        }
+
+        if (!Integer.valueOf(1).equals(
+                statuses.get(0))) {
+
+            throw new BusinessException(
+                    403, "课程已停用"
+            );
+        }
+    }
+
+    /**
+     * 校验知识点所属章节和父子层级。
+     */
+    private void validatePointHierarchy(
+            Long courseId,
+            Long pointId,
+            PointInput input) {
+
+        Long chapterId = input.chapterId();
+        Long parentId = input.parentId();
+
+        // 1. 校验章节归属
+        if (chapterId != null) {
+
+            List<Long> chapters = jdbc.queryForList(
+                    """
+                    SELECT id
+                    FROM course_chapter
+                    WHERE id = ?
+                      AND course_id = ?
+                    FOR UPDATE
+                    """,
+                    Long.class,
+                    chapterId,
+                    courseId
+            );
+
+            if (chapters.isEmpty()) {
+
+                throw new BusinessException(
+                        400,
+                        "所选章节不存在或不属于当前课程"
+                );
+            }
+        }
+
+        // 2. 获取当前课程知识点结构
+        // 使用锁定读，避免读取旧的事务快照。
+        List<Point> allPoints = jdbc.query(
+                """
+                SELECT
+                    id,
+                    course_id,
+                    title,
+                    estimated_minutes,
+                    sort_order,
+                    match_keywords,
+                    chapter_id,
+                    parent_id,
+                    difficulty
+                FROM course_knowledge_point
+                WHERE course_id = ?
+                ORDER BY id
+                FOR UPDATE
                 """,
                 (rs, rowNum) -> new Point(
                         rs.getLong("id"),
@@ -134,16 +384,321 @@ public class LearningPathService {
                         rs.getString("title"),
                         rs.getInt("estimated_minutes"),
                         rs.getInt("sort_order"),
-                        rs.getString("match_keywords")
+                        rs.getString("match_keywords"),
+                        rs.getObject("chapter_id", Long.class),
+                        rs.getObject("parent_id", Long.class),
+                        rs.getInt("difficulty")
                 ),
                 courseId
         );
+
+        Map<Long, Point> pointMap = new HashMap<>();
+
+        for (Point point : allPoints) {
+
+            pointMap.put(point.id(), point);
+        }
+
+        // 3. 修改时校验目标知识点归属
+        Point existing = null;
+
+        if (pointId != null) {
+
+            existing = pointMap.get(pointId);
+
+            if (existing == null) {
+
+                throw new BusinessException(
+                        404,
+                        "当前课程中不存在该知识点"
+                );
+            }
+        }
+
+        // 4. 校验父级知识点
+        if (parentId != null) {
+
+            if (Objects.equals(
+                    pointId,
+                    parentId)) {
+
+                throw new BusinessException(
+                        400,
+                        "知识点不能将自身设置为父级"
+                );
+            }
+
+            Point parent = pointMap.get(parentId);
+
+            if (parent == null) {
+
+                throw new BusinessException(
+                        400,
+                        "父级知识点不存在或不属于当前课程"
+                );
+            }
+
+            // 父子知识点必须位于同一个章节
+            if (!Objects.equals(
+                    parent.chapterId(),
+                    chapterId)) {
+
+                throw new BusinessException(
+                        400,
+                        "父子知识点必须属于同一章节"
+                );
+            }
+
+            // 5. 沿父级链向上检查循环关系
+            Set<Long> visited = new HashSet<>();
+
+            Long currentId = parentId;
+
+            while (currentId != null) {
+
+                if (Objects.equals(
+                        pointId,
+                        currentId)) {
+
+                    throw new BusinessException(
+                            400,
+                            "不能将子孙知识点设置为父级"
+                    );
+                }
+
+                if (!visited.add(currentId)) {
+
+                    throw new BusinessException(
+                            409,
+                            "现有知识点层级存在循环关系"
+                    );
+                }
+
+                Point current = pointMap.get(currentId);
+
+                if (current == null) {
+
+                    throw new BusinessException(
+                            409,
+                            "知识点层级关系不完整"
+                    );
+                }
+
+                currentId = current.parentId();
+            }
+        }
+
+        // 6. 如果当前知识点包含子节点，
+        // 暂时禁止直接跨章节移动。
+        if (existing != null
+                && !Objects.equals(
+                        existing.chapterId(),
+                        chapterId)) {
+
+            boolean hasChildren =
+                    allPoints.stream().anyMatch(
+                            point -> Objects.equals(
+                                    point.parentId(),
+                                    pointId
+                            )
+                    );
+
+            if (hasChildren) {
+
+                throw new BusinessException(
+                        409,
+                        "该知识点包含子知识点，请先调整子知识点所属关系"
+                );
+            }
+        }
     }
 
     public List<Point> listPoints(
             Long courseId, Long userId) {
         permissions.requireActiveRead(courseId, userId);
         return points(courseId);
+    }
+
+    /**
+     * 查询指定课程的完整知识地图。
+     *
+     * 教师、管理员和已加入课程的学生均可访问。
+     */
+    @Transactional(
+            readOnly = true,
+            isolation = Isolation.REPEATABLE_READ
+    )
+    public KnowledgeMapVO getKnowledgeMap(
+            Long courseId,
+            Long userId) {
+
+        // 1. 校验课程访问权限。
+        permissions.requireActiveRead(
+                courseId,
+                userId
+        );
+
+        // 2. 查询课程章节。
+        List<KnowledgeMapVO.ChapterNode> chapters =
+                jdbc.query(
+                        """
+                        SELECT
+                            id,
+                            chapter_name,
+                            sort_order
+                        FROM course_chapter
+                        WHERE course_id = ?
+                        ORDER BY sort_order, id
+                        """,
+                        (rs, rowNum) ->
+                                new KnowledgeMapVO.ChapterNode(
+
+                                        String.valueOf(
+                                                rs.getLong("id")
+                                        ),
+
+                                        rs.getString(
+                                                "chapter_name"
+                                        ),
+
+                                        rs.getInt(
+                                                "sort_order"
+                                        )
+                                ),
+                        courseId
+                );
+
+        // 3. 复用已有知识点查询方法。
+        List<Point> coursePoints =
+                points(courseId);
+
+        List<KnowledgeMapVO.PointNode> nodes =
+                coursePoints.stream()
+                        .map(point ->
+                                new KnowledgeMapVO.PointNode(
+
+                                        point.id().toString(),
+
+                                        point.title(),
+
+                                        point.chapterId() == null
+                                                ? null
+                                                : point.chapterId()
+                                                        .toString(),
+
+                                        point.parentId() == null
+                                                ? null
+                                                : point.parentId()
+                                                        .toString(),
+
+                                        point.difficulty(),
+
+                                        point.estimatedMinutes(),
+
+                                        point.sortOrder(),
+
+                                        point.matchKeywords()
+                                )
+                        )
+                        .toList();
+
+        // 4. 查询当前课程的先修关系。
+        // 两端知识点都必须属于当前课程。
+        List<KnowledgeMapVO.DependencyEdge> dependencies =
+                jdbc.query(
+                        """
+                        SELECT
+                            d.point_id,
+                            d.prerequisite_id
+                        FROM course_knowledge_dependency d
+                        JOIN course_knowledge_point p
+                          ON p.id = d.point_id
+                        JOIN course_knowledge_point pre
+                          ON pre.id = d.prerequisite_id
+                        WHERE p.course_id = ?
+                          AND pre.course_id = ?
+                        ORDER BY
+                            d.point_id,
+                            d.prerequisite_id
+                        """,
+                        (rs, rowNum) ->
+                                new KnowledgeMapVO.DependencyEdge(
+
+                                        String.valueOf(
+                                                rs.getLong("point_id")
+                                        ),
+
+                                        String.valueOf(
+                                                rs.getLong(
+                                                    "prerequisite_id"
+                                                )
+                                        )
+                                ),
+                        courseId,
+                        courseId
+                );
+
+        // 5. 统计知识地图信息。
+        int unclassifiedCount = 0;
+
+        int basicCount = 0;
+        int intermediateCount = 0;
+        int advancedCount = 0;
+
+        long totalEstimatedMinutes = 0;
+
+        for (Point point : coursePoints) {
+
+            if (point.chapterId() == null) {
+
+                unclassifiedCount++;
+            }
+
+            switch (point.difficulty()) {
+
+                case 1 -> basicCount++;
+
+                case 2 -> intermediateCount++;
+
+                case 3 -> advancedCount++;
+
+                default -> {
+                    // 异常难度值不计入三级统计。
+                }
+            }
+
+            totalEstimatedMinutes +=
+                    point.estimatedMinutes();
+        }
+
+        KnowledgeMapVO.Statistics statistics =
+                new KnowledgeMapVO.Statistics(
+
+                        chapters.size(),
+
+                        coursePoints.size(),
+
+                        dependencies.size(),
+
+                        unclassifiedCount,
+
+                        basicCount,
+
+                        intermediateCount,
+
+                        advancedCount,
+
+                        totalEstimatedMinutes
+                );
+
+        // 6. 返回完整知识地图。
+        return new KnowledgeMapVO(
+                courseId.toString(),
+                chapters,
+                nodes,
+                dependencies,
+                statistics
+        );
     }
 
     private Long insertWithId(
@@ -170,6 +725,9 @@ public class LearningPathService {
         return key.longValue();
     }
 
+    /**
+     * 新增课程知识点。
+     */
     @Transactional(rollbackFor = Exception.class)
     public Long addPoint(
             Long courseId,
@@ -177,41 +735,325 @@ public class LearningPathService {
             String title,
             Integer estimatedMinutes,
             Integer sortOrder,
-            String matchKeywords) {
+            String matchKeywords,
+            Long chapterId,
+            Long parentId,
+            Integer difficulty) {
 
-        permissions.requireManage(courseId, userId);
-
-        if (title == null || title.isBlank()
-                || title.length() > 200
-                || estimatedMinutes == null
-                || estimatedMinutes < 1
-                || estimatedMinutes > 10080) {
-            throw new BusinessException(
-                    400, "知识点名称或预计学时不合法");
-        }
-
-        String keywords = matchKeywords == null
-                ? ""
-                : matchKeywords.trim();
-
-        if (keywords.length() > 500) {
-            throw new BusinessException(
-                    400, "知识点匹配关键词不能超过500字");
-        }
-
-        return insertWithId(
-                """
-                INSERT INTO course_knowledge_point
-                    (course_id, title, estimated_minutes,
-                     sort_order, match_keywords)
-                VALUES (?, ?, ?, ?, ?)
-                """,
+        lockPointCourse(
                 courseId,
-                title.trim(),
-                estimatedMinutes,
-                sortOrder == null ? 0 : sortOrder,
-                keywords
+                userId
         );
+
+        PointInput input = validatePointInput(
+                title,
+                estimatedMinutes,
+                sortOrder,
+                matchKeywords,
+                chapterId,
+                parentId,
+                difficulty
+        );
+
+        validatePointHierarchy(
+                courseId,
+                null,
+                input
+        );
+
+        try {
+
+            return insertWithId(
+                    """
+                    INSERT INTO course_knowledge_point (
+                        course_id,
+                        title,
+                        estimated_minutes,
+                        sort_order,
+                        match_keywords,
+                        chapter_id,
+                        parent_id,
+                        difficulty
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    courseId,
+                    input.title(),
+                    input.estimatedMinutes(),
+                    input.sortOrder(),
+                    input.matchKeywords(),
+                    input.chapterId(),
+                    input.parentId(),
+                    input.difficulty()
+            );
+
+        } catch (DuplicateKeyException e) {
+
+            throw new BusinessException(
+                    409,
+                    "当前章节的同级知识点已存在相同名称"
+            );
+        }
+    }
+
+    /**
+     * 修改课程知识点完整信息。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void updatePoint(
+            Long courseId,
+            Long pointId,
+            Long userId,
+            String title,
+            Integer estimatedMinutes,
+            Integer sortOrder,
+            String matchKeywords,
+            Long chapterId,
+            Long parentId,
+            Integer difficulty) {
+
+        lockPointCourse(
+                courseId,
+                userId
+        );
+
+        PointInput input = validatePointInput(
+                title,
+                estimatedMinutes,
+                sortOrder,
+                matchKeywords,
+                chapterId,
+                parentId,
+                difficulty
+        );
+
+        validatePointHierarchy(
+                courseId,
+                pointId,
+                input
+        );
+
+        try {
+
+            jdbc.update(
+                    """
+                    UPDATE course_knowledge_point
+                    SET
+                        title = ?,
+                        estimated_minutes = ?,
+                        sort_order = ?,
+                        match_keywords = ?,
+                        chapter_id = ?,
+                        parent_id = ?,
+                        difficulty = ?,
+                        update_time = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                      AND course_id = ?
+                    """,
+                    input.title(),
+                    input.estimatedMinutes(),
+                    input.sortOrder(),
+                    input.matchKeywords(),
+                    input.chapterId(),
+                    input.parentId(),
+                    input.difficulty(),
+                    pointId,
+                    courseId
+            );
+
+        } catch (DuplicateKeyException e) {
+
+            throw new BusinessException(
+                    409,
+                    "当前章节的同级知识点已存在相同名称"
+            );
+        }
+    }
+
+    /**
+     * 检查知识点是否存在业务关联。
+     */
+    private boolean hasPointReference(
+            String sql,
+            Object... args) {
+
+        Long count = jdbc.queryForObject(
+                sql,
+                Long.class,
+                args
+        );
+
+        return count != null && count > 0;
+    }
+
+    /**
+     * 安全删除课程知识点。
+     *
+     * 仅允许删除没有子节点、先修关系、
+     * 文档关联和学生学习记录的知识点。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void deletePoint(
+            Long courseId,
+            Long pointId,
+            Long userId) {
+
+        // 1. 校验管理权限并获取课程级事务锁。
+        lockPointCourse(
+                courseId,
+                userId
+        );
+
+        // 2. 校验知识点存在且属于当前课程。
+        List<Long> rows = jdbc.queryForList(
+                """
+                SELECT id
+                FROM course_knowledge_point
+                WHERE id = ?
+                  AND course_id = ?
+                FOR UPDATE
+                """,
+                Long.class,
+                pointId,
+                courseId
+        );
+
+        if (rows.isEmpty()) {
+
+            throw new BusinessException(
+                    404,
+                    "当前课程中不存在该知识点"
+            );
+        }
+
+        // 3. 检查是否存在子知识点。
+        if (hasPointReference(
+                """
+                SELECT COUNT(*)
+                FROM course_knowledge_point
+                WHERE parent_id = ?
+                """,
+                pointId
+        )) {
+
+            throw new BusinessException(
+                    409,
+                    "该知识点包含子知识点，请先调整子知识点的层级关系"
+            );
+        }
+
+        // 4. 检查是否存在先修依赖。
+        if (hasPointReference(
+                """
+                SELECT COUNT(*)
+                FROM course_knowledge_dependency
+                WHERE point_id = ?
+                   OR prerequisite_id = ?
+                """,
+                pointId,
+                pointId
+        )) {
+
+            throw new BusinessException(
+                    409,
+                    "该知识点存在先修依赖关系，请先解除关联"
+            );
+        }
+
+        // 5. 检查是否存在课程资料关联。
+        if (hasPointReference(
+                """
+                SELECT COUNT(*)
+                FROM course_document_knowledge_point
+                WHERE point_id = ?
+                """,
+                pointId
+        )) {
+
+            throw new BusinessException(
+                    409,
+                    "该知识点已关联课程资料，请先解除资料关联"
+            );
+        }
+
+        // 6. 检查学生掌握程度记录。
+        if (hasPointReference(
+                """
+                SELECT COUNT(*)
+                FROM student_knowledge_mastery
+                WHERE point_id = ?
+                """,
+                pointId
+        )) {
+
+            throw new BusinessException(
+                    409,
+                    "该知识点已存在学生掌握程度记录，不能直接删除"
+            );
+        }
+
+        // 7. 检查学生学习路径。
+        if (hasPointReference(
+                """
+                SELECT COUNT(*)
+                FROM student_learning_path_item
+                WHERE point_id = ?
+                """,
+                pointId
+        )) {
+
+            throw new BusinessException(
+                    409,
+                    "该知识点已被学生学习路径使用，不能直接删除"
+            );
+        }
+
+        // 8. 检查历史问答统计。
+        if (hasPointReference(
+                """
+                SELECT COUNT(*)
+                FROM student_question_knowledge
+                WHERE point_id = ?
+                """,
+                pointId
+        )) {
+
+            throw new BusinessException(
+                    409,
+                    "该知识点已存在历史问答记录，不能直接删除"
+            );
+        }
+
+        // 9. 执行删除。
+        try {
+
+            int deleted = jdbc.update(
+                    """
+                    DELETE FROM course_knowledge_point
+                    WHERE id = ?
+                      AND course_id = ?
+                    """,
+                    pointId,
+                    courseId
+            );
+
+            if (deleted != 1) {
+
+                throw new BusinessException(
+                        409,
+                        "知识点删除失败，请刷新后重试"
+                );
+            }
+
+        } catch (
+                org.springframework.dao.DataIntegrityViolationException e
+        ) {
+
+            throw new BusinessException(
+                    409,
+                    "该知识点仍存在业务关联，暂时无法删除"
+            );
+        }
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -221,7 +1063,7 @@ public class LearningPathService {
             Long userId,
             String matchKeywords) {
 
-        permissions.requireManage(courseId, userId);
+        lockPointCourse(courseId, userId);
 
         if (matchKeywords == null
                 || matchKeywords.length() > 500) {
@@ -259,7 +1101,7 @@ public class LearningPathService {
             Long pointId,
             Long prerequisiteId) {
 
-        permissions.requireManage(courseId, userId);
+        lockPointCourse(courseId, userId);
 
         if (pointId.equals(prerequisiteId)) {
             throw new BusinessException(
@@ -292,6 +1134,68 @@ public class LearningPathService {
                 courseId,
                 points(courseId),
                 Map.of()
+        );
+    }
+
+    /**
+     * 解除两个知识点之间的先修依赖关系。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void removeDependency(
+            Long courseId,
+            Long userId,
+            Long pointId,
+            Long prerequisiteId) {
+
+        lockPointCourse(
+                courseId,
+                userId
+        );
+
+        if (pointId == null
+                || prerequisiteId == null
+                || pointId <= 0
+                || prerequisiteId <= 0) {
+
+            throw new BusinessException(
+                    400,
+                    "知识点ID不合法"
+            );
+        }
+
+        // 两个知识点必须同属于当前课程。
+        List<Long> ids = jdbc.queryForList(
+                """
+                SELECT id
+                FROM course_knowledge_point
+                WHERE course_id = ?
+                  AND id IN (?, ?)
+                ORDER BY id
+                FOR UPDATE
+                """,
+                Long.class,
+                courseId,
+                pointId,
+                prerequisiteId
+        );
+
+        if (ids.size() != 2) {
+
+            throw new BusinessException(
+                    400,
+                    "先修关系必须属于当前课程"
+            );
+        }
+
+        // 重复解除视为成功，保证接口幂等。
+        jdbc.update(
+                """
+                DELETE FROM course_knowledge_dependency
+                WHERE point_id = ?
+                  AND prerequisite_id = ?
+                """,
+                pointId,
+                prerequisiteId
         );
     }
 

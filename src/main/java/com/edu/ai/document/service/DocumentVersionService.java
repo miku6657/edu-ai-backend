@@ -15,13 +15,16 @@ public class DocumentVersionService {
 
     private final JdbcTemplate jdbc;
     private final CoursePermissionService permissions;
+    private final DocumentChunkService chunkService;
 
     public DocumentVersionService(
             JdbcTemplate jdbc,
-            CoursePermissionService permissions) {
+            CoursePermissionService permissions,
+            DocumentChunkService chunkService) {
 
         this.jdbc = jdbc;
         this.permissions = permissions;
+        this.chunkService = chunkService;
     }
 
     public record VersionInfo(
@@ -113,7 +116,8 @@ public class DocumentVersionService {
     @Transactional(rollbackFor = Exception.class)
     public void finishIndexAndActivate(
             Long documentId,
-            String processingToken) {
+            String processingToken,
+            List<DocumentChunkService.ChunkData> chunks) {
 
         if (processingToken == null
                 || processingToken.isBlank()) {
@@ -172,6 +176,14 @@ public class DocumentVersionService {
                     409, "文档索引任务状态已经变化"
             );
         }
+
+        // 保存本次索引实际使用的全部知识切片。
+        // 必须在版本正式切换之前执行。
+        chunkService.saveIndexedChunks(
+                document.courseId(),
+                documentId,
+                chunks
+        );
 
         // 如果较新的版本已经生效，
         // 较旧版本即使较晚完成索引，也不能覆盖新版本。

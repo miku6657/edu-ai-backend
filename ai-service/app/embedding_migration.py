@@ -60,7 +60,14 @@ def migrate_course(
         if not pdf_path.is_file():
             raise FileNotFoundError(f"PDF 文件不存在: {storage_name}")
 
-        chunks = parse_pdf(pdf_path)
+        chunking_version = item.get(
+            "chunking_version",
+            1,
+        )
+        chunks = parse_pdf(
+            pdf_path,
+            chunking_version=chunking_version,
+        )
         if not chunks:
             raise ValueError(
                 f"文档 {document_id} 没有可迁移的文本"
