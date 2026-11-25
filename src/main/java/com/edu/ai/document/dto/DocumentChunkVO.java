@@ -24,6 +24,13 @@ public record DocumentChunkVO(
 
         String contentHash,
 
-        int charCount
+        int charCount,
+
+        // F2-03新增字段
+        String knowledgeStatus,
+
+        int confirmedPointCount,
+
+        int pendingPointCount
 
 ) {}

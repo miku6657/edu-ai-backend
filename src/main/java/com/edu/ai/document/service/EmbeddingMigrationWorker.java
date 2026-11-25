@@ -318,12 +318,42 @@ public class EmbeddingMigrationWorker {
                                     migration.getTargetApiKeyCiphertext()
                             );
 
-            // 对 Python 发起实际迁移。
+            // 查询当前迁移任务对应的源Embedding配置。
+            CourseEmbeddingProfile sourceProfile =
+                    profileMapper.selectOne(
+                            new LambdaQueryWrapper<CourseEmbeddingProfile>()
+                                    .eq(
+                                            CourseEmbeddingProfile::getCourseId,
+                                            courseId
+                                    )
+                                    .eq(
+                                            CourseEmbeddingProfile::getEmbeddingVersion,
+                                            migration.getSourceVersion()
+                                    )
+                                    .eq(
+                                            CourseEmbeddingProfile::getStatus,
+                                            "ACTIVE"
+                                    )
+                    );
+
+            if (sourceProfile == null
+                    || sourceProfile.getCollectionName() == null
+                    || sourceProfile.getCollectionName().isBlank()) {
+
+                throw new IllegalStateException(
+                        "源Embedding配置不存在或Collection不可用"
+                );
+            }
+
+            courseLease.assertValid();
+
+            // 直接迁移源Collection中的既有知识切片。
             AiEmbeddingMigrationClient.MigrationResult result =
                     aiClient.migrate(
                             migration,
                             documents,
-                            apiKey
+                            apiKey,
+                            sourceProfile.getCollectionName()
                     );
 
             // 严格验证两个租约。

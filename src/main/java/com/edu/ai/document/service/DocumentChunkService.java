@@ -504,7 +504,13 @@ public class DocumentChunkService {
 
                 rs.getString("content_hash"),
 
-                rs.getInt("char_count")
+                rs.getInt("char_count"),
+
+                rs.getString("knowledge_status"),
+
+                rs.getInt("confirmed_point_count"),
+
+                rs.getInt("pending_point_count")
         );
     }
 
@@ -520,6 +526,7 @@ public class DocumentChunkService {
             Integer pageNo,
             Long chapterId,
             Boolean unclassified,
+            String knowledgeStatus,
             Integer page,
             Integer pageSize) {
 
@@ -648,6 +655,33 @@ public class DocumentChunkService {
             );
         }
 
+        // F2-03：知识点处理状态筛选。
+        if (knowledgeStatus != null
+                && !knowledgeStatus.isBlank()) {
+
+            String normalizedStatus =
+                    knowledgeStatus.trim();
+
+            if (!Set.of(
+                    "UNPROCESSED",
+                    "RECOMMENDED",
+                    "CONFIRMED",
+                    "NOT_APPLICABLE"
+            ).contains(normalizedStatus)) {
+
+                throw new BusinessException(
+                        400,
+                        "知识点处理状态不合法"
+                );
+            }
+
+            where.append(
+                    " AND c.knowledge_status = ?"
+            );
+
+            params.add(normalizedStatus);
+        }
+
         Long filteredCount = jdbc.queryForObject(
                 """
                 SELECT COUNT(*)
@@ -679,7 +713,24 @@ public class DocumentChunkService {
                             c.section_title,
                             c.content,
                             c.content_hash,
-                            c.char_count
+                            c.char_count,
+                            c.knowledge_status,
+
+                            (
+                                SELECT COUNT(*)
+                                FROM course_chunk_knowledge_point r
+                                WHERE r.chunk_id = c.id
+                                  AND r.course_id = c.course_id
+                                  AND r.confirm_status = 'CONFIRMED'
+                            ) AS confirmed_point_count,
+
+                            (
+                                SELECT COUNT(*)
+                                FROM course_chunk_knowledge_point r
+                                WHERE r.chunk_id = c.id
+                                  AND r.course_id = c.course_id
+                                  AND r.confirm_status = 'PENDING'
+                            ) AS pending_point_count
                         FROM course_document_chunk c
                         LEFT JOIN course_chapter ch
                           ON ch.id = c.chapter_id
@@ -779,7 +830,24 @@ public class DocumentChunkService {
                             c.section_title,
                             c.content,
                             c.content_hash,
-                            c.char_count
+                            c.char_count,
+                            c.knowledge_status,
+
+                            (
+                                SELECT COUNT(*)
+                                FROM course_chunk_knowledge_point r
+                                WHERE r.chunk_id = c.id
+                                  AND r.course_id = c.course_id
+                                  AND r.confirm_status = 'CONFIRMED'
+                            ) AS confirmed_point_count,
+
+                            (
+                                SELECT COUNT(*)
+                                FROM course_chunk_knowledge_point r
+                                WHERE r.chunk_id = c.id
+                                  AND r.course_id = c.course_id
+                                  AND r.confirm_status = 'PENDING'
+                            ) AS pending_point_count
                         FROM course_document_chunk c
                         LEFT JOIN course_chapter ch
                           ON ch.id = c.chapter_id
@@ -978,6 +1046,60 @@ public class DocumentChunkService {
             throw new BusinessException(
                     400,
                     "存在不属于当前文档的知识切片"
+            );
+        }
+
+        /*
+         * F2-03章节调整保护。
+         *
+         * 已经建立知识点推荐或人工处理结果的切片，
+         * 必须先重置知识点关联，再修改所属章节。
+         */
+
+        List<Object> guardParams =
+                new ArrayList<>();
+
+        guardParams.addAll(params);
+
+        guardParams.add(chapterId);
+
+        List<Long> protectedChunks =
+                jdbc.queryForList(
+                        """
+                        SELECT c.id
+                        FROM course_document_chunk c
+                        WHERE c.course_id = ?
+                          AND c.document_id = ?
+                          AND c.id IN (
+                        """
+                        + placeholders
+                        + """
+                        )
+                          AND NOT (
+                              c.chapter_id <=> ?
+                          )
+                          AND (
+                              c.knowledge_status <> 'UNPROCESSED'
+                              OR EXISTS (
+                                  SELECT 1
+                                  FROM course_chunk_knowledge_point r
+                                  WHERE r.chunk_id = c.id
+                                    AND r.course_id = c.course_id
+                              )
+                          )
+                        ORDER BY c.id
+                        FOR UPDATE
+                        """,
+                        Long.class,
+                        guardParams.toArray()
+                );
+
+        if (!protectedChunks.isEmpty()) {
+
+            throw new BusinessException(
+                    409,
+                    "部分切片已经完成知识点推荐或人工处理，"
+                    + "请先重置知识点关联，再修改所属章节"
             );
         }
 

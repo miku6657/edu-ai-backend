@@ -368,6 +368,10 @@ class CourseMigrationRequest(BaseModel):
     course_id: int = Field(gt=0)
     source_version: int = Field(ge=1)
     target_version: int = Field(ge=2)
+    source_collection_name: str = Field(
+        min_length=1,
+        max_length=63,
+    )
     documents: list[MigrationDocument] = Field(
         min_length=1,
         max_length=500,
@@ -397,6 +401,7 @@ def internal_embedding_migrate(
             course_id=request.course_id,
             source_version=request.source_version,
             target_version=request.target_version,
+            source_collection_name=request.source_collection_name,
             documents=documents,
             pdf_storage_dir=PDF_STORAGE_DIR,
             provider=request.provider,

@@ -833,6 +833,43 @@ public class LearningPathService {
                 input
         );
 
+        // F2-03：知识点章节修改保护。
+        List<Long> conflictingChunks =
+                jdbc.queryForList(
+                        """
+                        SELECT c.id
+                        FROM course_chunk_knowledge_point r
+                        JOIN course_document_chunk c
+                          ON c.id = r.chunk_id
+                         AND c.course_id = r.course_id
+                        WHERE r.course_id = ?
+                          AND r.point_id = ?
+                          AND r.confirm_status IN (
+                              'PENDING',
+                              'CONFIRMED'
+                          )
+                          AND c.chapter_id IS NOT NULL
+                          AND ? IS NOT NULL
+                          AND c.chapter_id <> ?
+                        ORDER BY c.id
+                        FOR UPDATE
+                        """,
+                        Long.class,
+                        courseId,
+                        pointId,
+                        input.chapterId(),
+                        input.chapterId()
+                );
+
+        if (!conflictingChunks.isEmpty()) {
+
+            throw new BusinessException(
+                    409,
+                    "知识点已被其他章节的切片关联，"
+                    + "请先调整相关切片的知识点关联"
+            );
+        }
+
         try {
 
             jdbc.update(
@@ -973,6 +1010,22 @@ public class LearningPathService {
             throw new BusinessException(
                     409,
                     "该知识点已关联课程资料，请先解除资料关联"
+            );
+        }
+
+        // 检查片段级知识点关联。
+        if (hasPointReference(
+                """
+                SELECT COUNT(*)
+                FROM course_chunk_knowledge_point
+                WHERE point_id = ?
+                """,
+                pointId
+        )) {
+
+            throw new BusinessException(
+                    409,
+                    "该知识点存在切片推荐或正式关联，请先解除关联"
             );
         }
 

@@ -84,6 +84,9 @@ public class DocumentChunkController {
             @RequestParam(defaultValue = "false")
             Boolean unclassified,
 
+            @RequestParam(required = false)
+            String knowledgeStatus,
+
             @RequestParam(defaultValue = "1")
             Integer page,
 
@@ -101,6 +104,7 @@ public class DocumentChunkController {
                         pageNo,
                         chapterId,
                         unclassified,
+                        knowledgeStatus,
                         page,
                         pageSize
                 )

@@ -45,7 +45,8 @@ public class AiEmbeddingMigrationClient {
     public MigrationResult migrate(
             CourseEmbeddingMigration migration,
             List<CourseDocument> documents,
-            String apiKey) {
+            String apiKey,
+            String sourceCollectionName) {
 
         try {
             Map<String, Object> body = new LinkedHashMap<>();
@@ -63,6 +64,19 @@ public class AiEmbeddingMigrationClient {
             body.put("course_id", migration.getCourseId());
             body.put("source_version", migration.getSourceVersion());
             body.put("target_version", migration.getTargetVersion());
+
+            if (sourceCollectionName == null
+                    || sourceCollectionName.isBlank()) {
+
+                throw new IllegalArgumentException(
+                        "源Collection名称不能为空"
+                );
+            }
+
+            body.put(
+                    "source_collection_name",
+                    sourceCollectionName
+            );
 
             body.put(
                     "provider",

@@ -640,9 +640,8 @@ def read_document_chunks(
     course_id: int,
     document_id: int,
 ) -> list[dict]:
-    """从现有Collection读取指定文档的生效切片。
+    """从当前Collection读取文档实际生效的知识切片。
 
-    仅用于业务切片补录：
     不重新解析PDF；
     不调用Embedding；
     不修改向量数据。
@@ -654,7 +653,6 @@ def read_document_chunks(
         collection_name_value
     )
 
-    # 校验Collection所属课程。
     prefix = f"course_{course_id}"
     metadata = collection.metadata or {}
     is_regular = (
@@ -704,6 +702,13 @@ def read_document_chunks(
             if not ids:
                 break
 
+            # 严格校验：三个结果数组长度必须一致。
+            if len(ids) != len(documents) \
+                    or len(ids) != len(metadatas):
+                raise ValueError(
+                    "切片向量数据长度不一致，无法补录"
+                )
+
             for chunk_id, text, meta in zip(
                 ids,
                 documents,
@@ -713,12 +718,44 @@ def read_document_chunks(
                     continue
                 visited.add(chunk_id)
 
+                if not meta or not isinstance(meta, dict):
+                    raise ValueError(
+                        "切片元数据缺失或格式不合法"
+                    )
+
                 page = meta.get("page")
                 chunk_index = meta.get("chunk_index")
                 section_title = meta.get("section_title")
 
                 if page is None or chunk_index is None:
-                    continue
+                    raise ValueError(
+                        "切片缺少页码或序号"
+                    )
+
+                if not isinstance(page, int) or page <= 0:
+                    raise ValueError(
+                        "切片页码不合法"
+                    )
+
+                if not isinstance(chunk_index, int) \
+                        or chunk_index < 0:
+                    raise ValueError(
+                        "切片序号不合法"
+                    )
+
+                if not text or not isinstance(text, str):
+                    raise ValueError(
+                        "切片正文缺失或格式不合法"
+                    )
+
+                # 校验切片ID与页码、序号一致。
+                expected_id = (
+                    f"{document_id}:{page}:{chunk_index}"
+                )
+                if str(chunk_id) != expected_id:
+                    raise ValueError(
+                        "切片ID与页码序号不一致"
+                    )
 
                 chunks.append({
                     "page": page,
@@ -731,5 +768,13 @@ def read_document_chunks(
                 break
 
             offset += limit
+
+    # 按 PDF 页码及切片序号排序。
+    chunks.sort(
+        key=lambda item: (
+            item["page"],
+            item["chunk_index"],
+        )
+    )
 
     return chunks
