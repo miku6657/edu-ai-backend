@@ -2,17 +2,20 @@
 package com.edu.ai.document.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.edu.ai.common.BusinessException;
 import com.edu.ai.course.entity.Course;
 import com.edu.ai.course.service.CoursePermissionService;
 import com.edu.ai.document.dto.DocumentVO;
 import com.edu.ai.document.entity.CourseDocument;
 import com.edu.ai.document.mapper.CourseDocumentMapper;
+import com.edu.ai.document.service.DocumentResourceType;
 import com.edu.ai.document.service.DocumentService;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
@@ -53,10 +56,13 @@ public class DocumentServiceImpl implements DocumentService {
      * 所有登录用户均可上传
      */
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public DocumentVO upload(
             Long courseId,
             Long userId,
-            MultipartFile file) {
+            MultipartFile file,
+            String resourceType,
+            String sourceInfo) {
 
         Course course = coursePermissionService.requireManage(
                 courseId, userId
@@ -70,6 +76,34 @@ public class DocumentServiceImpl implements DocumentService {
 
         String originalName =
                 cleanFilename(file.getOriginalFilename());
+
+        // 教师明确选择类型时使用指定类型；
+        // AUTO 时按文件名规则识别。
+        String resolvedType =
+                DocumentResourceType.resolve(
+                        resourceType,
+                        originalName
+                );
+
+        // 不允许来源字段无限长。
+        String resolvedSource =
+                sourceInfo == null
+                        ? null
+                        : sourceInfo.trim();
+
+        if (resolvedSource != null
+                && resolvedSource.length() > 255) {
+
+            throw new BusinessException(
+                    400, "资源来源不能超过255个字符"
+            );
+        }
+
+        if (resolvedSource != null
+                && resolvedSource.isBlank()) {
+
+            resolvedSource = null;
+        }
 
         String storageName = UUID.randomUUID() + ".pdf";
 
@@ -95,14 +129,55 @@ public class DocumentServiceImpl implements DocumentService {
             doc.setStorageName(storageName);
             doc.setFileSize(file.getSize());
             doc.setContentType("application/pdf");
+
+            // 新增教学资源元数据
+            doc.setResourceType(resolvedType);
+            doc.setSourceInfo(resolvedSource);
+
             doc.setStatus("UPLOADED");
+            doc.setVersionNo(1);
+            doc.setVersionStatus("PENDING");
             doc.setCreateTime(LocalDateTime.now());
             doc.setUpdateTime(LocalDateTime.now());
 
             try {
                 documentMapper.insert(doc);
+
+                if (doc.getId() == null) {
+                    throw new IllegalStateException(
+                            "文档保存后未获得ID"
+                    );
+                }
+
+                int updated = documentMapper.update(
+                        null,
+                        new LambdaUpdateWrapper<CourseDocument>()
+                                .eq(
+                                        CourseDocument::getId,
+                                        doc.getId()
+                                )
+                                .set(
+                                        CourseDocument::getResourceId,
+                                        doc.getId()
+                                )
+                );
+
+                if (updated != 1) {
+                    throw new IllegalStateException(
+                            "初始化资源ID失败"
+                    );
+                }
+
+                doc.setResourceId(doc.getId());
+
             } catch (RuntimeException e) {
-                Files.deleteIfExists(target);
+
+                try {
+                    Files.deleteIfExists(target);
+                } catch (IOException cleanupError) {
+                    e.addSuppressed(cleanupError);
+                }
+
                 throw e;
             }
 

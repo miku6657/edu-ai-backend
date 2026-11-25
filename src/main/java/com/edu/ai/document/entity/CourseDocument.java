@@ -22,6 +22,37 @@ public class CourseDocument {
     private Long fileSize;
     private String contentType;
 
+    /**
+     * 教学资源类型：
+     * LESSON_PLAN / COURSEWARE /
+     * EXERCISE / PRACTICAL_GUIDE / OTHER
+     */
+    private String resourceType;
+
+    /**
+     * 资源来源，例如：
+     * 教师自编、教材配套、实验室资料等
+     */
+    private String sourceInfo;
+
+    /**
+     * 资源根ID。
+     * 同一资源的所有版本使用相同的resourceId。
+     */
+    private Long resourceId;
+
+    /**
+     * 资源版本号，从1开始。
+     */
+    private Integer versionNo;
+
+    /**
+     * PENDING：待生效
+     * CURRENT：当前生效
+     * HISTORY：历史版本
+     */
+    private String versionStatus;
+
     private String status;
     private String errorMessage;
 

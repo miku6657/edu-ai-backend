@@ -46,7 +46,23 @@ public class DocumentController {
     )
     public Result<DocumentVO> upload(
             @PathVariable Long courseId,
-            @RequestParam("file") MultipartFile file,
+
+            @RequestParam("file")
+            MultipartFile file,
+
+            @RequestParam(
+                    value = "resourceType",
+                    required = false,
+                    defaultValue = "AUTO"
+            )
+            String resourceType,
+
+            @RequestParam(
+                    value = "sourceInfo",
+                    required = false
+            )
+            String sourceInfo,
+
             Authentication authentication) {
 
         Long userId = getUserId(authentication);
@@ -54,7 +70,9 @@ public class DocumentController {
         DocumentVO document = documentService.upload(
                 courseId,
                 userId,
-                file
+                file,
+                resourceType,
+                sourceInfo
         );
 
         indexTask.process(document.getId());
@@ -101,6 +119,43 @@ public class DocumentController {
                 .header(
                         HttpHeaders.CONTENT_DISPOSITION,
                         disposition.toString()
+                )
+                .body(file.resource());
+    }
+
+    // PDF 在线预览
+    @GetMapping("/{documentId}/preview")
+    public ResponseEntity<Resource> preview(
+            @PathVariable Long documentId,
+            Authentication authentication) {
+
+        DocumentService.DownloadFile file =
+                documentService.download(
+                        documentId,
+                        getUserId(authentication)
+                );
+
+        ContentDisposition disposition =
+                ContentDisposition.inline()
+                        .filename(
+                                file.filename(),
+                                StandardCharsets.UTF_8
+                        )
+                        .build();
+
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_PDF)
+                .header(
+                        HttpHeaders.CONTENT_DISPOSITION,
+                        disposition.toString()
+                )
+                .header(
+                        HttpHeaders.CACHE_CONTROL,
+                        "private, no-store"
+                )
+                .header(
+                        "X-Content-Type-Options",
+                        "nosniff"
                 )
                 .body(file.resource());
     }

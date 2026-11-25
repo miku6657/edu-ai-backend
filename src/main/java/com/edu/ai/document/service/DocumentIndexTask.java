@@ -41,6 +41,7 @@ public class DocumentIndexTask {
     private final CourseMapper courseMapper;
     private final CourseIndexLease courseIndexLease;
     private final CourseEmbeddingProfileService profileService;
+    private final DocumentVersionService documentVersionService;
     private final ObjectMapper objectMapper;
 
     private final HttpClient httpClient;
@@ -52,6 +53,7 @@ public class DocumentIndexTask {
             CourseMapper courseMapper,
             CourseIndexLease courseIndexLease,
             CourseEmbeddingProfileService profileService,
+            DocumentVersionService documentVersionService,
             ObjectMapper objectMapper,
             @Value("${ai.service.url}") String serviceUrl,
             @Value("${ai.service.internal-key}") String internalKey) {
@@ -60,6 +62,7 @@ public class DocumentIndexTask {
         this.courseMapper = courseMapper;
         this.courseIndexLease = courseIndexLease;
         this.profileService = profileService;
+        this.documentVersionService = documentVersionService;
         this.objectMapper = objectMapper;
 
         this.serviceUrl = serviceUrl;
@@ -281,25 +284,10 @@ public class DocumentIndexTask {
 
             lease.assertValid();
 
-            int updated = updateCurrentTask(
+            documentVersionService.finishIndexAndActivate(
                     documentId,
-                    token,
-                    "READY",
-                    null
+                    token
             );
-
-            if (updated != 1) {
-                log.warn(
-                        "Index result ignored, documentId={}",
-                        documentId
-                );
-            } else {
-                log.info(
-                        "PDF indexed successfully, documentId={}, version={}",
-                        documentId,
-                        embeddingVersion
-                );
-            }
 
         } catch (Exception e) {
 

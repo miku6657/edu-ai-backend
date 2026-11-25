@@ -13,6 +13,7 @@ import lombok.Data;
 import tools.jackson.databind.annotation.JsonSerialize;
 import tools.jackson.databind.ser.std.ToStringSerializer;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Data
@@ -23,13 +24,36 @@ public class Course {
     @JsonSerialize(using = ToStringSerializer.class)
     private Long id;
 
+    /**
+     * 课程编码，业务唯一标识
+     * 与学生加入课程使用的邀请码不同
+     */
+    @TableField("course_code")
+    private String courseCode;
+
     private String name;
 
     private String description;
 
     /**
-     * 数据库实际字段 user_id
-     * 保留原来的 userId 命名，避免影响其他业务代码
+     * 学分，例如 3.0、3.5
+     */
+    private BigDecimal credits;
+
+    /**
+     * 适用专业
+     */
+    @TableField("applicable_major")
+    private String applicableMajor;
+
+    /**
+     * 开课学期
+     */
+    private String semester;
+
+    /**
+     * 课程负责人
+     * 数据库字段为 user_id
      */
     @TableField("user_id")
     @JsonProperty("ownerId")
@@ -37,7 +61,8 @@ public class Course {
     private Long userId;
 
     /**
-     * 课程状态：1正常，0停用
+     * 1：正常
+     * 0：停用
      */
     private Integer status;
 
@@ -47,8 +72,7 @@ public class Course {
     private Integer embeddingVersion;
 
     /**
-     * 课程邀请码
-     * 不允许直接通过课程详情返回
+     * 课程邀请码，不向普通课程详情输出
      */
     @TableField("invite_code")
     @JsonIgnore
