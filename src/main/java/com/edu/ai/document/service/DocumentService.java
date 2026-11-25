@@ -45,6 +45,16 @@ public interface DocumentService {
             MultipartFile file
     );
 
+    /**
+     * 合并同一课程下的同类型PDF资源。
+     */
+    DocumentVO mergeDocuments(
+            Long courseId,
+            Long userId,
+            List<Long> documentIds,
+            String filename
+    );
+
     List<DocumentVO> listByCourse(
             Long courseId,
             Long userId

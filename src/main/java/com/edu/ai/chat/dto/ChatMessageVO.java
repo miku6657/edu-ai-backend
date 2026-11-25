@@ -4,13 +4,8 @@ import com.edu.ai.chat.entity.ChatMessage;
 import lombok.Data;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
-/**
- * 聊天消息响应对象。
- *
- * 消息 ID 和会话 ID 均使用字符串，
- * sourcesJson 保留原始 JSON 字符串。
- */
 @Data
 public class ChatMessageVO {
 
@@ -25,6 +20,24 @@ public class ChatMessageVO {
     private String sourcesJson;
 
     private LocalDateTime createTime;
+
+    /**
+     * 历史引用的版本信息。
+     * 动态查询生成，不写入数据库。
+     */
+    private List<CitationVersion> citationVersions = List.of();
+
+    public record CitationVersion(
+            String documentId,
+            String documentName,
+            String resourceId,
+            Integer versionNo,
+            String versionStatus,
+            String currentDocumentId,
+            String currentDocumentName,
+            Integer currentVersionNo,
+            boolean outdated
+    ) {}
 
     public static ChatMessageVO from(ChatMessage message) {
 

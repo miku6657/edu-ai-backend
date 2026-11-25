@@ -11,6 +11,8 @@ import com.edu.ai.document.entity.CourseDocument;
 import com.edu.ai.document.mapper.CourseDocumentMapper;
 import com.edu.ai.document.service.DocumentResourceType;
 import com.edu.ai.document.service.DocumentService;
+import com.edu.ai.document.service.GeneratedPdfFile;
+import com.edu.ai.document.service.PdfMergeClient;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.FileSystemResource;
@@ -29,7 +31,13 @@ import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 @Service
@@ -40,17 +48,20 @@ public class DocumentServiceImpl implements DocumentService {
     private final CourseDocumentMapper documentMapper;
     private final CoursePermissionService coursePermissionService;
     private final JdbcTemplate jdbc;
+    private final PdfMergeClient pdfMergeClient;
     private final Path storageRoot;
 
     public DocumentServiceImpl(
             CourseDocumentMapper documentMapper,
             CoursePermissionService coursePermissionService,
             JdbcTemplate jdbc,
+            PdfMergeClient pdfMergeClient,
             @Value("${app.storage.pdf-dir}") String storageDir) {
 
         this.documentMapper = documentMapper;
         this.coursePermissionService = coursePermissionService;
         this.jdbc = jdbc;
+        this.pdfMergeClient = pdfMergeClient;
 
         this.storageRoot = Paths.get(storageDir)
                 .toAbsolutePath()
@@ -445,6 +456,277 @@ public class DocumentServiceImpl implements DocumentService {
     }
 
     /**
+     * 将多份同类型课程PDF合并成一份新的独立资源。
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public DocumentVO mergeDocuments(
+            Long courseId,
+            Long userId,
+            List<Long> documentIds,
+            String filename) {
+
+        Course course =
+                coursePermissionService.requireManage(
+                        courseId,
+                        userId
+                );
+
+        if (!Integer.valueOf(1).equals(
+                course.getStatus())) {
+
+            throw new BusinessException(
+                    400, "课程已停用"
+            );
+        }
+
+        // 1. 校验合并数量
+        if (documentIds == null
+                || documentIds.size() < 2
+                || documentIds.size() > 10) {
+
+            throw new BusinessException(
+                    400, "请选择2至10份PDF进行合并"
+            );
+        }
+
+        if (documentIds.stream().anyMatch(
+                id -> id == null || id <= 0)) {
+
+            throw new BusinessException(
+                    400, "文档ID不合法"
+            );
+        }
+
+        if (new HashSet<>(documentIds).size()
+                != documentIds.size()) {
+
+            throw new BusinessException(
+                    400, "不能重复选择同一份文档"
+            );
+        }
+
+        // 2. 校验输出文件名
+        if (filename == null || filename.isBlank()) {
+
+            throw new BusinessException(
+                    400, "请输入合并后的文件名称"
+            );
+        }
+
+        filename = filename.trim();
+
+        if (filename.contains("/")
+                || filename.contains("\\")
+                || filename.matches(".*\\p{Cntrl}.*")) {
+
+            throw new BusinessException(
+                    400, "文件名称包含非法字符"
+            );
+        }
+
+        if (!filename.toLowerCase(Locale.ROOT)
+                .endsWith(".pdf")) {
+
+            filename += ".pdf";
+        }
+
+        if (filename.length() > 255) {
+
+            throw new BusinessException(
+                    400, "文件名称不能超过255个字符"
+            );
+        }
+
+        // 3. 按ID顺序加锁，避免并发修改源文档。
+        List<Long> sortedIds = documentIds.stream()
+                .sorted()
+                .toList();
+
+        List<CourseDocument> lockedDocuments =
+                documentMapper.selectList(
+                        new LambdaQueryWrapper<CourseDocument>()
+                                .eq(
+                                        CourseDocument::getCourseId,
+                                        courseId
+                                )
+                                .in(
+                                        CourseDocument::getId,
+                                        sortedIds
+                                )
+                                .orderByAsc(
+                                        CourseDocument::getId
+                                )
+                                .last("FOR UPDATE")
+                );
+
+        if (lockedDocuments.size()
+                != documentIds.size()) {
+
+            throw new BusinessException(
+                    400,
+                    "部分文档不存在或不属于当前课程"
+            );
+        }
+
+        Map<Long, CourseDocument> documentMap =
+                new HashMap<>();
+
+        for (CourseDocument doc : lockedDocuments) {
+
+            documentMap.put(
+                    doc.getId(),
+                    doc
+            );
+        }
+
+        // 4. 校验所有文档状态和资源类型。
+        List<String> storageNames =
+                new ArrayList<>();
+
+        String resourceType = null;
+
+        long totalSize = 0;
+
+        // 按教师提交的顺序处理，
+        // 而不是数据库加锁时的ID顺序。
+        for (Long documentId : documentIds) {
+
+            CourseDocument doc =
+                    documentMap.get(documentId);
+
+            if (!"READY".equals(doc.getStatus())
+                    || !"CURRENT".equals(
+                            doc.getVersionStatus())) {
+
+                throw new BusinessException(
+                        409,
+                        "只能合并已完成处理的当前生效版本"
+                );
+            }
+
+            if (doc.getResourceType() == null
+                    || doc.getResourceType().isBlank()) {
+
+                throw new BusinessException(
+                        400,
+                        "存在未设置资源类型的文档"
+                );
+            }
+
+            if (resourceType == null) {
+
+                resourceType = doc.getResourceType();
+
+            } else if (!Objects.equals(
+                    resourceType,
+                    doc.getResourceType())) {
+
+                throw new BusinessException(
+                        400,
+                        "只能合并相同资源类型的PDF"
+                );
+            }
+
+            if (doc.getFileSize() == null
+                    || doc.getFileSize() <= 0
+                    || doc.getFileSize() > MAX_FILE_SIZE) {
+
+                throw new BusinessException(
+                        400, "存在大小异常的PDF"
+                );
+            }
+
+            totalSize += doc.getFileSize();
+
+            if (totalSize > MAX_FILE_SIZE) {
+
+                throw new BusinessException(
+                        400,
+                        "原始PDF总大小不能超过30MB"
+                );
+            }
+
+            storageNames.add(doc.getStorageName());
+        }
+
+        // 5. 调用Python进行PDF合并。
+        byte[] mergedData =
+                pdfMergeClient.merge(storageNames);
+
+        // 6. 转换成原有上传方法可接受的文件对象。
+        GeneratedPdfFile mergedFile =
+                new GeneratedPdfFile(
+                        filename,
+                        mergedData
+                );
+
+        // 7. 保存为新的独立资源V1。
+        DocumentVO created = saveDocument(
+                courseId,
+                userId,
+                mergedFile,
+                resourceType,
+                "由" + documentIds.size()
+                        + "份同类型课程资料合并生成",
+                null,
+                1
+        );
+
+        Long newDocumentId = created.getId();
+
+        // 8. 继承所有源文档的分类。
+        // 使用DISTINCT实现章节、知识点去重。
+        String placeholders = String.join(
+                ",",
+                java.util.Collections.nCopies(
+                        documentIds.size(),
+                        "?"
+                )
+        );
+
+        List<Object> args = new ArrayList<>();
+
+        args.add(newDocumentId);
+        args.add(courseId);
+        args.addAll(documentIds);
+
+        jdbc.update(
+                """
+                INSERT INTO course_document_chapter
+                    (document_id, chapter_id)
+                SELECT DISTINCT ?, dc.chapter_id
+                FROM course_document_chapter dc
+                JOIN course_chapter c
+                  ON c.id = dc.chapter_id
+                WHERE c.course_id = ?
+                  AND dc.document_id IN (
+                """
+                + placeholders
+                + ")",
+                args.toArray()
+        );
+
+        jdbc.update(
+                """
+                INSERT INTO course_document_knowledge_point
+                    (document_id, point_id)
+                SELECT DISTINCT ?, dp.point_id
+                FROM course_document_knowledge_point dp
+                JOIN course_knowledge_point p
+                  ON p.id = dp.point_id
+                WHERE p.course_id = ?
+                  AND dp.document_id IN (
+                """
+                + placeholders
+                + ")",
+                args.toArray()
+        );
+
+        return created;
+    }
+
+    /**
      * 查询课程资料。
      */
     @Override
@@ -453,7 +735,8 @@ public class DocumentServiceImpl implements DocumentService {
             Long userId) {
 
         coursePermissionService.requireActiveRead(
-                courseId, userId
+                courseId,
+                userId
         );
 
         boolean canManage =
@@ -468,9 +751,14 @@ public class DocumentServiceImpl implements DocumentService {
                                 CourseDocument::getCourseId,
                                 courseId
                         )
+                        .ne(
+                                CourseDocument::getStatus,
+                                "DELETED"
+                        )
                         .and(wrapper -> {
 
-                            // 所有课程成员查看当前生效版本。
+                            // 所有课程成员都可以查看
+                            // 已完成索引的当前生效版本。
                             wrapper.nested(current ->
                                     current.eq(
                                             CourseDocument::getVersionStatus,
@@ -481,21 +769,23 @@ public class DocumentServiceImpl implements DocumentService {
                                     )
                             );
 
-                            // 教师和管理员还可以查看待处理版本，
-                            // 以便处理失败、重试或删除。
                             if (canManage) {
+
+                                // 教师可以查看尚未完成处理的版本。
                                 wrapper.or().eq(
                                         CourseDocument::getVersionStatus,
                                         "PENDING"
                                 );
+
+                                // 教师还可以查看正在删除
+                                // 或删除失败的资源。
+                                wrapper.or().in(
+                                        CourseDocument::getStatus,
+                                        "DELETING",
+                                        "DELETE_FAILED"
+                                );
                             }
                         })
-                        .notIn(
-                                CourseDocument::getStatus,
-                                "DELETING",
-                                "DELETE_FAILED",
-                                "DELETED"
-                        )
                         .orderByDesc(
                                 CourseDocument::getCreateTime
                         );

@@ -60,6 +60,13 @@ public class DocumentClassificationService {
             Integer sortOrder) {
 
         permissions.requireManage(courseId, userId);
+        permissions.requireActiveRead(courseId, userId);
+
+        if (sortOrder != null && sortOrder < 0) {
+            throw new BusinessException(
+                    400, "章节排序不能小于0"
+            );
+        }
 
         if (name == null || name.isBlank()
                 || name.trim().length() > 200) {
@@ -82,6 +89,112 @@ public class DocumentClassificationService {
         } catch (DuplicateKeyException e) {
             throw new BusinessException(
                     409, "该课程已存在同名章节"
+            );
+        }
+    }
+
+    /**
+     * 修改课程章节名称及排序。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void updateChapter(
+            Long courseId,
+            Long chapterId,
+            Long userId,
+            String name,
+            Integer sortOrder) {
+
+        permissions.requireManage(courseId, userId);
+        permissions.requireActiveRead(courseId, userId);
+
+        if (name == null
+                || name.isBlank()
+                || name.trim().length() > 200) {
+
+            throw new BusinessException(
+                    400, "章节名称不能为空且不能超过200个字符"
+            );
+        }
+
+        if (sortOrder == null || sortOrder < 0) {
+
+            throw new BusinessException(
+                    400, "章节排序必须为非负整数"
+            );
+        }
+
+        // 限制章节必须属于当前课程。
+        List<Long> rows = jdbc.queryForList(
+                """
+                SELECT id
+                FROM course_chapter
+                WHERE id = ?
+                  AND course_id = ?
+                FOR UPDATE
+                """,
+                Long.class,
+                chapterId,
+                courseId
+        );
+
+        if (rows.isEmpty()) {
+            throw new BusinessException(
+                    404, "当前课程中不存在该章节"
+            );
+        }
+
+        try {
+            jdbc.update(
+                    """
+                    UPDATE course_chapter
+                    SET chapter_name = ?,
+                        sort_order = ?
+                    WHERE id = ?
+                      AND course_id = ?
+                    """,
+                    name.trim(),
+                    sortOrder,
+                    chapterId,
+                    courseId
+            );
+
+        } catch (DuplicateKeyException e) {
+
+            throw new BusinessException(
+                    409, "该课程已存在同名章节"
+            );
+        }
+    }
+
+    /**
+     * 删除指定课程章节。
+     *
+     * 仅删除章节及文档与章节的关联，
+     * 不删除PDF、知识点或向量索引。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteChapter(
+            Long courseId,
+            Long chapterId,
+            Long userId) {
+
+        permissions.requireManage(courseId, userId);
+        permissions.requireActiveRead(courseId, userId);
+
+        int deleted = jdbc.update(
+                """
+                DELETE FROM course_chapter
+                WHERE id = ?
+                  AND course_id = ?
+                """,
+                chapterId,
+                courseId
+        );
+
+        if (deleted != 1) {
+
+            throw new BusinessException(
+                    404, "当前课程中不存在该章节"
             );
         }
     }

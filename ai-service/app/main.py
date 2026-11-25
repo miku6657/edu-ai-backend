@@ -5,13 +5,14 @@ from contextlib import asynccontextmanager
 from threading import Lock
 
 from fastapi import Depends, FastAPI, Header, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from .chat_service import create_chat_client
 from .config import AI_INTERNAL_KEY, PDF_STORAGE_DIR
 from .embedding_migration import migrate_course
 from .embedding_service import create_embedding_client, embed_texts
+from .pdf_merger import merge_pdf_files
 from .pdf_parser import parse_pdf
 from .rag_service import rag_stream
 from .vector_store import (
@@ -75,6 +76,13 @@ class IndexRequest(BaseModel):
     expected_dimension: int = Field(
         gt=0,
         le=8192,
+    )
+
+
+class MergePdfRequest(BaseModel):
+    storage_names: list[str] = Field(
+        min_length=2,
+        max_length=10,
     )
 
 
@@ -423,4 +431,35 @@ def internal_cleanup_collections(request: CleanupRequest):
         raise HTTPException(
             status_code=500,
             detail="Collection清理失败",
+        )
+
+
+@app.post(
+    "/internal/documents/merge",
+    dependencies=[Depends(require_internal)],
+)
+def internal_merge_pdf(
+    request: MergePdfRequest,
+):
+    try:
+        pdf_data = merge_pdf_files(
+            request.storage_names
+        )
+        return Response(
+            content=pdf_data,
+            media_type="application/pdf",
+            headers={
+                "Cache-Control": "no-store",
+            },
+        )
+    except (ValueError, FileNotFoundError) as error:
+        raise HTTPException(
+            status_code=400,
+            detail=str(error),
+        ) from error
+    except Exception as error:
+        logger.exception("课程PDF合并失败")
+        raise HTTPException(
+            status_code=500,
+            detail="PDF合并失败",
         )

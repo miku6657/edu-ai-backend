@@ -1,6 +1,7 @@
 package com.edu.ai.chat.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.edu.ai.chat.dto.ChatMessageVO;
 import com.edu.ai.chat.dto.ChatRequest;
 import com.edu.ai.chat.entity.ChatMessage;
 import com.edu.ai.chat.entity.ChatSession;
@@ -62,6 +63,7 @@ ChatService {
     private final ObjectMapper objectMapper;
     private final ChatStreamRegistry streamRegistry;
     private final QuestionKnowledgeService questionKnowledgeService;
+    private final ChatCitationVersionService citationVersionService;
     private final HttpClient httpClient;
 
     private final String serviceUrl;
@@ -79,6 +81,7 @@ ChatService {
             ObjectMapper objectMapper,
             ChatStreamRegistry streamRegistry,
             QuestionKnowledgeService questionKnowledgeService,
+            ChatCitationVersionService citationVersionService,
             @Value("${ai.service.url}") String serviceUrl,
             @Value("${ai.service.internal-key}") String internalKey) {
 
@@ -92,6 +95,7 @@ ChatService {
         this.objectMapper = objectMapper;
         this.streamRegistry = streamRegistry;
         this.questionKnowledgeService = questionKnowledgeService;
+        this.citationVersionService = citationVersionService;
         this.serviceUrl = serviceUrl;
         this.internalKey = internalKey;
 
@@ -689,37 +693,69 @@ ChatService {
     }
 
     /**
-     * 查询会话历史消息。
-     * 只能查询当前用户自己的会话。
+     * 校验当前用户是否有权访问指定会话。
      */
-    public List<ChatMessage> listMessages(
+    private ChatSession requireReadableSession(
             Long sessionId,
             Long userId) {
+
+        if (userId == null) {
+            throw new BusinessException(
+                    401, "登录状态无效"
+            );
+        }
 
         ChatSession session =
                 sessionMapper.selectById(sessionId);
 
         if (session == null) {
             throw new BusinessException(
-                    404, "会话不存在");
+                    404, "会话不存在"
+            );
         }
 
-        // 验证会话归属
         if (!userId.equals(session.getUserId())) {
             throw new BusinessException(
-                    403, "无权访问该会话");
+                    403, "无权访问该会话"
+            );
         }
 
-        // 验证课程访问权限
         checkAccess(
                 session.getCourseId(),
                 userId
         );
 
-        return messageMapper.selectList(
-                new LambdaQueryWrapper<ChatMessage>()
-                        .eq(ChatMessage::getSessionId, sessionId)
-                        .orderByAsc(ChatMessage::getId)
+        return session;
+    }
+
+    /**
+     * 查询会话历史消息，并补充引用版本信息。
+     */
+    public List<ChatMessageVO> listMessages(
+            Long sessionId,
+            Long userId) {
+
+        ChatSession session =
+                requireReadableSession(
+                        sessionId,
+                        userId
+                );
+
+        List<ChatMessage> messages =
+                messageMapper.selectList(
+                        new LambdaQueryWrapper<ChatMessage>()
+                                .eq(
+                                        ChatMessage::getSessionId,
+                                        sessionId
+                                )
+                                .orderByAsc(
+                                        ChatMessage::getId
+                                )
+                );
+
+        return citationVersionService.enrichMessages(
+                session.getCourseId(),
+                messages
         );
     }
 

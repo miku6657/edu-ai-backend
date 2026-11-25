@@ -65,6 +65,45 @@ public class DocumentClassificationController {
     }
 
     /**
+     * 修改章节名称和排序。
+     */
+    @PutMapping("/courses/{courseId}/chapters/{chapterId}")
+    public Result<String> updateChapter(
+            @PathVariable Long courseId,
+            @PathVariable Long chapterId,
+            @Valid @RequestBody CreateChapterRequest request,
+            Authentication auth) {
+
+        service.updateChapter(
+                courseId,
+                chapterId,
+                userId(auth),
+                request.name(),
+                request.sortOrder()
+        );
+
+        return Result.success("章节修改成功");
+    }
+
+    /**
+     * 删除课程章节。
+     */
+    @DeleteMapping("/courses/{courseId}/chapters/{chapterId}")
+    public Result<String> deleteChapter(
+            @PathVariable Long courseId,
+            @PathVariable Long chapterId,
+            Authentication auth) {
+
+        service.deleteChapter(
+                courseId,
+                chapterId,
+                userId(auth)
+        );
+
+        return Result.success("章节删除成功");
+    }
+
+    /**
      * 课程成员查看章节。
      */
     @GetMapping("/courses/{courseId}/chapters")

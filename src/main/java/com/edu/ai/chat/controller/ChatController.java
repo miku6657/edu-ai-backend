@@ -62,22 +62,20 @@ public class ChatController {
         return Result.success(result);
     }
 
-    // 查询会话历史消息
+    /**
+     * 查询会话历史消息及引用资料版本信息。
+     */
     @GetMapping("/sessions/{sessionId}/messages")
     public Result<List<ChatMessageVO>> messages(
             @PathVariable Long sessionId,
             Authentication authentication) {
 
-        List<ChatMessageVO> result =
+        return Result.success(
                 chatService.listMessages(
                         sessionId,
                         getUserId(authentication)
                 )
-                .stream()
-                .map(ChatMessageVO::from)
-                .toList();
-
-        return Result.success(result);
+        );
     }
 
     // 修改会话标题

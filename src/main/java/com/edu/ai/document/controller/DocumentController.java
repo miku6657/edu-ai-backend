@@ -166,6 +166,63 @@ public class DocumentController {
         return Result.success(created);
     }
 
+    /**
+     * 合并同类型课程PDF。
+     */
+    @PostMapping("/course/{courseId}/merge")
+    public Result<DocumentVO> mergeDocuments(
+            @PathVariable Long courseId,
+            @RequestBody MergeDocumentsRequest request,
+            Authentication authentication) {
+
+        Long userId = getUserId(authentication);
+
+        permissions.requireManage(
+                courseId,
+                userId
+        );
+
+        CourseIndexLease.Handle lease =
+                courseIndexLease.tryOpen(
+                        courseId,
+                        "DOCUMENT_MERGE"
+                );
+
+        if (lease == null) {
+
+            throw new BusinessException(
+                    409,
+                    "课程正在进行索引或其他文档操作，请稍后重试"
+            );
+        }
+
+        DocumentVO created;
+
+        try (lease) {
+
+            lease.assertValid();
+
+            created = documentService.mergeDocuments(
+                    courseId,
+                    userId,
+                    request.documentIds(),
+                    request.filename()
+            );
+
+            lease.assertValid();
+        }
+
+        // 先释放课程锁，再提交索引任务。
+        indexTask.process(created.getId());
+
+        return Result.success(created);
+    }
+
+    public record MergeDocumentsRequest(
+            List<Long> documentIds,
+            String filename
+    ) {}
+
     // 查看课程课件
     @GetMapping("/course/{courseId}")
     public Result<List<DocumentVO>> list(
