@@ -38,6 +38,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useCourseStore } from '@/stores/course'
 import { notifyError, notifySuccess, notifyWarning } from '@/utils/notify'
 import DocumentClassificationPanel from '@/views/knowledge/DocumentClassificationPanel.vue'
+import DocumentChunkDialog from '@/views/knowledge/DocumentChunkDialog.vue'
 import DocumentMergeDialog from '@/views/knowledge/DocumentMergeDialog.vue'
 import DocumentPreviewDialog from '@/views/knowledge/DocumentPreviewDialog.vue'
 import DocumentVersionDialog from '@/views/knowledge/DocumentVersionDialog.vue'
@@ -90,6 +91,8 @@ const previewDoc = ref<
 const versionDialogVisible = ref(false)
 const versionDocument = ref<KnowledgeDoc | null>(null)
 const mergeDialogVisible = ref(false)
+const chunkDialogVisible = ref(false)
+const chunkDocument = ref<KnowledgeDoc | null>(null)
 const resourceFilterOptions = [
   { value: '', label: '全部类型' },
   ...RESOURCE_TYPE_OPTIONS.filter(
@@ -267,6 +270,8 @@ watch(
     versionDialogVisible.value = false
     versionDocument.value = null
     mergeDialogVisible.value = false
+    chunkDialogVisible.value = false
+    chunkDocument.value = null
     void loadResourceClassifications()
   },
   { immediate: true },
@@ -474,6 +479,29 @@ function openPreview(doc: KnowledgeDoc): void {
 
   previewDoc.value = doc
   previewVisible.value = true
+}
+
+/**
+ * 打开课程资料的知识切片管理。
+ */
+function openChunkManager(doc: KnowledgeDoc): void {
+  if (!canManageDocuments.value) {
+    notifyWarning('无权管理课程知识切片')
+    return
+  }
+
+  if (doc.courseId !== selectedCourseId.value) {
+    notifyWarning('该资料不属于当前课程')
+    return
+  }
+
+  if (doc.status !== 'READY') {
+    notifyWarning('资料尚未完成解析，暂时无法管理切片')
+    return
+  }
+
+  chunkDocument.value = doc
+  chunkDialogVisible.value = true
 }
 
 function openVersionManager(doc: KnowledgeDoc): void {
@@ -1161,7 +1189,7 @@ function documentTone(doc: KnowledgeDoc): Tone {
                 </el-table-column>
                 <el-table-column
                   label="操作"
-                  :width="compact ? 180 : 260"
+                  :width="compact ? 200 : 340"
                   fixed="right"
                 >
                   <template #default="{ row }">
@@ -1173,6 +1201,18 @@ function documentTone(doc: KnowledgeDoc): Tone {
                         @click="openPreview(row)"
                       >
                         预览
+                      </el-button>
+
+                      <el-button
+                        v-if="
+                          canManageDocuments
+                          && row.status === 'READY'
+                        "
+                        text
+                        type="primary"
+                        @click="openChunkManager(row)"
+                      >
+                        切片管理
                       </el-button>
 
                       <el-button
@@ -1242,6 +1282,13 @@ function documentTone(doc: KnowledgeDoc): Tone {
         </BaseCard>
       </section>
     </div>
+    <DocumentChunkDialog
+      v-model="chunkDialogVisible"
+      :course-id="selectedCourseId"
+      :document="chunkDocument"
+      :chapters="chapters"
+      @preview="openPreview"
+    />
     <DocumentMergeDialog
       v-model="mergeDialogVisible"
       :course-id="selectedCourseId"
