@@ -25,7 +25,12 @@ public class CorsConfig {
 
         // 允许的 HTTP 请求方式
         config.setAllowedMethods(List.of(
-                "GET", "POST", "PUT", "DELETE", "OPTIONS"
+                "GET",
+                "POST",
+                "PUT",
+                "PATCH",
+                "DELETE",
+                "OPTIONS"
         ));
 
         // 允许的请求头
