@@ -12,6 +12,18 @@ export interface ChatSession {
   updateTime: string
 }
 
+export interface CitationVersion {
+  documentId: BigIntId
+  documentName: string
+  resourceId: BigIntId | null
+  versionNo: number | null
+  versionStatus: string | null
+  currentDocumentId: BigIntId | null
+  currentDocumentName: string | null
+  currentVersionNo: number | null
+  outdated: boolean
+}
+
 /** Java ChatMessage DTO。 */
 export interface ChatMessage {
   id: BigIntId
@@ -19,6 +31,7 @@ export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
   sourcesJson: string | null
+  citationVersions?: CitationVersion[]
   createTime: string
 }
 
@@ -53,6 +66,7 @@ export interface RagCitation {
   section_title: string | null
   content: string
   similarity_score?: number | null
+  version?: CitationVersion
 }
 
 export interface CitationPayload {
@@ -121,7 +135,7 @@ export interface ParsedSseFrame {
 }
 
 interface JavaSource {
-  documentId: number
+  documentId: number | string
   page: number
 }
 
@@ -157,23 +171,76 @@ function sourceToCitation(source: JavaSource): RagCitation {
   }
 }
 
-function isJavaSource(value: unknown): value is JavaSource {
-  if (typeof value !== 'object' || value === null) {
+function isJavaSource(
+  value: unknown,
+): value is JavaSource {
+  if (
+    typeof value !== 'object'
+    || value === null
+  ) {
     return false
   }
+
   const source = value as Record<string, unknown>
-  return typeof source.documentId === 'number' && typeof source.page === 'number'
+  const id = source.documentId
+  const page = source.page
+
+  const validId =
+    (
+      typeof id === 'string'
+      && /^[1-9]\d*$/.test(id)
+    )
+    || (
+      typeof id === 'number'
+      && Number.isSafeInteger(id)
+      && id > 0
+    )
+
+  return (
+    validId
+    && typeof page === 'number'
+    && Number.isSafeInteger(page)
+    && page > 0
+  )
 }
 
-function parseSources(json: string | null): RagCitation[] {
+function parseSources(
+  json: string | null,
+  versions: CitationVersion[] = [],
+): RagCitation[] {
   if (!json) {
     return []
   }
   try {
     const parsed: unknown = JSON.parse(json)
-    return Array.isArray(parsed)
-      ? parsed.filter(isJavaSource).map(sourceToCitation)
-      : []
+
+    if (!Array.isArray(parsed)) {
+      return []
+    }
+
+    const versionMap = new Map(
+      versions.map(version => [
+        String(version.documentId),
+        version,
+      ]),
+    )
+
+    return parsed
+      .filter(isJavaSource)
+      .map((source) => {
+        const citation = sourceToCitation(source)
+        const version = versionMap.get(citation.doc_id)
+
+        if (!version) {
+          return citation
+        }
+
+        return {
+          ...citation,
+          doc_name: version.documentName || citation.doc_name,
+          version,
+        }
+      })
   } catch {
     return []
   }
@@ -187,7 +254,10 @@ function toChatHistoryMessage(item: ChatMessage): ChatHistoryMessage {
     role: item.role === 'assistant' ? 'ASSISTANT' : 'USER',
     intent_type: null,
     content: item.content,
-    citations: parseSources(item.sourcesJson),
+    citations: parseSources(
+      item.sourcesJson,
+      item.citationVersions ?? [],
+    ),
     is_rejected: false,
     trace_id: null,
     retrieval_cost_ms: null,

@@ -298,4 +298,93 @@ describe('Java chat API', () => {
     await expect(streamRagQa({ courseId: '2001', query: '问题' }, {}))
       .rejects.toMatchObject({ code: 'CLIENT_MALFORMED_RESPONSE' })
   })
+
+  it('兼容字符串类型的 RAG 引用 ID', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(sseResponse([
+        'event: session\ndata: {"sessionId":"701"}\n\n',
+        'event: sources\ndata: {"sources":[{"documentId":"9007199254740993","page":4}]}\n\n',
+        'event: token\ndata: {"content":"测试回答"}\n\n',
+        'event: done\ndata: {"sessionId":"701"}\n\n',
+      ]))
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    const citations: RagCitation[][] = []
+
+    await streamRagQa(
+      {
+        courseId: '7001',
+        query: '测试文档引用',
+      },
+      {
+        onCitation: payload => citations.push(payload.citations),
+      },
+    )
+
+    expect(citations[0]?.[0]).toMatchObject({
+      doc_id: '9007199254740993',
+      page_start: 4,
+      page_end: 4,
+    })
+  })
+
+  it('历史消息能够恢复引用版本信息', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([
+        {
+          id: '801',
+          courseId: '8001',
+          userId: '4',
+          title: '历史课程问答',
+          createTime: '2026-11-25T10:00:00',
+          updateTime: '2026-11-25T10:00:00',
+        },
+      ]))
+      .mockResolvedValueOnce(jsonResponse([
+        {
+          id: '901',
+          sessionId: '801',
+          role: 'assistant',
+          content: '期末考试占比为60%。',
+          sourcesJson: JSON.stringify([
+            {
+              documentId: '101',
+              page: 3,
+            },
+          ]),
+          citationVersions: [
+            {
+              documentId: '101',
+              documentName: '课程考核说明.pdf',
+              resourceId: '101',
+              versionNo: 1,
+              versionStatus: 'HISTORY',
+              currentDocumentId: '102',
+              currentDocumentName: '课程考核说明V2.pdf',
+              currentVersionNo: 2,
+              outdated: true,
+            },
+          ],
+          createTime: '2026-11-25T10:00:00',
+        },
+      ]))
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await listMessages('8001')
+
+    expect(result.items[0]?.citations?.[0]).toMatchObject({
+      doc_id: '101',
+      doc_name: '课程考核说明.pdf',
+      page_start: 3,
+      version: {
+        outdated: true,
+        versionNo: 1,
+        currentVersionNo: 2,
+        currentDocumentId: '102',
+      },
+    })
+  })
 })

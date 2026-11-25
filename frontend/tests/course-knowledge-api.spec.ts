@@ -21,6 +21,7 @@ import {
   downloadDocumentFile,
   listDocs,
   listDocumentVersions,
+  mergeDocuments,
   previewDocument,
   retryDoc,
   uploadDoc,
@@ -261,6 +262,45 @@ describe('course and document BIGINT APIs', () => {
     expect(defaultForm.get('sourceInfo')).toBeNull()
     expect(configuredForm.get('resourceType')).toBe('COURSEWARE')
     expect(configuredForm.get('sourceInfo')).toBe('教师自编')
+  })
+
+  it('merges documents with string BIGINT identifiers and the requested order', async () => {
+    const document = {
+      id: '9007199254740997',
+      courseId: LARGE_ID,
+      resourceId: '9007199254740997',
+      uploaderId: '9007199254740998',
+      originalName: 'merged.pdf',
+      fileSize: 2048,
+      versionNo: 1,
+      versionStatus: 'CURRENT',
+      resourceType: 'COURSEWARE',
+      sourceInfo: null,
+      status: 'UPLOADED',
+      errorMessage: null,
+      createTime: '2026-11-25T10:00:00',
+    }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(document))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(mergeDocuments(LARGE_ID, {
+      documentIds: ['9007199254740994', '9007199254740995'],
+      filename: 'merged.pdf',
+    })).resolves.toEqual(document)
+
+    expect(capturedUrls(fetchMock)).toEqual([
+      `/api/documents/course/${LARGE_ID}/merge`,
+    ])
+    expect(capturedRequests(fetchMock)).toEqual([
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          documentIds: ['9007199254740994', '9007199254740995'],
+          filename: 'merged.pdf',
+        }),
+      },
+    ])
   })
 
   it('uses authenticated PDF preview and download routes', async () => {

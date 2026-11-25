@@ -60,11 +60,13 @@ describe('knowledge document presentation', () => {
     expect(canRetry(doc('PROCESSING'))).toBe(false)
   })
 
-  it('存在解析中文档时启用轮询', () => {
+  it('存在处理中或删除中的文档时启用轮询', () => {
     expect(hasPendingDocs([doc('READY'), doc('FAILED')])).toBe(false)
     expect(hasPendingDocs([doc('READY'), doc('PARSING')])).toBe(true)
     expect(hasPendingDocs([doc('PROCESSING')])).toBe(true)
     expect(hasPendingDocs([doc('UPLOADED')])).toBe(true)
+    expect(hasPendingDocs([doc('DELETING')])).toBe(true)
+    expect(hasPendingDocs([doc('DELETE_FAILED')])).toBe(false)
   })
 
   it('版本状态映射为可读名称', () => {

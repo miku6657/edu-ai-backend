@@ -3,9 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   batchAssignDocumentTags,
   createCourseChapter,
+  deleteCourseChapter,
   getDocumentTags,
   listDocumentClassifications,
   listCourseChapters,
+  updateCourseChapter,
 } from '@/api/document-classification'
 import { resetApiClient } from '@/api/client'
 
@@ -53,6 +55,8 @@ describe('document classification api', () => {
         chapters: [{ id: chapterId, name: '第一章' }],
         points: [{ id: pointId, name: 'Java集合' }],
       }]))
+      .mockResolvedValueOnce(jsonResponse('章节修改成功'))
+      .mockResolvedValueOnce(jsonResponse('章节删除成功'))
     vi.stubGlobal('fetch', fetchMock)
 
     await expect(listCourseChapters(courseId)).resolves.toEqual([{
@@ -79,6 +83,12 @@ describe('document classification api', () => {
       chapters: [{ id: chapterId, name: '第一章' }],
       points: [{ id: pointId, name: 'Java集合' }],
     }])
+    await expect(updateCourseChapter(courseId, chapterId, {
+      name: '第一章：基础',
+      sortOrder: 2,
+    })).resolves.toBe('章节修改成功')
+    await expect(deleteCourseChapter(courseId, chapterId))
+      .resolves.toBe('章节删除成功')
 
     expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
       `/api/v1/document-classification/courses/${courseId}/chapters`,
@@ -86,6 +96,8 @@ describe('document classification api', () => {
       `/api/v1/document-classification/courses/${courseId}/documents/${documentId}/tags`,
       `/api/v1/document-classification/courses/${courseId}/documents/tags`,
       `/api/v1/document-classification/courses/${courseId}/documents/tags`,
+      `/api/v1/document-classification/courses/${courseId}/chapters/${chapterId}`,
+      `/api/v1/document-classification/courses/${courseId}/chapters/${chapterId}`,
     ])
     const batchRequest = fetchMock.mock.calls[3]?.[1] as RequestInit | undefined
     expect(batchRequest?.method).toBe('PUT')
@@ -94,5 +106,13 @@ describe('document classification api', () => {
       chapterIds: [chapterId],
       pointIds: [pointId],
     }))
+    const updateRequest = fetchMock.mock.calls[5]?.[1] as RequestInit | undefined
+    const deleteRequest = fetchMock.mock.calls[6]?.[1] as RequestInit | undefined
+    expect(updateRequest?.method).toBe('PUT')
+    expect(updateRequest?.body).toBe(JSON.stringify({
+      name: '第一章：基础',
+      sortOrder: 2,
+    }))
+    expect(deleteRequest?.method).toBe('DELETE')
   })
 })

@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import { ElMessageBox } from 'element-plus'
 
 import type { BigIntId } from '@/api/types'
 import type { KnowledgeDoc } from '@/api/knowledge'
 import {
   batchAssignDocumentTags,
   createCourseChapter,
+  deleteCourseChapter,
   getDocumentTags,
   listCourseChapters,
+  updateCourseChapter,
 } from '@/api/document-classification'
 import type { CourseChapter } from '@/api/document-classification'
 import {
@@ -34,6 +37,16 @@ const selectedPoints = ref<BigIntId[]>([])
 
 const chapterName = ref('')
 const chapterOrder = ref(0)
+const editChapterVisible = ref(false)
+const editChapterForm = ref<{
+  id: BigIntId
+  name: string
+  sortOrder: number
+}>({
+  id: '',
+  name: '',
+  sortOrder: 0,
+})
 
 const loading = ref(false)
 const saving = ref(false)
@@ -77,6 +90,14 @@ watch(
     selectedDocs.value = []
     selectedChapters.value = []
     selectedPoints.value = []
+    chapterName.value = ''
+    chapterOrder.value = 0
+    editChapterVisible.value = false
+    editChapterForm.value = {
+      id: '',
+      name: '',
+      sortOrder: 0,
+    }
     void loadClassification()
   },
   { immediate: true },
@@ -113,6 +134,139 @@ async function addChapter(): Promise<void> {
     notifySuccess('章节创建成功')
     emit('changed')
     await loadClassification()
+  } catch (error) {
+    notifyError(error)
+  } finally {
+    saving.value = false
+  }
+}
+
+function openEditChapter(
+  chapter: CourseChapter,
+): void {
+  if (!props.canManage || saving.value) {
+    return
+  }
+
+  editChapterForm.value = {
+    id: chapter.id,
+    name: chapter.name,
+    sortOrder: chapter.sortOrder,
+  }
+
+  editChapterVisible.value = true
+}
+
+async function saveChapterEdit(): Promise<void> {
+  const courseId = props.courseId
+  const form = { ...editChapterForm.value }
+
+  if (
+    !courseId
+    || !props.canManage
+    || saving.value
+  ) {
+    return
+  }
+
+  const name = form.name.trim()
+
+  if (!name || name.length > 200) {
+    notifyWarning('章节名称不能为空且不能超过200个字符')
+    return
+  }
+
+  if (
+    !Number.isInteger(form.sortOrder)
+    || form.sortOrder < 0
+  ) {
+    notifyWarning('章节排序必须为非负整数')
+    return
+  }
+
+  saving.value = true
+
+  try {
+    await updateCourseChapter(
+      courseId,
+      form.id,
+      {
+        name,
+        sortOrder: form.sortOrder,
+      },
+    )
+
+    notifySuccess('章节修改成功')
+    emit('changed')
+
+    if (props.courseId === courseId) {
+      editChapterVisible.value = false
+      await loadClassification()
+    }
+  } catch (error) {
+    notifyError(error)
+  } finally {
+    saving.value = false
+  }
+}
+
+async function removeChapter(
+  chapter: CourseChapter,
+): Promise<void> {
+  const courseId = props.courseId
+
+  if (
+    !courseId
+    || !props.canManage
+    || saving.value
+  ) {
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      `确定删除章节“${chapter.name}”吗？`
+      + '该章节与课程资料的关联也会被清除，'
+      + '但不会删除PDF文件和知识点。',
+      '删除课程章节',
+      {
+        type: 'warning',
+        confirmButtonText: '确认删除',
+        cancelButtonText: '取消',
+      },
+    )
+  } catch {
+    // 用户取消操作。
+    return
+  }
+
+  if (
+    props.courseId !== courseId
+    || !props.canManage
+    || saving.value
+  ) {
+    return
+  }
+
+  saving.value = true
+
+  try {
+    await deleteCourseChapter(
+      courseId,
+      chapter.id,
+    )
+
+    notifySuccess('章节删除成功')
+    emit('changed')
+
+    if (props.courseId === courseId) {
+      selectedChapters.value =
+        selectedChapters.value.filter(
+          id => id !== chapter.id,
+        )
+
+      await loadClassification()
+    }
   } catch (error) {
     notifyError(error)
   } finally {
@@ -226,21 +380,64 @@ async function saveAssignments(): Promise<void> {
       </div>
 
       <div class="classification-section">
-        <h4>章节列表</h4>
+        <div class="chapter-list-heading">
+          <h4>课程章节</h4>
+          <span class="chapter-count">
+            共 {{ chapters.length }} 个章节
+          </span>
+        </div>
 
         <el-empty
-          v-if="chapters.length === 0"
+          v-if="chapters.length === 0 && !loading"
           description="当前还没有课程章节"
           :image-size="65"
         />
 
-        <el-tag
-          v-for="chapter in chapters"
-          :key="chapter.id"
-          style="margin-right: 8px; margin-bottom: 8px"
+        <el-table
+          v-else
+          :data="chapters"
+          row-key="id"
+          size="small"
         >
-          {{ chapter.name }}
-        </el-tag>
+          <el-table-column
+            prop="sortOrder"
+            label="排序"
+            width="75"
+          />
+
+          <el-table-column
+            prop="name"
+            label="章节名称"
+            min-width="180"
+            show-overflow-tooltip
+          />
+
+          <el-table-column
+            v-if="canManage"
+            label="操作"
+            width="145"
+          >
+            <template #default="{ row }">
+              <el-button
+                text
+                type="primary"
+                :disabled="saving || loading"
+                @click="openEditChapter(row)"
+              >
+                编辑
+              </el-button>
+
+              <el-button
+                text
+                type="danger"
+                :disabled="saving || loading"
+                @click="removeChapter(row)"
+              >
+                删除
+              </el-button>
+            </template>
+          </el-table-column>
+        </el-table>
       </div>
 
       <div v-if="canManage" class="classification-section">
@@ -328,6 +525,61 @@ async function saveAssignments(): Promise<void> {
         </el-form>
       </div>
     </template>
+
+    <el-dialog
+      v-model="editChapterVisible"
+      title="编辑课程章节"
+      width="min(480px, 92vw)"
+      append-to-body
+      :close-on-click-modal="!saving"
+      :close-on-press-escape="!saving"
+      :show-close="!saving"
+    >
+      <el-form label-width="90px">
+        <el-form-item label="章节名称" required>
+          <el-input
+            v-model="editChapterForm.name"
+            maxlength="200"
+            show-word-limit
+            :disabled="saving"
+            placeholder="请输入章节名称"
+          />
+        </el-form-item>
+
+        <el-form-item label="章节排序" required>
+          <el-input-number
+            v-model="editChapterForm.sortOrder"
+            :min="0"
+            :max="2147483647"
+            :step="1"
+            :precision="0"
+            :disabled="saving"
+          />
+        </el-form-item>
+
+        <p class="chapter-edit-hint">
+          排序数值越小，章节显示越靠前。
+          修改名称和排序不会影响已有PDF及知识点关联。
+        </p>
+      </el-form>
+
+      <template #footer>
+        <el-button
+          :disabled="saving"
+          @click="editChapterVisible = false"
+        >
+          取消
+        </el-button>
+
+        <el-button
+          type="primary"
+          :loading="saving"
+          @click="saveChapterEdit"
+        >
+          保存修改
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -357,6 +609,25 @@ async function saveAssignments(): Promise<void> {
 .classification-section h4 {
   margin: 0;
   font-size: 14px;
+}
+
+.chapter-list-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.chapter-count {
+  font-size: 12px;
+  color: var(--sc-text-secondary);
+}
+
+.chapter-edit-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--sc-text-secondary);
 }
 
 .classification-section :deep(.el-form-item) {

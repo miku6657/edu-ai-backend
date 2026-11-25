@@ -52,12 +52,16 @@ export function canRetry(doc: KnowledgeDoc): boolean {
   return doc.status === 'FAILED'
 }
 
-/** 存在待解析/解析中文档时需要轮询刷新，让异步结果自动出现在页面上。 */
-export function hasPendingDocs(docs: KnowledgeDoc[]): boolean {
-  return docs.some((doc) =>
-    doc.status === 'UPLOADED'
-    || doc.status === 'PARSING'
-    || doc.status === 'PROCESSING',
+/** 异步处理中或待清理的文档需要轮询刷新状态。 */
+export function hasPendingDocs(
+  docs: KnowledgeDoc[],
+): boolean {
+  return docs.some(
+    doc =>
+      doc.status === 'UPLOADED'
+      || doc.status === 'PARSING'
+      || doc.status === 'PROCESSING'
+      || doc.status === 'DELETING',
   )
 }
 

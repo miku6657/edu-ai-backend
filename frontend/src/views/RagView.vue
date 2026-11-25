@@ -18,6 +18,7 @@ import { ElMessageBox } from 'element-plus'
 import { listAccessibleCourses } from '@/api/course-access'
 import type { Course } from '@/api/course'
 import type { BigIntId } from '@/api/types'
+import type { KnowledgeDoc } from '@/api/knowledge'
 import { ApiError } from '@/api/error'
 import { clearMessages, listMessages, streamRagQa } from '@/api/rag'
 import type {
@@ -31,6 +32,7 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useCourseStore } from '@/stores/course'
 import { notifyError, notifySuccess, notifyWarning } from '@/utils/notify'
+import DocumentPreviewDialog from '@/views/knowledge/DocumentPreviewDialog.vue'
 import {
   recentChatPairs,
   relativeTimeLabel,
@@ -78,6 +80,10 @@ interface FocusableInput {
 const courses = ref<Course[]>([])
 const selectedCourseId = ref<BigIntId | null>(courseStore.selectedCourseId)
 const messages = ref<UiMessage[]>([])
+const citationPreviewVisible = ref(false)
+const citationPreviewDocument = ref<
+  Pick<KnowledgeDoc, 'id' | 'originalName'> | null
+>(null)
 const historyItems = ref<ChatHistoryMessage[]>([])
 const query = ref('')
 const loadingCourses = ref(true)
@@ -152,6 +158,8 @@ function handleCourseChange(): void {
 
 async function onCourseChange(): Promise<void> {
   stopStreaming()
+  citationPreviewVisible.value = false
+  citationPreviewDocument.value = null
   courseStore.select(selectedCourseId.value)
   messages.value = []
   historyItems.value = []
@@ -394,6 +402,42 @@ function citationKey(citation: RagCitation): string {
   return `${citation.parent_chunk_id}-${citation.page_start}`
 }
 
+function outdatedCitations(message: UiMessage): RagCitation[] {
+  const seen = new Set<string>()
+
+  return (message.citations ?? []).filter((citation) => {
+    if (!citation.version?.outdated || seen.has(citation.doc_id)) {
+      return false
+    }
+
+    seen.add(citation.doc_id)
+    return true
+  })
+}
+
+function previewOriginalCitation(citation: RagCitation): void {
+  citationPreviewDocument.value = {
+    id: citation.doc_id,
+    originalName: citation.doc_name,
+  }
+  citationPreviewVisible.value = true
+}
+
+function previewCurrentCitation(citation: RagCitation): void {
+  const version = citation.version
+
+  if (!version?.currentDocumentId) {
+    notifyWarning('当前没有可预览的新版本')
+    return
+  }
+
+  citationPreviewDocument.value = {
+    id: version.currentDocumentId,
+    originalName: version.currentDocumentName || citation.doc_name,
+  }
+  citationPreviewVisible.value = true
+}
+
 function inlineSegments(message: UiMessage): InlineSegment[] {
   return splitInlineCitations(message.content, message.citations)
 }
@@ -595,6 +639,44 @@ function relativeTime(value: string): string {
                 </div>
 
                 <div
+                  v-if="outdatedCitations(message).length > 0"
+                  class="rag-version-notice"
+                >
+                  <div class="rag-version-notice-title">
+                    <el-tag type="warning" size="small">
+                      资料已更新
+                    </el-tag>
+                    <strong>本回答引用了旧版本课程资料</strong>
+                  </div>
+
+                  <div
+                    v-for="citation in outdatedCitations(message)"
+                    :key="citation.doc_id"
+                    class="rag-version-notice-item"
+                  >
+                    <p>
+                      《{{ citation.doc_name }}》
+                      V{{ citation.version?.versionNo }}
+                      已更新至
+                      V{{ citation.version?.currentVersionNo }}。
+                    </p>
+                    <el-button
+                      text
+                      type="primary"
+                      size="small"
+                      @click="previewCurrentCitation(citation)"
+                    >
+                      查看最新版本
+                    </el-button>
+                  </div>
+
+                  <p class="rag-version-notice-hint">
+                    此回答生成时使用的是旧版资料，
+                    建议结合最新课程资料重新提问。
+                  </p>
+                </div>
+
+                <div
                   v-if="message.citations !== null && message.citations.length > 0"
                   class="rag-citations"
                 >
@@ -615,10 +697,59 @@ function relativeTime(value: string): string {
                       </span>
                     </summary>
                     <div class="rag-citation-body">
-                      <p v-if="citation.section_title" class="rag-citation-section">
+                      <p
+                        v-if="citation.section_title"
+                        class="rag-citation-section"
+                      >
                         {{ citation.section_title }}
                       </p>
-                      <p v-if="citation.content">{{ citation.content }}</p>
+
+                      <p v-if="citation.content">
+                        {{ citation.content }}
+                      </p>
+
+                      <div
+                        v-if="citation.version"
+                        class="rag-citation-version"
+                      >
+                        <span>
+                          引用版本：V{{ citation.version.versionNo }}
+                        </span>
+                        <el-tag
+                          v-if="citation.version.outdated"
+                          type="warning"
+                          size="small"
+                        >
+                          历史版本
+                        </el-tag>
+                        <el-tag
+                          v-else-if="citation.version.versionStatus === 'CURRENT'"
+                          type="success"
+                          size="small"
+                        >
+                          当前版本
+                        </el-tag>
+                      </div>
+
+                      <div class="rag-citation-actions">
+                        <el-button
+                          text
+                          type="primary"
+                          size="small"
+                          @click="previewOriginalCitation(citation)"
+                        >
+                          查看原始引用
+                        </el-button>
+                        <el-button
+                          v-if="citation.version?.outdated"
+                          text
+                          type="primary"
+                          size="small"
+                          @click="previewCurrentCitation(citation)"
+                        >
+                          查看最新版本
+                        </el-button>
+                      </div>
                     </div>
                   </details>
                 </div>
@@ -735,6 +866,11 @@ function relativeTime(value: string): string {
         <p>学习不是一场冲刺<br />而是一段持续积累的旅程</p>
       </div>
     </aside>
+
+    <DocumentPreviewDialog
+      v-model="citationPreviewVisible"
+      :document="citationPreviewDocument"
+    />
   </div>
 </template>
 
@@ -1429,5 +1565,65 @@ function relativeTime(value: string): string {
   .rag-composer__hint {
     display: none;
   }
+}
+
+.rag-version-notice {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid var(--el-color-warning-light-5);
+  border-radius: 8px;
+  background: var(--el-color-warning-light-9);
+}
+
+.rag-version-notice-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.rag-version-notice-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.rag-version-notice-item p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+.rag-version-notice-hint {
+  margin: 0;
+  color: var(--sc-text-secondary);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.rag-citation-version {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.rag-citation-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.rag-citation-actions :deep(.el-button) {
+  margin-left: 0;
 }
 </style>

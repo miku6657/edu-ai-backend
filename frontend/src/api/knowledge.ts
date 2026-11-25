@@ -218,3 +218,24 @@ export function versionStatusLabel(
       return '未知状态'
   }
 }
+
+export interface MergeDocumentsRequest {
+  documentIds: BigIntId[]
+  filename: string
+}
+
+/**
+ * 合并同类型课程PDF。
+ */
+export function mergeDocuments(
+  courseId: BigIntId,
+  data: MergeDocumentsRequest,
+): Promise<KnowledgeDoc> {
+  return apiRequest<KnowledgeDoc>(
+    `/documents/course/${encodeURIComponent(courseId)}/merge`,
+    {
+      method: 'POST',
+      body: data,
+    },
+  )
+}

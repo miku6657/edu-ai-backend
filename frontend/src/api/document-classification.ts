@@ -94,3 +94,38 @@ export function listDocumentClassifications(
     `${courseUrl(courseId)}/documents/tags`,
   )
 }
+
+/**
+ * 修改课程章节。
+ */
+export function updateCourseChapter(
+  courseId: BigIntId,
+  chapterId: BigIntId,
+  data: {
+    name: string
+    sortOrder: number
+  },
+): Promise<string> {
+  return apiRequest<string>(
+    `${courseUrl(courseId)}/chapters/${encodeURIComponent(chapterId)}`,
+    {
+      method: 'PUT',
+      body: data,
+    },
+  )
+}
+
+/**
+ * 删除课程章节。
+ */
+export function deleteCourseChapter(
+  courseId: BigIntId,
+  chapterId: BigIntId,
+): Promise<string> {
+  return apiRequest<string>(
+    `${courseUrl(courseId)}/chapters/${encodeURIComponent(chapterId)}`,
+    {
+      method: 'DELETE',
+    },
+  )
+}

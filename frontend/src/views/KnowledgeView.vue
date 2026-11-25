@@ -38,6 +38,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useCourseStore } from '@/stores/course'
 import { notifyError, notifySuccess, notifyWarning } from '@/utils/notify'
 import DocumentClassificationPanel from '@/views/knowledge/DocumentClassificationPanel.vue'
+import DocumentMergeDialog from '@/views/knowledge/DocumentMergeDialog.vue'
 import DocumentPreviewDialog from '@/views/knowledge/DocumentPreviewDialog.vue'
 import DocumentVersionDialog from '@/views/knowledge/DocumentVersionDialog.vue'
 import {
@@ -88,6 +89,7 @@ const previewDoc = ref<
 >(null)
 const versionDialogVisible = ref(false)
 const versionDocument = ref<KnowledgeDoc | null>(null)
+const mergeDialogVisible = ref(false)
 const resourceFilterOptions = [
   { value: '', label: '全部类型' },
   ...RESOURCE_TYPE_OPTIONS.filter(
@@ -215,6 +217,27 @@ const pendingCount = computed(
   () => docs.value.filter(doc => hasPendingDocs([doc])).length,
 )
 
+const mergeableCount = computed(() => {
+  const counts = new Map<string, number>()
+
+  for (const doc of docs.value) {
+    if (
+      doc.courseId !== selectedCourseId.value
+      || doc.status !== 'READY'
+      || doc.versionStatus !== 'CURRENT'
+    ) {
+      continue
+    }
+
+    counts.set(
+      doc.resourceType,
+      (counts.get(doc.resourceType) ?? 0) + 1,
+    )
+  }
+
+  return [...counts.values()].some(count => count >= 2)
+})
+
 const statusOptions: Array<{ value: DocumentStatus | ''; label: string }> = [
   { value: '', label: '全部课件' },
   { value: 'UPLOADED', label: '待解析' },
@@ -243,6 +266,7 @@ watch(
     previewDoc.value = null
     versionDialogVisible.value = false
     versionDocument.value = null
+    mergeDialogVisible.value = false
     void loadResourceClassifications()
   },
   { immediate: true },
@@ -391,6 +415,28 @@ async function loadResourceClassifications(): Promise<void> {
     chapters.value = chapterResult
     knowledgePoints.value = pointResult
     documentClassifications.value = classificationResult
+
+    if (
+      filterChapterId.value
+      && !chapterResult.some(
+        chapter =>
+          String(chapter.id) ===
+          String(filterChapterId.value),
+      )
+    ) {
+      filterChapterId.value = ''
+    }
+
+    if (
+      filterPointId.value
+      && !pointResult.some(
+        point =>
+          String(point.id) ===
+          String(filterPointId.value),
+      )
+    ) {
+      filterPointId.value = ''
+    }
   } catch (error) {
     if (version !== classificationVersion) {
       return
@@ -580,8 +626,14 @@ function canRetry(doc: KnowledgeDoc): boolean {
 }
 
 function canDelete(doc: KnowledgeDoc): boolean {
+  // 历史资源不能通过普通接口删除。
   if (doc.versionStatus === 'HISTORY') {
     return false
+  }
+
+  // 删除失败的文档允许重新发起删除。
+  if (doc.status === 'DELETE_FAILED') {
+    return true
   }
 
   if (
@@ -741,6 +793,16 @@ function documentTone(doc: KnowledgeDoc): Tone {
                   />
                 </el-select>
                 <el-button size="small" :disabled="loadingDocs" @click="loadDocs">刷新</el-button>
+                <el-button
+                  v-if="canManageDocuments"
+                  size="small"
+                  type="primary"
+                  plain
+                  :disabled="!mergeableCount || loadingDocs"
+                  @click="mergeDialogVisible = true"
+                >
+                  合并资料
+                </el-button>
                 <el-button
                   v-if="canManageDocuments"
                   type="primary"
@@ -1145,7 +1207,11 @@ function documentTone(doc: KnowledgeDoc): Tone {
                         :loading="actionDocId === row.id"
                         @click="onDelete(row)"
                       >
-                        删除
+                        {{
+                          row.status === 'DELETE_FAILED'
+                            ? '重新删除'
+                            : '删除'
+                        }}
                       </el-button>
 
                       <span
@@ -1176,6 +1242,12 @@ function documentTone(doc: KnowledgeDoc): Tone {
         </BaseCard>
       </section>
     </div>
+    <DocumentMergeDialog
+      v-model="mergeDialogVisible"
+      :course-id="selectedCourseId"
+      :documents="docs"
+      @changed="loadDocs"
+    />
     <DocumentVersionDialog
       v-model="versionDialogVisible"
       :document="versionDocument"
