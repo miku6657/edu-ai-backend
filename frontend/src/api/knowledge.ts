@@ -4,11 +4,17 @@ import type { BigIntId } from '@/api/types'
 export type DocumentStatus =
   | 'UPLOADED'
   | 'PARSING'
+  | 'PROCESSING'
   | 'READY'
   | 'FAILED'
   | 'DELETING'
   | 'DELETE_FAILED'
   | 'DELETED'
+
+export type DocumentVersionStatus =
+  | 'PENDING'
+  | 'CURRENT'
+  | 'HISTORY'
 
 export type ResourceType =
   | 'LESSON_PLAN'
@@ -41,9 +47,12 @@ export function resourceTypeLabel(
 export interface KnowledgeDoc {
   id: BigIntId
   courseId: BigIntId
+  resourceId: BigIntId
   uploaderId: BigIntId
   originalName: string
   fileSize: number
+  versionNo: number
+  versionStatus: DocumentVersionStatus
 
   resourceType: ResourceType
   sourceInfo: string | null
@@ -146,4 +155,66 @@ export function downloadDocumentFile(
     `/documents/${encodeURIComponent(documentId)}/download`,
     signal,
   )
+}
+
+/**
+ * 文档版本信息。
+ */
+export interface DocumentVersion {
+  documentId: BigIntId
+  resourceId: BigIntId
+  versionNo: number
+  originalName: string
+  versionStatus: DocumentVersionStatus
+  status: DocumentStatus
+  uploaderId: BigIntId
+  createTime: string
+}
+
+/**
+ * 查询资源的全部版本。
+ */
+export function listDocumentVersions(
+  documentId: BigIntId,
+): Promise<DocumentVersion[]> {
+  return apiRequest<DocumentVersion[]>(
+    `/documents/${encodeURIComponent(documentId)}/versions`,
+  )
+}
+
+/**
+ * 上传已有资源的新版本。
+ */
+export function uploadDocumentVersion(
+  documentId: BigIntId,
+  file: File,
+): Promise<KnowledgeDoc> {
+  const form = new FormData()
+  form.append('file', file)
+
+  return apiRequest<KnowledgeDoc>(
+    `/documents/${encodeURIComponent(documentId)}/versions`,
+    {
+      method: 'POST',
+      formData: form,
+    },
+  )
+}
+
+/**
+ * 版本状态显示名称。
+ */
+export function versionStatusLabel(
+  status: DocumentVersionStatus,
+): string {
+  switch (status) {
+    case 'CURRENT':
+      return '当前版本'
+    case 'HISTORY':
+      return '历史版本'
+    case 'PENDING':
+      return '待生效版本'
+    default:
+      return '未知状态'
+  }
 }

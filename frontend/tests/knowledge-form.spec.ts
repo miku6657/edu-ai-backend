@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { KnowledgeDoc } from '@/api/knowledge'
+import { versionStatusLabel } from '@/api/knowledge'
 import {
   canDelete,
   canRetry,
@@ -16,9 +17,12 @@ function doc(status: KnowledgeDoc['status']): KnowledgeDoc {
   return {
     id: '50001',
     courseId: '2001',
+    resourceId: '50001',
     uploaderId: '10001',
     originalName: 'a.pdf',
     fileSize: 1024,
+    versionNo: 1,
+    versionStatus: status === 'READY' ? 'CURRENT' : 'PENDING',
     resourceType: 'COURSEWARE',
     sourceInfo: null,
     status,
@@ -31,12 +35,14 @@ describe('knowledge document presentation', () => {
   it('状态映射为可读文案与标签类型', () => {
     expect(documentStatusLabel('UPLOADED')).toBe('待解析')
     expect(documentStatusLabel('PARSING')).toBe('解析中')
+    expect(documentStatusLabel('PROCESSING')).toBe('解析中')
     expect(documentStatusLabel('READY')).toBe('就绪')
     expect(documentStatusLabel('FAILED')).toBe('失败')
     expect(documentStatusLabel('DELETING')).toBe('删除中')
     expect(documentStatusLabel('DELETE_FAILED')).toBe('删除失败')
     expect(documentStatusLabel('DELETED')).toBe('已删除')
     expect(documentStatusTagType('READY')).toBe('success')
+    expect(documentStatusTagType('PROCESSING')).toBe('warning')
     expect(documentStatusTagType('FAILED')).toBe('danger')
     expect(documentStatusTagType('DELETE_FAILED')).toBe('danger')
   })
@@ -51,12 +57,20 @@ describe('knowledge document presentation', () => {
     expect(canRetry(doc('FAILED'))).toBe(true)
     expect(canRetry(doc('READY'))).toBe(false)
     expect(canRetry(doc('PARSING'))).toBe(false)
+    expect(canRetry(doc('PROCESSING'))).toBe(false)
   })
 
   it('存在解析中文档时启用轮询', () => {
     expect(hasPendingDocs([doc('READY'), doc('FAILED')])).toBe(false)
     expect(hasPendingDocs([doc('READY'), doc('PARSING')])).toBe(true)
+    expect(hasPendingDocs([doc('PROCESSING')])).toBe(true)
     expect(hasPendingDocs([doc('UPLOADED')])).toBe(true)
+  })
+
+  it('版本状态映射为可读名称', () => {
+    expect(versionStatusLabel('CURRENT')).toBe('当前版本')
+    expect(versionStatusLabel('HISTORY')).toBe('历史版本')
+    expect(versionStatusLabel('PENDING')).toBe('待生效版本')
   })
 
   it('快速切换课程时旧请求序号失效', () => {

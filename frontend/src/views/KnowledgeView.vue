@@ -22,6 +22,7 @@ import {
   resourceTypeLabel,
   retryDoc,
   uploadDoc,
+  versionStatusLabel,
 } from '@/api/knowledge'
 import type {
   KnowledgeDoc,
@@ -38,10 +39,12 @@ import { useCourseStore } from '@/stores/course'
 import { notifyError, notifySuccess, notifyWarning } from '@/utils/notify'
 import DocumentClassificationPanel from '@/views/knowledge/DocumentClassificationPanel.vue'
 import DocumentPreviewDialog from '@/views/knowledge/DocumentPreviewDialog.vue'
+import DocumentVersionDialog from '@/views/knowledge/DocumentVersionDialog.vue'
 import {
   documentStatusLabel,
   documentStatusTagType,
   formatFileSize,
+  hasPendingDocs,
   uploadFileError,
   UPLOAD_ACCEPT,
 } from '@/views/knowledge/knowledge-form'
@@ -49,7 +52,7 @@ import {
 /**
  * 课程知识库（P3，参考图 `docs/ui_picture/我的课程.png` 与基调图中的知识库页）。
  *
- * 所有文档状态、计数、诊断与操作都来自真实接口；上传成功后是 `UPLOADED`/`PARSING`，
+ * 所有文档状态、计数、诊断与操作都来自真实接口；上传成功后进入异步解析状态，
  * 不在前端伪造 `READY`。新增拖拽上传区，仍复用同一套 `uploadDoc` 与文件校验。
  */
 type Tone = 'primary' | 'success' | 'warning' | 'danger' | 'neutral'
@@ -80,7 +83,11 @@ const documentClassifications = ref<DocumentClassification[]>([])
 const classificationLoading = ref(false)
 const classificationError = ref('')
 const previewVisible = ref(false)
-const previewDoc = ref<KnowledgeDoc | null>(null)
+const previewDoc = ref<
+  Pick<KnowledgeDoc, 'id' | 'originalName'> | null
+>(null)
+const versionDialogVisible = ref(false)
+const versionDocument = ref<KnowledgeDoc | null>(null)
 const resourceFilterOptions = [
   { value: '', label: '全部类型' },
   ...RESOURCE_TYPE_OPTIONS.filter(
@@ -99,6 +106,25 @@ const POLL_INTERVAL_MS = 4000
 let pollTimer: number | null = null
 let classificationVersion = 0
 let classificationDocumentKey: string | null = null
+
+const resourceVersionKey = computed(() => {
+  const resourceId = versionDocument.value?.resourceId
+
+  if (!resourceId) {
+    return ''
+  }
+
+  return docs.value
+    .filter(doc => doc.resourceId === resourceId)
+    .map(doc => [
+      doc.id,
+      doc.status,
+      doc.versionStatus,
+      doc.versionNo,
+    ].join(':'))
+    .sort()
+    .join('|')
+})
 
 const compactQuery =
   typeof window === 'undefined' ? null : window.matchMedia('(max-width: 640px)')
@@ -186,18 +212,14 @@ const visibleDocs = computed(() => {
 })
 
 const pendingCount = computed(
-  () =>
-    docs.value.filter(
-      (doc) =>
-        doc.status === 'UPLOADED' ||
-          doc.status === 'PARSING',
-    ).length,
+  () => docs.value.filter(doc => hasPendingDocs([doc])).length,
 )
 
 const statusOptions: Array<{ value: DocumentStatus | ''; label: string }> = [
   { value: '', label: '全部课件' },
   { value: 'UPLOADED', label: '待解析' },
   { value: 'PARSING', label: '解析中' },
+  { value: 'PROCESSING', label: '解析中' },
   { value: 'READY', label: '已就绪' },
   { value: 'FAILED', label: '处理失败' },
   { value: 'DELETING', label: '删除中' },
@@ -219,6 +241,8 @@ watch(
     classificationDocumentKey = null
     previewVisible.value = false
     previewDoc.value = null
+    versionDialogVisible.value = false
+    versionDocument.value = null
     void loadResourceClassifications()
   },
   { immediate: true },
@@ -406,6 +430,27 @@ function openPreview(doc: KnowledgeDoc): void {
   previewVisible.value = true
 }
 
+function openVersionManager(doc: KnowledgeDoc): void {
+  if (!canManageDocuments.value) {
+    notifyWarning('无权管理课程资源版本')
+    return
+  }
+
+  versionDocument.value = doc
+  versionDialogVisible.value = true
+}
+
+function openHistoricalPreview(
+  doc: Pick<KnowledgeDoc, 'id' | 'originalName'>,
+): void {
+  previewDoc.value = doc
+  previewVisible.value = true
+}
+
+async function onVersionChanged(): Promise<void> {
+  await loadDocs()
+}
+
 function resetResourceFilters(): void {
   searchKeyword.value = ''
   filterStatus.value = ''
@@ -535,8 +580,32 @@ function canRetry(doc: KnowledgeDoc): boolean {
 }
 
 function canDelete(doc: KnowledgeDoc): boolean {
-  return doc.status !== 'DELETING' &&
-    doc.status !== 'DELETED'
+  if (doc.versionStatus === 'HISTORY') {
+    return false
+  }
+
+  if (
+    doc.status === 'DELETING'
+    || doc.status === 'DELETED'
+    || doc.status === 'PROCESSING'
+    || doc.status === 'PARSING'
+  ) {
+    return false
+  }
+
+  if (
+    doc.versionStatus === 'CURRENT'
+    && docs.value.some(
+      other =>
+        other.id !== doc.id
+        && other.resourceId === doc.resourceId
+        && other.status !== 'DELETED',
+    )
+  ) {
+    return false
+  }
+
+  return true
 }
 
 function documentTone(doc: KnowledgeDoc): Tone {
@@ -980,6 +1049,29 @@ function documentTone(doc: KnowledgeDoc): Tone {
                     {{ row.uploaderId }}
                   </template>
                 </el-table-column>
+                <el-table-column
+                  label="版本"
+                  :width="compact ? 90 : 125"
+                >
+                  <template #default="{ row }">
+                    <div class="resource-version-cell">
+                      <strong>V{{ row.versionNo }}</strong>
+
+                      <el-tag
+                        :type="
+                          row.versionStatus === 'CURRENT'
+                            ? 'success'
+                            : row.versionStatus === 'PENDING'
+                              ? 'warning'
+                              : 'info'
+                        "
+                        size="small"
+                      >
+                        {{ versionStatusLabel(row.versionStatus) }}
+                      </el-tag>
+                    </div>
+                  </template>
+                </el-table-column>
                 <el-table-column label="状态" :width="compact ? 85 : 100">
                   <template #default="{ row }">
                     <TagBadge
@@ -1007,48 +1099,69 @@ function documentTone(doc: KnowledgeDoc): Tone {
                 </el-table-column>
                 <el-table-column
                   label="操作"
-                  :width="compact ? 160 : 210"
+                  :width="compact ? 180 : 260"
                   fixed="right"
                 >
                   <template #default="{ row }">
-                    <el-button
-                      v-if="row.status === 'READY'"
-                      text
-                      type="primary"
-                      @click="openPreview(row)"
-                    >
-                      预览
-                    </el-button>
-                    <el-button
-                      v-if="canManageDocuments && canRetry(row)"
-                      text
-                      type="primary"
-                      :loading="actionDocId === row.id"
-                      @click="onRetry(row)"
-                    >
-                      重试
-                    </el-button>
-                    <el-button
-                      v-if="canManageDocuments && canDelete(row)"
-                      text
-                      type="danger"
-                      :loading="actionDocId === row.id"
-                      @click="onDelete(row)"
-                    >
-                      删除
-                    </el-button>
-                    <span
-                      v-if="row.status === 'DELETING'"
-                      class="knowledge-muted"
-                    >
-                      清理中
-                    </span>
-                    <span
-                      v-if="!canManageDocuments && row.status !== 'READY'"
-                      class="knowledge-muted"
-                    >
-                      暂不可预览
-                    </span>
+                    <div class="resource-row-actions">
+                      <el-button
+                        v-if="row.status === 'READY'"
+                        text
+                        type="primary"
+                        @click="openPreview(row)"
+                      >
+                        预览
+                      </el-button>
+
+                      <el-button
+                        v-if="
+                          canManageDocuments &&
+                          (
+                            row.versionStatus === 'CURRENT' ||
+                            row.versionStatus === 'PENDING'
+                          )
+                        "
+                        text
+                        type="primary"
+                        @click="openVersionManager(row)"
+                      >
+                        版本管理
+                      </el-button>
+
+                      <el-button
+                        v-if="canManageDocuments && canRetry(row)"
+                        text
+                        type="primary"
+                        :loading="actionDocId === row.id"
+                        @click="onRetry(row)"
+                      >
+                        重试
+                      </el-button>
+
+                      <el-button
+                        v-if="canManageDocuments && canDelete(row)"
+                        text
+                        type="danger"
+                        :loading="actionDocId === row.id"
+                        @click="onDelete(row)"
+                      >
+                        删除
+                      </el-button>
+
+                      <span
+                        v-if="row.status === 'DELETING'"
+                        class="knowledge-muted"
+                      >
+                        清理中
+                      </span>
+
+                      <span
+                        v-if="!canManageDocuments && row.status !== 'READY'"
+                        class="knowledge-muted"
+                      >
+                        暂不可预览
+                      </span>
+                    </div>
                   </template>
                 </el-table-column>
               </el-table>
@@ -1063,6 +1176,14 @@ function documentTone(doc: KnowledgeDoc): Tone {
         </BaseCard>
       </section>
     </div>
+    <DocumentVersionDialog
+      v-model="versionDialogVisible"
+      :document="versionDocument"
+      :can-manage="canManageDocuments"
+      :refresh-key="resourceVersionKey"
+      @changed="onVersionChanged"
+      @preview="openHistoricalPreview"
+    />
     <DocumentPreviewDialog
       v-model="previewVisible"
       :document="previewDoc"
@@ -1606,5 +1727,27 @@ function documentTone(doc: KnowledgeDoc): Tone {
     flex: 1;
     min-width: 130px;
   }
+}
+
+.resource-version-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+}
+
+.resource-version-cell strong {
+  font-size: 13px;
+}
+
+.resource-row-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+
+.resource-row-actions :deep(.el-button) {
+  margin-left: 0;
 }
 </style>

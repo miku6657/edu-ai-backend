@@ -10,7 +10,10 @@ import { notifyError } from '@/utils/notify'
 
 const props = defineProps<{
   modelValue: boolean
-  document: KnowledgeDoc | null
+  document: Pick<
+    KnowledgeDoc,
+    'id' | 'originalName'
+  > | null
 }>()
 
 const emit = defineEmits<{

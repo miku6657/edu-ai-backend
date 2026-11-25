@@ -20,9 +20,11 @@ import {
   deleteDoc,
   downloadDocumentFile,
   listDocs,
+  listDocumentVersions,
   previewDocument,
   retryDoc,
   uploadDoc,
+  uploadDocumentVersion,
 } from '@/api/knowledge'
 import { resetApiClient } from '@/api/client'
 
@@ -196,9 +198,12 @@ describe('course and document BIGINT APIs', () => {
     const document = {
       id: LARGE_ID,
       courseId: LARGE_ID,
+      resourceId: LARGE_ID,
       uploaderId: LARGE_ID,
       originalName: 'lecture.pdf',
       fileSize: 1024,
+      versionNo: 2,
+      versionStatus: 'PENDING',
       resourceType: 'COURSEWARE',
       sourceInfo: '教师自编',
       status: 'PARSING',
@@ -226,9 +231,12 @@ describe('course and document BIGINT APIs', () => {
     const document = {
       id: LARGE_ID,
       courseId: LARGE_ID,
+      resourceId: LARGE_ID,
       uploaderId: LARGE_ID,
       originalName: 'lecture.pdf',
       fileSize: 1024,
+      versionNo: 2,
+      versionStatus: 'PENDING',
       resourceType: 'COURSEWARE',
       sourceInfo: '教师自编',
       status: 'UPLOADED',
@@ -271,5 +279,51 @@ describe('course and document BIGINT APIs', () => {
       `/api/documents/${LARGE_ID}/preview`,
       `/api/documents/${LARGE_ID}/download`,
     ])
+  })
+
+  it('lists and uploads resource versions without converting BIGINT identifiers', async () => {
+    const version = {
+      documentId: LARGE_ID,
+      resourceId: '9007199254740994',
+      versionNo: 1,
+      originalName: 'lecture.pdf',
+      versionStatus: 'CURRENT',
+      status: 'READY',
+      uploaderId: '9007199254740995',
+      createTime: '2026-11-25T10:00:00',
+    }
+    const uploaded = {
+      id: '9007199254740996',
+      courseId: '2001',
+      resourceId: version.resourceId,
+      uploaderId: version.uploaderId,
+      originalName: 'lecture-v2.pdf',
+      fileSize: 1024,
+      versionNo: 2,
+      versionStatus: 'PENDING',
+      resourceType: 'COURSEWARE',
+      sourceInfo: null,
+      status: 'PROCESSING',
+      errorMessage: null,
+      createTime: version.createTime,
+    }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([version]))
+      .mockResolvedValueOnce(jsonResponse(uploaded))
+    vi.stubGlobal('fetch', fetchMock)
+    const file = new File(['pdf'], 'lecture-v2.pdf', { type: 'application/pdf' })
+
+    await expect(listDocumentVersions(LARGE_ID)).resolves.toEqual([version])
+    await expect(uploadDocumentVersion(LARGE_ID, file)).resolves.toEqual(uploaded)
+
+    expect(capturedUrls(fetchMock)).toEqual([
+      `/api/documents/${LARGE_ID}/versions`,
+      `/api/documents/${LARGE_ID}/versions`,
+    ])
+    expect(capturedRequests(fetchMock)[1]).toEqual({
+      method: 'POST',
+      body: undefined,
+    })
+    expect(capturedFormData(fetchMock, 1).get('file')).toBeInstanceOf(File)
   })
 })

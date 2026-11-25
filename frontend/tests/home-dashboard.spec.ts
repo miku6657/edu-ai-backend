@@ -90,9 +90,12 @@ function doc(id: string, overrides: Partial<KnowledgeDoc> = {}): KnowledgeDoc {
   return {
     id,
     courseId: 'c1',
+    resourceId: id,
     uploaderId: '10001',
     originalName: `课件 ${id}.pdf`,
     fileSize: 1024,
+    versionNo: 1,
+    versionStatus: 'CURRENT',
     resourceType: 'COURSEWARE',
     sourceInfo: null,
     status: 'READY',

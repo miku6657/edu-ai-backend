@@ -10,6 +10,8 @@ export function documentStatusLabel(status: DocumentStatus): string {
       return '待解析'
     case 'PARSING':
       return '解析中'
+    case 'PROCESSING':
+      return '解析中'
     case 'READY':
       return '就绪'
     case 'FAILED':
@@ -33,6 +35,7 @@ export function documentStatusTagType(status: DocumentStatus): TagType {
     case 'DELETE_FAILED':
       return 'danger'
     case 'PARSING':
+    case 'PROCESSING':
     case 'UPLOADED':
       return 'warning'
     default:
@@ -51,7 +54,11 @@ export function canRetry(doc: KnowledgeDoc): boolean {
 
 /** 存在待解析/解析中文档时需要轮询刷新，让异步结果自动出现在页面上。 */
 export function hasPendingDocs(docs: KnowledgeDoc[]): boolean {
-  return docs.some((doc) => doc.status === 'UPLOADED' || doc.status === 'PARSING')
+  return docs.some((doc) =>
+    doc.status === 'UPLOADED'
+    || doc.status === 'PARSING'
+    || doc.status === 'PROCESSING',
+  )
 }
 
 export function formatFileSize(bytes: number): string {
