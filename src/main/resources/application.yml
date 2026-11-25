@@ -28,7 +28,7 @@ ai:
     internal-key: ${AI_INTERNAL_KEY}
   platform-config-user-id: ${AI_PLATFORM_CONFIG_USER_ID:0}
   document:
-    version-upload-enabled: false
+    version-upload-enabled: true
   model:
     ollama-allowed-hosts: ${OLLAMA_ALLOWED_HOSTS:localhost,127.0.0.1}
 
