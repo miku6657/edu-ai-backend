@@ -583,11 +583,28 @@ def search_course_by_collection(
     metadatas = result.get("metadatas") or [[]]
     distances = result.get("distances") or [[]]
 
+    allowed_set = set(allowed_ids)
+
     hits = []
     for doc, meta, dist in zip(documents[0], metadatas[0], distances[0]):
+        if not meta or not doc:
+            continue
+
+        document_id = str(meta.get("document_id"))
+
+        if document_id not in allowed_set:
+            continue
+
+        if meta.get("active") != "1":
+            continue
+
+        page = meta.get("page")
+        if not isinstance(page, int) or page <= 0:
+            continue
+
         hits.append({
-            "document_id": meta.get("document_id"),
-            "page": meta.get("page"),
+            "document_id": document_id,
+            "page": page,
             "chunk_index": meta.get("chunk_index"),
             "text": doc,
             "score": round(1.0 - float(dist), 4),

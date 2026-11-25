@@ -286,7 +286,13 @@ public class ChatCitationVersionService {
                     continue;
                 }
 
-                String value = idNode.asString();
+                String value;
+
+                if (idNode.isString()) {
+                    value = idNode.asString();
+                } else {
+                    value = idNode.toString();
+                }
 
                 if (value == null
                         || !value.matches("[1-9][0-9]*")) {

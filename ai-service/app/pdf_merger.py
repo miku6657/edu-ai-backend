@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 import pymupdf
@@ -7,17 +8,20 @@ from .config import PDF_STORAGE_DIR, MAX_PAGES
 MAX_FILE_SIZE = 30 * 1024 * 1024
 MAX_DOCUMENTS = 10
 
+STORAGE_NAME_PATTERN = re.compile(
+    r"[0-9a-fA-F]{8}-"
+    r"[0-9a-fA-F]{4}-"
+    r"[0-9a-fA-F]{4}-"
+    r"[0-9a-fA-F]{4}-"
+    r"[0-9a-fA-F]{12}\.pdf"
+)
+
 
 def resolve_pdf(storage_name: str) -> Path:
-    """解析并校验内部PDF存储路径。
-
-    只允许访问PDF_STORAGE_DIR中的文件。
-    """
+    """只允许读取合法的内部PDF存储文件。"""
     if (
-        not storage_name
-        or "/" in storage_name
-        or "\\" in storage_name
-        or not storage_name.lower().endswith(".pdf")
+        not isinstance(storage_name, str)
+        or not STORAGE_NAME_PATTERN.fullmatch(storage_name)
     ):
         raise ValueError("非法PDF存储文件名")
 
@@ -44,6 +48,10 @@ def merge_pdf_files(storage_names: list[str]) -> bytes:
     if len(storage_names) > MAX_DOCUMENTS:
         raise ValueError(f"最多只能合并{MAX_DOCUMENTS}份PDF")
 
+    # 重复文件校验
+    if len(set(storage_names)) != len(storage_names):
+        raise ValueError("不能重复选择同一份PDF")
+
     paths = [resolve_pdf(name) for name in storage_names]
 
     total_size = sum(path.stat().st_size for path in paths)
@@ -56,6 +64,10 @@ def merge_pdf_files(storage_names: list[str]) -> bytes:
     try:
         for path in paths:
             with pymupdf.open(path) as doc:
+                # 加密PDF判断
+                if doc.needs_pass:
+                    raise ValueError("存在加密的PDF，无法合并")
+
                 total_pages += doc.page_count
                 if total_pages > MAX_PAGES:
                     raise ValueError(
@@ -66,7 +78,13 @@ def merge_pdf_files(storage_names: list[str]) -> bytes:
         if merged.page_count == 0:
             raise ValueError("合并结果为空")
 
-        return merged.tobytes()
+        data = merged.tobytes()
+
+        # 合并结果大小校验
+        if not data or len(data) > MAX_FILE_SIZE:
+            raise ValueError("合并结果为空或超过30MB")
+
+        return data
 
     finally:
         merged.close()

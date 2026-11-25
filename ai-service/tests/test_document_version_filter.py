@@ -36,7 +36,12 @@ class DocumentVersionFilterTest(unittest.TestCase):
         collection.query.return_value = {
             "documents": [["片段A"]],
             "metadatas": [[
-                {"document_id": "102", "page": 1, "chunk_index": 0}
+                {
+                    "document_id": "102",
+                    "page": 1,
+                    "chunk_index": 0,
+                    "active": "1",
+                }
             ]],
             "distances": [[0.2]],
         }
