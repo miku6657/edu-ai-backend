@@ -176,6 +176,74 @@ export async function apiStream(
   return response
 }
 
+/**
+ * 下载或预览需要 JWT 认证的 PDF 文件。
+ *
+ * 成功响应按 Blob 读取；失败响应仍使用原有 Result 格式处理。
+ */
+export async function apiPdf(
+  path: string,
+  signal?: AbortSignal,
+): Promise<Blob> {
+  const headers: Record<string, string> = {
+    Accept: 'application/pdf',
+  }
+
+  const token = tokenProvider()
+
+  if (token) {
+    headers.Authorization = `Bearer ${token}`
+  }
+
+  let response: Response
+
+  try {
+    response = await fetch(buildUrl(path), {
+      method: 'GET',
+      headers,
+      signal: signal ?? null,
+      cache: 'no-store',
+    })
+  } catch (error) {
+    if (signal?.aborted) {
+      throw error
+    }
+
+    throw new ApiError({
+      code: CLIENT_ERROR_CODES.NETWORK,
+      message: '无法连接到课程资料服务。',
+      cause: error,
+    })
+  }
+
+  if (response.status === 401) {
+    unauthorizedHandler()
+  }
+
+  if (!response.ok) {
+    const result = await parseEnvelope<unknown>(response)
+
+    throw new ApiError({
+      code: String(result.code),
+      message: result.message || 'PDF文件读取失败',
+      httpStatus: response.status,
+      traceId: result.trace_id ?? null,
+    })
+  }
+
+  const contentType = response.headers.get('Content-Type') ?? ''
+
+  if (!contentType.toLowerCase().startsWith('application/pdf')) {
+    throw new ApiError({
+      code: CLIENT_ERROR_CODES.MALFORMED_RESPONSE,
+      message: '服务端未返回有效的PDF文件。',
+      httpStatus: response.status,
+    })
+  }
+
+  return response.blob()
+}
+
 /** 构造完整请求地址 */
 function buildUrl(path: string): string {
   return `${resolveApiBaseUrl()}${path.startsWith('/') ? path : `/${path}`}`

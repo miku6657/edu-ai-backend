@@ -19,6 +19,8 @@ function doc(status: KnowledgeDoc['status']): KnowledgeDoc {
     uploaderId: '10001',
     originalName: 'a.pdf',
     fileSize: 1024,
+    resourceType: 'COURSEWARE',
+    sourceInfo: null,
     status,
     errorMessage: null,
     createTime: '2026-10-21T10:00:00.000+08:00',

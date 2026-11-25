@@ -16,7 +16,14 @@ import {
   removeCourseStudent,
   updateCourse,
 } from '@/api/course'
-import { deleteDoc, listDocs, retryDoc } from '@/api/knowledge'
+import {
+  deleteDoc,
+  downloadDocumentFile,
+  listDocs,
+  previewDocument,
+  retryDoc,
+  uploadDoc,
+} from '@/api/knowledge'
 import { resetApiClient } from '@/api/client'
 
 const LARGE_ID = '9007199254740993'
@@ -43,6 +50,14 @@ function capturedRequests(fetchMock: Mock): Array<{
       body: typeof init?.body === 'string' ? init.body : undefined,
     }
   })
+}
+
+function capturedFormData(fetchMock: Mock, index = 0): FormData {
+  const init = fetchMock.mock.calls[index]?.[1] as RequestInit | undefined
+  if (!(init?.body instanceof FormData)) {
+    throw new Error('Expected request body to be FormData')
+  }
+  return init.body
 }
 
 describe('course and document BIGINT APIs', () => {
@@ -74,7 +89,14 @@ describe('course and document BIGINT APIs', () => {
 
     await expect(listCourses()).resolves.toEqual([course])
     await expect(getCourseDetail(LARGE_ID)).resolves.toEqual(course)
-    await updateCourse(LARGE_ID, { name: course.name })
+    await updateCourse(LARGE_ID, {
+      courseCode: 'DB101',
+      name: course.name,
+      description: '',
+      credits: 3,
+      applicableMajor: '软件工程',
+      semester: '2026-2027-1',
+    })
     await deleteCourse(LARGE_ID)
 
     expect(capturedUrls(fetchMock)).toEqual([
@@ -177,6 +199,8 @@ describe('course and document BIGINT APIs', () => {
       uploaderId: LARGE_ID,
       originalName: 'lecture.pdf',
       fileSize: 1024,
+      resourceType: 'COURSEWARE',
+      sourceInfo: '教师自编',
       status: 'PARSING',
       errorMessage: null,
       createTime: '2026-11-14T10:00:00',
@@ -195,6 +219,57 @@ describe('course and document BIGINT APIs', () => {
       `/api/documents/course/${LARGE_ID}`,
       `/api/documents/${LARGE_ID}`,
       `/api/documents/${LARGE_ID}/retry`,
+    ])
+  })
+
+  it('uploads documents with optional resource metadata and defaults to AUTO', async () => {
+    const document = {
+      id: LARGE_ID,
+      courseId: LARGE_ID,
+      uploaderId: LARGE_ID,
+      originalName: 'lecture.pdf',
+      fileSize: 1024,
+      resourceType: 'COURSEWARE',
+      sourceInfo: '教师自编',
+      status: 'UPLOADED',
+      errorMessage: null,
+      createTime: '2026-11-14T10:00:00',
+    }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(document))
+      .mockResolvedValueOnce(jsonResponse(document))
+    vi.stubGlobal('fetch', fetchMock)
+    const file = new File(['pdf'], 'lecture.pdf', { type: 'application/pdf' })
+
+    await expect(uploadDoc(LARGE_ID, file)).resolves.toEqual(document)
+    await expect(uploadDoc(LARGE_ID, file, {
+      resourceType: 'COURSEWARE',
+      sourceInfo: '  教师自编  ',
+    })).resolves.toEqual(document)
+
+    const defaultForm = capturedFormData(fetchMock)
+    const configuredForm = capturedFormData(fetchMock, 1)
+    expect(defaultForm.get('resourceType')).toBe('AUTO')
+    expect(defaultForm.get('sourceInfo')).toBeNull()
+    expect(configuredForm.get('resourceType')).toBe('COURSEWARE')
+    expect(configuredForm.get('sourceInfo')).toBe('教师自编')
+  })
+
+  it('uses authenticated PDF preview and download routes', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
+      new Response(new Blob(['%PDF-test']), {
+        status: 200,
+        headers: { 'Content-Type': 'application/pdf' },
+      }),
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(previewDocument(LARGE_ID)).resolves.toBeInstanceOf(Blob)
+    await expect(downloadDocumentFile(LARGE_ID)).resolves.toBeInstanceOf(Blob)
+
+    expect(capturedUrls(fetchMock)).toEqual([
+      `/api/documents/${LARGE_ID}/preview`,
+      `/api/documents/${LARGE_ID}/download`,
     ])
   })
 })

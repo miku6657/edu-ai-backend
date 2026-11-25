@@ -27,8 +27,12 @@ import {
 function course(id: string, overrides: Partial<Course> = {}): Course {
   return {
     id,
+    courseCode: null,
     name: `课程 ${id}`,
     description: null,
+    credits: null,
+    applicableMajor: null,
+    semester: null,
     ownerId: '10001',
     status: 1,
     createTime: '2026-10-01T10:00:00+08:00',
@@ -89,6 +93,8 @@ function doc(id: string, overrides: Partial<KnowledgeDoc> = {}): KnowledgeDoc {
     uploaderId: '10001',
     originalName: `课件 ${id}.pdf`,
     fileSize: 1024,
+    resourceType: 'COURSEWARE',
+    sourceInfo: null,
     status: 'READY',
     errorMessage: null,
     createTime: '2026-10-30T10:00:00+08:00',

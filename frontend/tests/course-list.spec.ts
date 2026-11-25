@@ -10,8 +10,12 @@ function course(
 ): Course {
   return {
     id,
+    courseCode: null,
     name,
     description,
+    credits: null,
+    applicableMajor: null,
+    semester: null,
     ownerId: '10001',
     status: 1,
     createTime: '2026-10-01T10:00:00',

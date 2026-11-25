@@ -26,8 +26,9 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 import { notifyError, notifySuccess, notifyWarning } from '@/utils/notify'
 import {
   CourseFormValidationError,
-  toCreateCourseRequest,
+  toCourseRequest,
 } from '@/views/course/course-form'
+import type { CourseFormValues } from '@/views/course/course-form'
 
 const loading = ref(false)
 const loadError = ref('')
@@ -44,19 +45,22 @@ const membersLoading = ref(false)
 const selectedMemberCourse = ref<Course | null>(null)
 const members = ref<CourseMember[]>([])
 
-const createForm = ref({
+const emptyCourseForm = (): CourseFormValues => ({
+  courseCode: '',
   name: '',
   description: '',
+  credits: 3,
+  applicableMajor: '',
+  semester: '',
 })
 
-const editForm = ref<{
+const createForm = ref<CourseFormValues>(emptyCourseForm())
+
+const editForm = ref<CourseFormValues & {
   id: BigIntId
-  name: string
-  description: string
 }>({
   id: '',
-  name: '',
-  description: '',
+  ...emptyCourseForm(),
 })
 
 const hasCourses = computed(() => courses.value.length > 0)
@@ -70,7 +74,10 @@ const filteredCourses = computed(() => {
 
   return courses.value.filter(course =>
     course.name.toLowerCase().includes(keyword)
-    || (course.description ?? '').toLowerCase().includes(keyword),
+    || (course.description ?? '').toLowerCase().includes(keyword)
+    || (course.courseCode ?? '').toLowerCase().includes(keyword)
+    || (course.applicableMajor ?? '').toLowerCase().includes(keyword)
+    || (course.semester ?? '').toLowerCase().includes(keyword),
   )
 })
 
@@ -104,10 +111,7 @@ async function loadCourses(): Promise<void> {
  * 打开创建课程弹窗
  */
 function openCreate(): void {
-  createForm.value = {
-    name: '',
-    description: '',
-  }
+  createForm.value = emptyCourseForm()
 
   creating.value = true
 }
@@ -120,10 +124,7 @@ async function submitCreate(): Promise<void> {
 
   let request
   try {
-    request = toCreateCourseRequest(
-      createForm.value.name,
-      createForm.value.description,
-    )
+    request = toCourseRequest(createForm.value)
   } catch (error) {
     if (error instanceof CourseFormValidationError) {
       notifyWarning(error.message)
@@ -139,7 +140,7 @@ async function submitCreate(): Promise<void> {
     const created = await createCourse(request)
 
     creating.value = false
-    notifySuccess(`课程空间「${created.name}」创建成功`)
+    notifySuccess(`课程「${created.name}」创建成功`)
 
     await loadCourses()
   } catch (error) {
@@ -155,8 +156,12 @@ async function submitCreate(): Promise<void> {
 function openEdit(course: Course): void {
   editForm.value = {
     id: course.id,
+    courseCode: course.courseCode ?? '',
     name: course.name,
     description: course.description ?? '',
+    credits: course.credits ?? 3,
+    applicableMajor: course.applicableMajor ?? '',
+    semester: course.semester ?? '',
   }
 
   editing.value = true
@@ -166,27 +171,24 @@ function openEdit(course: Course): void {
  * 修改课程
  */
 async function submitEdit(): Promise<void> {
-  const name = editForm.value.name.trim()
-
-  if (!name) {
-    notifyWarning('课程名称不能为空')
-    return
-  }
-
-  if (name.length > 100) {
-    notifyWarning('课程名称不能超过100个字符')
-    return
-  }
-
   if (submitting.value) return
+
+  let request
+  try {
+    request = toCourseRequest(editForm.value)
+  } catch (error) {
+    if (error instanceof CourseFormValidationError) {
+      notifyWarning(error.message)
+    } else {
+      notifyError(error)
+    }
+    return
+  }
 
   submitting.value = true
 
   try {
-    await updateCourse(editForm.value.id, {
-      name,
-      description: editForm.value.description.trim(),
-    })
+    await updateCourse(editForm.value.id, request)
 
     editing.value = false
     notifySuccess('课程修改成功')
@@ -567,6 +569,24 @@ async function removeMember(member: CourseMember): Promise<void> {
           <div class="course-item__body">
             <h3>{{ course.name }}</h3>
 
+            <div class="course-item__meta">
+              <span v-if="course.courseCode">
+                编码：{{ course.courseCode }}
+              </span>
+
+              <span v-if="course.credits != null">
+                {{ course.credits }} 学分
+              </span>
+
+              <span v-if="course.semester">
+                {{ course.semester }}
+              </span>
+            </div>
+
+            <p v-if="course.applicableMajor">
+              适用专业：{{ course.applicableMajor }}
+            </p>
+
             <p>
               {{ course.description || '暂无课程描述' }}
             </p>
@@ -681,11 +701,16 @@ async function removeMember(member: CourseMember): Promise<void> {
       title="新建课程"
       width="520px"
     >
-      <el-form label-width="90px">
-        <el-form-item
-          label="课程名称"
-          required
-        >
+      <el-form label-width="100px">
+        <el-form-item label="课程编码" required>
+          <el-input
+            v-model="createForm.courseCode"
+            maxlength="32"
+            placeholder="例如 JAVA101"
+          />
+        </el-form-item>
+
+        <el-form-item label="课程名称" required>
           <el-input
             v-model="createForm.name"
             maxlength="100"
@@ -694,13 +719,39 @@ async function removeMember(member: CourseMember): Promise<void> {
           />
         </el-form-item>
 
+        <el-form-item label="课程学分" required>
+          <el-input-number
+            v-model="createForm.credits"
+            :min="0.1"
+            :max="99.9"
+            :step="0.5"
+            :precision="1"
+          />
+        </el-form-item>
+
+        <el-form-item label="适用专业" required>
+          <el-input
+            v-model="createForm.applicableMajor"
+            maxlength="200"
+            placeholder="例如 软件工程"
+          />
+        </el-form-item>
+
+        <el-form-item label="开课学期" required>
+          <el-input
+            v-model="createForm.semester"
+            maxlength="50"
+            placeholder="例如 2026-2027-1"
+          />
+        </el-form-item>
+
         <el-form-item label="课程描述">
           <el-input
             v-model="createForm.description"
             type="textarea"
+            :rows="4"
             maxlength="500"
             show-word-limit
-            :rows="4"
             placeholder="介绍一下这门课程..."
           />
         </el-form-item>
@@ -727,15 +778,43 @@ async function removeMember(member: CourseMember): Promise<void> {
       title="编辑课程"
       width="520px"
     >
-      <el-form label-width="90px">
-        <el-form-item
-          label="课程名称"
-          required
-        >
+      <el-form label-width="100px">
+        <el-form-item label="课程编码" required>
+          <el-input
+            v-model="editForm.courseCode"
+            maxlength="32"
+          />
+        </el-form-item>
+
+        <el-form-item label="课程名称" required>
           <el-input
             v-model="editForm.name"
             maxlength="100"
             show-word-limit
+          />
+        </el-form-item>
+
+        <el-form-item label="课程学分" required>
+          <el-input-number
+            v-model="editForm.credits"
+            :min="0.1"
+            :max="99.9"
+            :step="0.5"
+            :precision="1"
+          />
+        </el-form-item>
+
+        <el-form-item label="适用专业" required>
+          <el-input
+            v-model="editForm.applicableMajor"
+            maxlength="200"
+          />
+        </el-form-item>
+
+        <el-form-item label="开课学期" required>
+          <el-input
+            v-model="editForm.semester"
+            maxlength="50"
           />
         </el-form-item>
 
@@ -1256,6 +1335,21 @@ async function removeMember(member: CourseMember): Promise<void> {
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.course-item__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.course-item__meta span {
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--sc-primary-soft);
+  color: var(--sc-primary-strong);
+  font-size: 12px;
 }
 
 .course-item__body p {

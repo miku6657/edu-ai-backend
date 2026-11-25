@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 
-import { apiRequest, configureApiClient, resetApiClient, resolveApiBaseUrl } from '@/api/client'
+import { apiPdf, apiRequest, configureApiClient, resetApiClient, resolveApiBaseUrl } from '@/api/client'
 import { ApiError, CLIENT_ERROR_CODES } from '@/api/error'
 import { SUCCESS_CODE } from '@/api/types'
 
@@ -156,5 +156,66 @@ describe('apiRequest', () => {
     expect(request.method).toBe('POST')
     expect(request.headers['Content-Type']).toBe('application/json')
     expect(request.body).toBe(JSON.stringify({ course_id: '2001' }))
+  })
+
+  it('PDF请求携带JWT并读取二进制响应', async () => {
+    configureApiClient({ tokenProvider: () => 'jwt-token-value' })
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(new Blob(['%PDF-test']), {
+        status: 200,
+        headers: { 'Content-Type': 'application/pdf' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const blob = await apiPdf('/documents/50001/preview')
+
+    expect(await blob.text()).toBe('%PDF-test')
+    expect(blob.type).toBe('application/pdf')
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/documents/50001/preview')
+
+    const request = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined
+    expect(request?.method).toBe('GET')
+    expect(request?.headers).toEqual({
+      Accept: 'application/pdf',
+      Authorization: 'Bearer jwt-token-value',
+    })
+    expect(request?.cache).toBe('no-store')
+  })
+
+  it('PDF请求在失败时解析Result错误', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        jsonResponse(envelope(null, { code: 404, message: '资料不存在' }), 404),
+      ),
+    )
+
+    await expect(apiPdf('/documents/50001/preview')).rejects.toMatchObject({
+      code: '404',
+      message: '资料不存在',
+      httpStatus: 404,
+    })
+  })
+
+  it('PDF请求收到非PDF成功响应时抛出格式错误', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      jsonResponse(envelope('not a PDF')),
+    ))
+
+    await expect(apiPdf('/documents/50001/preview')).rejects.toMatchObject({
+      code: CLIENT_ERROR_CODES.MALFORMED_RESPONSE,
+    })
+  })
+
+  it('PDF请求被主动取消时保留原始取消异常', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const abortError = new DOMException('Aborted', 'AbortError')
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(abortError))
+
+    await expect(
+      apiPdf('/documents/50001/preview', controller.signal),
+    ).rejects.toBe(abortError)
   })
 })

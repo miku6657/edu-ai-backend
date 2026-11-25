@@ -1,19 +1,33 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 
 import { ElMessageBox } from 'element-plus'
 
 import { listAccessibleCourses } from '@/api/course-access'
 import type { Course } from '@/api/course'
 import {
+  listCourseChapters,
+  listDocumentClassifications,
+} from '@/api/document-classification'
+import type {
+  CourseChapter,
+  DocumentClassification,
+} from '@/api/document-classification'
+import { listKnowledgePoints } from '@/api/learning-path'
+import type { KnowledgePoint } from '@/api/learning-path'
+import {
   deleteDoc,
   listDocs,
+  RESOURCE_TYPE_OPTIONS,
+  resourceTypeLabel,
   retryDoc,
   uploadDoc,
 } from '@/api/knowledge'
 import type {
   KnowledgeDoc,
   DocumentStatus,
+  ResourceType,
+  ResourceTypeSelection,
 } from '@/api/knowledge'
 import type { BigIntId } from '@/api/types'
 import BaseCard from '@/components/ui/BaseCard.vue'
@@ -22,6 +36,8 @@ import TagBadge from '@/components/ui/TagBadge.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useCourseStore } from '@/stores/course'
 import { notifyError, notifySuccess, notifyWarning } from '@/utils/notify'
+import DocumentClassificationPanel from '@/views/knowledge/DocumentClassificationPanel.vue'
+import DocumentPreviewDialog from '@/views/knowledge/DocumentPreviewDialog.vue'
 import {
   documentStatusLabel,
   documentStatusTagType,
@@ -50,6 +66,27 @@ const selectedCourseId = ref<BigIntId | null>(
   courseStore.selectedCourseId,
 )
 const filterStatus = ref<DocumentStatus | ''>('')
+const uploadResourceType =
+  ref<ResourceTypeSelection>('AUTO')
+const uploadSourceInfo = ref('')
+const filterResourceType =
+  ref<ResourceType | ''>('')
+const searchKeyword = ref('')
+const filterChapterId = ref('')
+const filterPointId = ref('')
+const chapters = ref<CourseChapter[]>([])
+const knowledgePoints = ref<KnowledgePoint[]>([])
+const documentClassifications = ref<DocumentClassification[]>([])
+const classificationLoading = ref(false)
+const classificationError = ref('')
+const previewVisible = ref(false)
+const previewDoc = ref<KnowledgeDoc | null>(null)
+const resourceFilterOptions = [
+  { value: '', label: '全部类型' },
+  ...RESOURCE_TYPE_OPTIONS.filter(
+    (item) => item.value !== 'AUTO',
+  ),
+]
 const loadingCourses = ref(true)
 const loadingDocs = ref(false)
 const uploading = ref(false)
@@ -60,6 +97,8 @@ const fileInput = ref<HTMLInputElement | null>(null)
 const compact = ref(false)
 const POLL_INTERVAL_MS = 4000
 let pollTimer: number | null = null
+let classificationVersion = 0
+let classificationDocumentKey: string | null = null
 
 const compactQuery =
   typeof window === 'undefined' ? null : window.matchMedia('(max-width: 640px)')
@@ -74,14 +113,76 @@ const currentCourse = computed(
     ) ?? null,
 )
 
-const visibleDocs = computed(() => {
-  if (filterStatus.value === '') {
-    return docs.value
-  }
+const classificationMap = computed(() => new Map(
+  documentClassifications.value.map(
+    item => [String(item.documentId), item] as const,
+  ),
+))
 
-  return docs.value.filter(
-    (doc) => doc.status === filterStatus.value,
-  )
+function classificationOf(
+  docId: BigIntId,
+): DocumentClassification | undefined {
+  return classificationMap.value.get(String(docId))
+}
+
+const visibleDocs = computed(() => {
+  const keywords = searchKeyword.value
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+
+  return docs.value.filter((doc) => {
+    if (
+      filterStatus.value !== ''
+      && doc.status !== filterStatus.value
+    ) {
+      return false
+    }
+
+    if (
+      filterResourceType.value !== ''
+      && doc.resourceType !== filterResourceType.value
+    ) {
+      return false
+    }
+
+    const classification = classificationOf(doc.id)
+    const docChapters = classification?.chapters ?? []
+    const docPoints = classification?.points ?? []
+
+    if (
+      filterChapterId.value !== ''
+      && !docChapters.some(
+        chapter =>
+          String(chapter.id) === String(filterChapterId.value),
+      )
+    ) {
+      return false
+    }
+
+    if (
+      filterPointId.value !== ''
+      && !docPoints.some(
+        point =>
+          String(point.id) === String(filterPointId.value),
+      )
+    ) {
+      return false
+    }
+
+    const searchableText = [
+      doc.originalName,
+      doc.sourceInfo ?? '',
+      resourceTypeLabel(doc.resourceType),
+      ...docChapters.map(chapter => chapter.name),
+      ...docPoints.map(point => point.name),
+    ]
+      .join(' ')
+      .toLowerCase()
+
+    return keywords.every(keyword => searchableText.includes(keyword))
+  })
 })
 
 const pendingCount = computed(
@@ -105,6 +206,23 @@ const statusOptions: Array<{ value: DocumentStatus | ''; label: string }> = [
 ]
 
 let requestSequence = 0
+
+watch(
+  selectedCourseId,
+  () => {
+    searchKeyword.value = ''
+    filterChapterId.value = ''
+    filterPointId.value = ''
+    chapters.value = []
+    knowledgePoints.value = []
+    documentClassifications.value = []
+    classificationDocumentKey = null
+    previewVisible.value = false
+    previewDoc.value = null
+    void loadResourceClassifications()
+  },
+  { immediate: true },
+)
 
 onMounted(() => {
   syncCompact()
@@ -179,8 +297,13 @@ async function loadDocs(): Promise<void> {
     if (sequence !== requestSequence || courseId !== selectedCourseId.value) {
       return
     }
+    const nextClassificationKey = classificationKeyFor(result)
     docs.value = result
     syncPolling()
+    if (nextClassificationKey !== classificationDocumentKey) {
+      classificationDocumentKey = nextClassificationKey
+      void loadResourceClassifications()
+    }
   } catch (error) {
     if (sequence !== requestSequence || courseId !== selectedCourseId.value) {
       return
@@ -191,6 +314,70 @@ async function loadDocs(): Promise<void> {
   } finally {
     if (sequence === requestSequence) {
       loadingDocs.value = false
+    }
+  }
+}
+
+function classificationKeyFor(documents: KnowledgeDoc[]): string {
+  const documentIds = documents
+    .map(doc => String(doc.id))
+    .sort()
+  const readyDocumentIds = documents
+    .filter(doc => doc.status === 'READY')
+    .map(doc => String(doc.id))
+    .sort()
+
+  return JSON.stringify([documentIds, readyDocumentIds])
+}
+
+async function loadResourceClassifications(): Promise<void> {
+  const courseId = selectedCourseId.value
+  const version = ++classificationVersion
+
+  classificationError.value = ''
+
+  if (!courseId) {
+    chapters.value = []
+    knowledgePoints.value = []
+    documentClassifications.value = []
+    classificationLoading.value = false
+    return
+  }
+
+  classificationLoading.value = true
+
+  try {
+    const [
+      chapterResult,
+      pointResult,
+      classificationResult,
+    ] = await Promise.all([
+      listCourseChapters(courseId),
+      listKnowledgePoints(courseId),
+      listDocumentClassifications(courseId),
+    ])
+
+    if (
+      version !== classificationVersion
+      || selectedCourseId.value !== courseId
+    ) {
+      return
+    }
+
+    chapters.value = chapterResult
+    knowledgePoints.value = pointResult
+    documentClassifications.value = classificationResult
+  } catch (error) {
+    if (version !== classificationVersion) {
+      return
+    }
+
+    classificationError.value =
+      error instanceof Error ? error.message : '资源分类加载失败'
+    notifyError(error)
+  } finally {
+    if (version === classificationVersion) {
+      classificationLoading.value = false
     }
   }
 }
@@ -207,6 +394,24 @@ function selectCourse(courseId: BigIntId): void {
 
 function onFilterChange(): void {
   // 当前 Java 接口不支持服务端状态筛选，因此只应用前端本地筛选。
+}
+
+function openPreview(doc: KnowledgeDoc): void {
+  if (doc.status !== 'READY') {
+    notifyWarning('资料尚未完成处理，暂时无法预览')
+    return
+  }
+
+  previewDoc.value = doc
+  previewVisible.value = true
+}
+
+function resetResourceFilters(): void {
+  searchKeyword.value = ''
+  filterStatus.value = ''
+  filterResourceType.value = ''
+  filterChapterId.value = ''
+  filterPointId.value = ''
 }
 
 function chooseFile(): void {
@@ -240,9 +445,20 @@ async function uploadFile(file: File): Promise<void> {
     notifyWarning(error)
     return
   }
+  if (uploadSourceInfo.value.trim().length > 255) {
+    notifyWarning('资源来源不能超过255个字符')
+    return
+  }
   uploading.value = true
   try {
-    const uploaded = await uploadDoc(course.id, file)
+    const uploaded = await uploadDoc(
+      course.id,
+      file,
+      {
+        resourceType: uploadResourceType.value,
+        sourceInfo: uploadSourceInfo.value,
+      },
+    )
     notifySuccess(
       `《${uploaded.originalName}》上传成功，当前状态：${uploaded.status}`,
     )
@@ -287,6 +503,7 @@ async function onDelete(doc: KnowledgeDoc): Promise<void> {
     await deleteDoc(doc.id)
     notifySuccess('课件删除成功')
     await loadDocs()
+    await loadResourceClassifications()
   } catch (error) {
     notifyError(error)
   } finally {
@@ -441,6 +658,19 @@ function documentTone(doc: KnowledgeDoc): Tone {
                     :value="item.value"
                   />
                 </el-select>
+                <el-select
+                  v-model="filterResourceType"
+                  size="small"
+                  class="knowledge-filter"
+                  placeholder="全部类型"
+                >
+                  <el-option
+                    v-for="item in resourceFilterOptions"
+                    :key="item.value"
+                    :label="item.label"
+                    :value="item.value"
+                  />
+                </el-select>
                 <el-button size="small" :disabled="loadingDocs" @click="loadDocs">刷新</el-button>
                 <el-button
                   v-if="canManageDocuments"
@@ -469,6 +699,45 @@ function documentTone(doc: KnowledgeDoc): Tone {
             </EmptyState>
 
             <template v-else>
+              <div
+                v-if="canManageDocuments"
+                class="resource-upload-options"
+              >
+                <div class="resource-upload-field">
+                  <span>资料类型</span>
+
+                  <el-select
+                    v-model="uploadResourceType"
+                    :disabled="uploading"
+                    style="width: 200px"
+                  >
+                    <el-option
+                      v-for="option in RESOURCE_TYPE_OPTIONS"
+                      :key="option.value"
+                      :value="option.value"
+                      :label="option.label"
+                    />
+                  </el-select>
+                </div>
+
+                <div class="resource-upload-field">
+                  <span>资料来源</span>
+
+                  <el-input
+                    v-model="uploadSourceInfo"
+                    :disabled="uploading"
+                    maxlength="255"
+                    show-word-limit
+                    placeholder="例如：教师自编 / 教材配套资料"
+                  />
+                </div>
+
+                <p class="knowledge-muted">
+                  选择“自动识别”时，将根据 PDF 文件名判断资料类型。
+                  如需准确分类，可以直接指定类型。
+                </p>
+              </div>
+
               <div
                 v-if="canManageDocuments"
                 class="upload-zone"
@@ -520,6 +789,84 @@ function documentTone(doc: KnowledgeDoc): Tone {
                 <span class="docs-header__count">{{ visibleDocs.length }}</span>
               </div>
 
+              <div class="resource-search-panel">
+                <el-input
+                  v-model="searchKeyword"
+                  clearable
+                  maxlength="100"
+                  placeholder="搜索文件名、章节、知识点或资料来源"
+                  class="resource-search-input"
+                />
+
+                <div class="resource-search-filters">
+                  <el-select
+                    v-model="filterChapterId"
+                    clearable
+                    filterable
+                    :value-on-clear="''"
+                    :loading="classificationLoading"
+                    placeholder="全部章节"
+                  >
+                    <el-option
+                      label="全部章节"
+                      value=""
+                    />
+
+                    <el-option
+                      v-for="chapter in chapters"
+                      :key="chapter.id"
+                      :label="chapter.name"
+                      :value="chapter.id"
+                    />
+                  </el-select>
+
+                  <el-select
+                    v-model="filterPointId"
+                    clearable
+                    filterable
+                    :value-on-clear="''"
+                    :loading="classificationLoading"
+                    placeholder="全部知识点"
+                  >
+                    <el-option
+                      label="全部知识点"
+                      value=""
+                    />
+
+                    <el-option
+                      v-for="point in knowledgePoints"
+                      :key="point.id"
+                      :label="point.title"
+                      :value="point.id"
+                    />
+                  </el-select>
+
+                  <el-button @click="resetResourceFilters">
+                    重置筛选
+                  </el-button>
+                </div>
+
+                <el-alert
+                  v-if="classificationError"
+                  :title="classificationError"
+                  type="warning"
+                  :closable="false"
+                />
+
+                <el-button
+                  v-if="classificationError"
+                  text
+                  type="primary"
+                  @click="loadResourceClassifications"
+                >
+                  重新加载课程分类
+                </el-button>
+
+                <div class="resource-search-count">
+                  共找到 {{ visibleDocs.length }} 份资料
+                </div>
+              </div>
+
               <el-skeleton v-if="loadingDocs" :rows="4" animated />
               <EmptyState
                 v-else-if="visibleDocs.length === 0"
@@ -542,7 +889,7 @@ function documentTone(doc: KnowledgeDoc): Tone {
                   <el-button
                     v-else-if="docs.length > 0"
                     size="small"
-                    @click="filterStatus = ''"
+                    @click="resetResourceFilters"
                   >
                     查看全部
                   </el-button>
@@ -555,6 +902,82 @@ function documentTone(doc: KnowledgeDoc): Tone {
                     <div class="knowledge-muted">
                       {{ formatFileSize(row.fileSize) }}
                     </div>
+                  </template>
+                </el-table-column>
+                <el-table-column
+                  label="资料类型"
+                  :width="compact ? 100 : 120"
+                >
+                  <template #default="{ row }">
+                    <el-tag type="info" size="small">
+                      {{ resourceTypeLabel(row.resourceType) }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column
+                  label="所属章节"
+                  min-width="160"
+                >
+                  <template #default="{ row }">
+                    <div class="resource-tags">
+                      <el-tag
+                        v-for="chapter in (classificationOf(row.id)?.chapters ?? [])"
+                        :key="chapter.id"
+                        size="small"
+                        type="info"
+                      >
+                        {{ chapter.name }}
+                      </el-tag>
+
+                      <span
+                        v-if="!classificationOf(row.id)?.chapters.length"
+                        class="knowledge-muted"
+                      >
+                        未挂接
+                      </span>
+                    </div>
+                  </template>
+                </el-table-column>
+                <el-table-column
+                  label="知识点"
+                  min-width="180"
+                >
+                  <template #default="{ row }">
+                    <div class="resource-tags">
+                      <el-tag
+                        v-for="point in (classificationOf(row.id)?.points ?? [])"
+                        :key="point.id"
+                        size="small"
+                        type="success"
+                      >
+                        {{ point.name }}
+                      </el-tag>
+
+                      <span
+                        v-if="!classificationOf(row.id)?.points.length"
+                        class="knowledge-muted"
+                      >
+                        未挂接
+                      </span>
+                    </div>
+                  </template>
+                </el-table-column>
+                <el-table-column
+                  v-if="!compact"
+                  label="资料来源"
+                  min-width="150"
+                >
+                  <template #default="{ row }">
+                    {{ row.sourceInfo || '未填写' }}
+                  </template>
+                </el-table-column>
+                <el-table-column
+                  v-if="!compact"
+                  label="上传人 ID"
+                  width="120"
+                >
+                  <template #default="{ row }">
+                    {{ row.uploaderId }}
                   </template>
                 </el-table-column>
                 <el-table-column label="状态" :width="compact ? 85 : 100">
@@ -583,12 +1006,19 @@ function documentTone(doc: KnowledgeDoc): Tone {
                   </template>
                 </el-table-column>
                 <el-table-column
-                  v-if="canManageDocuments"
                   label="操作"
-                  :width="compact ? 130 : 150"
+                  :width="compact ? 160 : 210"
                   fixed="right"
                 >
                   <template #default="{ row }">
+                    <el-button
+                      v-if="row.status === 'READY'"
+                      text
+                      type="primary"
+                      @click="openPreview(row)"
+                    >
+                      预览
+                    </el-button>
                     <el-button
                       v-if="canManageDocuments && canRetry(row)"
                       text
@@ -608,19 +1038,35 @@ function documentTone(doc: KnowledgeDoc): Tone {
                       删除
                     </el-button>
                     <span
-                      v-if="canManageDocuments && !canRetry(row) && !canDelete(row)"
+                      v-if="row.status === 'DELETING'"
                       class="knowledge-muted"
                     >
-                      {{ row.status === 'DELETING' ? '清理中' : '已删除' }}
+                      清理中
+                    </span>
+                    <span
+                      v-if="!canManageDocuments && row.status !== 'READY'"
+                      class="knowledge-muted"
+                    >
+                      暂不可预览
                     </span>
                   </template>
                 </el-table-column>
               </el-table>
+              <DocumentClassificationPanel
+                :course-id="selectedCourseId"
+                :documents="docs"
+                :can-manage="canManageDocuments"
+                @changed="loadResourceClassifications"
+              />
             </template>
           </div>
         </BaseCard>
       </section>
     </div>
+    <DocumentPreviewDialog
+      v-model="previewVisible"
+      :document="previewDoc"
+    />
   </div>
 </template>
 
@@ -1084,6 +1530,81 @@ function documentTone(doc: KnowledgeDoc): Tone {
 
   .upload-zone {
     flex-wrap: wrap;
+  }
+}
+
+.resource-upload-options {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--sc-border);
+  border-radius: 10px;
+  background: var(--sc-surface-muted);
+}
+
+.resource-upload-field {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.resource-upload-field > span {
+  flex: 0 0 72px;
+  color: var(--sc-text-secondary);
+  font-size: 13px;
+}
+
+@media (max-width: 639px) {
+  .resource-upload-field {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .resource-upload-field > span {
+    flex: none;
+  }
+}
+
+.resource-search-panel {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--sc-border);
+  border-radius: 10px;
+  background: var(--sc-surface-muted);
+}
+
+.resource-search-input {
+  width: 100%;
+}
+
+.resource-search-filters {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.resource-search-filters :deep(.el-select) {
+  width: 180px;
+}
+
+.resource-search-count {
+  color: var(--sc-text-secondary);
+  font-size: 12px;
+}
+
+.resource-tags {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+@media (max-width: 640px) {
+  .resource-search-filters :deep(.el-select) {
+    flex: 1;
+    min-width: 130px;
   }
 }
 </style>

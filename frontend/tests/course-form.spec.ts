@@ -2,36 +2,63 @@ import { describe, expect, it } from 'vitest'
 
 import {
   CourseFormValidationError,
-  toCreateCourseRequest,
+  toCourseRequest,
+  type CourseFormValues,
 } from '@/views/course/course-form'
 
-describe('course form', () => {
-  it('创建课程时清理名称和描述', () => {
-    expect(
-      toCreateCourseRequest('  操作系统原理  ', '  2026 秋  '),
-    ).toEqual({
-      name: '操作系统原理',
-      description: '2026 秋',
+const validForm = (): CourseFormValues => ({
+  courseCode: 'java101',
+  name: '  Java程序设计  ',
+  description: '  Java基础课程  ',
+  credits: 3.5,
+  applicableMajor: '软件工程',
+  semester: '2026-2027-1',
+})
+
+describe('课程信息维护 F1-01', () => {
+  it('正确转换并清理课程信息', () => {
+    expect(toCourseRequest(validForm())).toEqual({
+      courseCode: 'JAVA101',
+      name: 'Java程序设计',
+      description: 'Java基础课程',
+      credits: 3.5,
+      applicableMajor: '软件工程',
+      semester: '2026-2027-1',
     })
   })
 
-  it('空描述不提交', () => {
-    expect(
-      toCreateCourseRequest('数据库', '   '),
-    ).toEqual({
-      name: '数据库',
-    })
+  it('拒绝无效课程编码', () => {
+    const form = validForm()
+    form.courseCode = '无效编码'
+
+    expect(() => toCourseRequest(form)).toThrow(CourseFormValidationError)
   })
 
   it('拒绝空课程名称', () => {
-    expect(
-      () => toCreateCourseRequest('   ', ''),
-    ).toThrow(CourseFormValidationError)
+    const form = validForm()
+    form.name = '   '
+
+    expect(() => toCourseRequest(form)).toThrow(CourseFormValidationError)
   })
 
-  it('拒绝超过100个字符的课程名称', () => {
-    expect(
-      () => toCreateCourseRequest('a'.repeat(101), ''),
-    ).toThrow(CourseFormValidationError)
+  it('拒绝不合法的学分', () => {
+    const form = validForm()
+    form.credits = -1
+
+    expect(() => toCourseRequest(form)).toThrow(CourseFormValidationError)
+  })
+
+  it('拒绝空适用专业', () => {
+    const form = validForm()
+    form.applicableMajor = ''
+
+    expect(() => toCourseRequest(form)).toThrow(CourseFormValidationError)
+  })
+
+  it('拒绝空开课学期', () => {
+    const form = validForm()
+    form.semester = ''
+
+    expect(() => toCourseRequest(form)).toThrow(CourseFormValidationError)
   })
 })

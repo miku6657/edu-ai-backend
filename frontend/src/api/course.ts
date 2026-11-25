@@ -8,8 +8,12 @@ import type { BigIntId } from '@/api/types'
  */
 export interface Course {
   id: BigIntId
+  courseCode: string | null
   name: string
   description: string | null
+  credits: number | null
+  applicableMajor: string | null
+  semester: string | null
   ownerId: BigIntId
   status: number
   createTime: string
@@ -20,16 +24,24 @@ export interface Course {
  * 创建课程请求
  */
 export interface CreateCourseRequest {
+  courseCode: string
   name: string
   description?: string
+  credits: number
+  applicableMajor: string
+  semester: string
 }
 
 /**
  * 修改课程请求
  */
 export interface UpdateCourseRequest {
+  courseCode: string
   name: string
   description?: string
+  credits: number
+  applicableMajor: string
+  semester: string
 }
 
 export interface CourseMember {

@@ -17,10 +17,16 @@ export function filterCourses(
   return courses.filter((course) => {
     const name = course.name.toLowerCase()
     const description = (course.description ?? '').toLowerCase()
+    const courseCode = (course.courseCode ?? '').toLowerCase()
+    const applicableMajor = (course.applicableMajor ?? '').toLowerCase()
+    const semester = (course.semester ?? '').toLowerCase()
 
     return (
       name.includes(keyword) ||
-      description.includes(keyword)
+      description.includes(keyword) ||
+      courseCode.includes(keyword) ||
+      applicableMajor.includes(keyword) ||
+      semester.includes(keyword)
     )
   })
 }
