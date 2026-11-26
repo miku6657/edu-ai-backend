@@ -6,13 +6,16 @@ import {
   checkQualitySample,
   completeQualityTask,
   createQualityTask,
+  getQualityDocumentControl,
   getQualityDetail,
   listQualityAssignees,
   listQualityTasks,
   qualityIssueStatusLabel,
   qualitySampleStatusLabel,
+  resumeQualityDocument,
   reviewQualityIssue,
   resolveQualityIssue,
+  suspendQualityDocument,
 } from '@/api/document-quality'
 
 const COURSE_ID = '9007199254740993'
@@ -144,5 +147,48 @@ describe('document quality api', () => {
     expect(qualityIssueStatusLabel('OPEN')).toBe('待整改')
     expect(qualityIssueStatusLabel('RESOLVED')).toBe('待复核')
     expect(qualityIssueStatusLabel('CLOSED')).toBe('已关闭')
+  })
+
+  it('uses the document retrieval control endpoints with string BIGINT IDs', async () => {
+    const control = {
+      documentId: DOCUMENT_ID,
+      qualityStatus: 'SUSPENDED',
+      qualityBlockReason: '发现严重缺页',
+      qualityBlockedBy: ISSUE_ID,
+      qualityBlockedAt: '2026-11-26T14:00:00',
+      retrievable: false,
+    }
+    const fetchMock = vi.fn()
+      .mockImplementation(() => Promise.resolve(jsonResponse(control)))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(getQualityDocumentControl(
+      COURSE_ID,
+      DOCUMENT_ID,
+    )).resolves.toEqual(control)
+    await suspendQualityDocument(COURSE_ID, DOCUMENT_ID, '发现严重缺页')
+    await resumeQualityDocument(COURSE_ID, DOCUMENT_ID, '资料已重新核验')
+
+    expect(fetchMock.mock.calls.map(([url, init]) => ({
+      url: String(url),
+      method: (init as RequestInit | undefined)?.method,
+      body: (init as RequestInit | undefined)?.body,
+    }))).toEqual([
+      {
+        url: `/api/v1/document-quality/courses/${COURSE_ID}/documents/${DOCUMENT_ID}/control`,
+        method: 'GET',
+        body: undefined,
+      },
+      {
+        url: `/api/v1/document-quality/courses/${COURSE_ID}/documents/${DOCUMENT_ID}/suspend`,
+        method: 'POST',
+        body: JSON.stringify({ reason: '发现严重缺页' }),
+      },
+      {
+        url: `/api/v1/document-quality/courses/${COURSE_ID}/documents/${DOCUMENT_ID}/resume`,
+        method: 'POST',
+        body: JSON.stringify({ reason: '资料已重新核验' }),
+      },
+    ])
   })
 })

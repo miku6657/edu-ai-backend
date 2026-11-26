@@ -319,3 +319,68 @@ export function qualityIssueTagType(
       return 'danger'
   }
 }
+
+/**
+ * 文档质量控制状态。
+ */
+export interface QualityDocumentControl {
+  documentId: BigIntId
+  qualityStatus: 'NORMAL' | 'SUSPENDED'
+  qualityBlockReason: string | null
+  qualityBlockedBy: BigIntId | null
+  qualityBlockedAt: string | null
+  retrievable: boolean
+}
+
+export interface QualityControlActionRequest {
+  reason: string
+}
+
+/**
+ * 查询文档检索控制状态。
+ */
+export function getQualityDocumentControl(
+  courseId: BigIntId,
+  documentId: BigIntId,
+): Promise<QualityDocumentControl> {
+  return apiRequest<QualityDocumentControl>(
+    `${baseUrl(courseId)}/documents/`
+      + `${encodeURIComponent(documentId)}/control`,
+  )
+}
+
+/**
+ * 暂停资料检索。
+ */
+export function suspendQualityDocument(
+  courseId: BigIntId,
+  documentId: BigIntId,
+  reason: string,
+): Promise<QualityDocumentControl> {
+  return apiRequest<QualityDocumentControl>(
+    `${baseUrl(courseId)}/documents/`
+      + `${encodeURIComponent(documentId)}/suspend`,
+    {
+      method: 'POST',
+      body: { reason },
+    },
+  )
+}
+
+/**
+ * 恢复资料检索。
+ */
+export function resumeQualityDocument(
+  courseId: BigIntId,
+  documentId: BigIntId,
+  reason: string,
+): Promise<QualityDocumentControl> {
+  return apiRequest<QualityDocumentControl>(
+    `${baseUrl(courseId)}/documents/`
+      + `${encodeURIComponent(documentId)}/resume`,
+    {
+      method: 'POST',
+      body: { reason },
+    },
+  )
+}

@@ -27,6 +27,10 @@ export type DocumentReviewStatus =
   | 'APPROVED'
   | 'REJECTED'
 
+export type DocumentQualityStatus =
+  | 'NORMAL'
+  | 'SUSPENDED'
+
 export type ResourceType =
   | 'LESSON_PLAN'
   | 'COURSEWARE'
@@ -75,6 +79,11 @@ export interface KnowledgeDoc {
   reviewerId: BigIntId | null
   reviewTime: string | null
   reviewComment: string | null
+
+  qualityStatus: DocumentQualityStatus
+  qualityBlockReason: string | null
+  qualityBlockedBy: BigIntId | null
+  qualityBlockedAt: string | null
 
   status: DocumentStatus
   errorMessage: string | null

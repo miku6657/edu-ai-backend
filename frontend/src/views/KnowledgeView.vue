@@ -16,6 +16,10 @@ import type {
 import { listKnowledgePoints } from '@/api/learning-path'
 import type { KnowledgePoint } from '@/api/learning-path'
 import {
+  resumeQualityDocument,
+  suspendQualityDocument,
+} from '@/api/document-quality'
+import {
   deleteDoc,
   documentReviewStatusLabel,
   documentReviewStatusTagType,
@@ -811,6 +815,124 @@ function canDelete(doc: KnowledgeDoc): boolean {
   return true
 }
 
+/**
+ * 只有当前已发布的资料可以进行检索控制。
+ */
+function canControlRetrieval(doc: KnowledgeDoc): boolean {
+  return (
+    canManageDocuments.value
+    && doc.status === 'READY'
+    && doc.versionStatus === 'CURRENT'
+    && doc.reviewStatus === 'APPROVED'
+  )
+}
+
+/**
+ * 暂停资料检索。
+ */
+async function onSuspendRetrieval(
+  doc: KnowledgeDoc,
+): Promise<void> {
+  if (!canControlRetrieval(doc)) {
+    notifyWarning('当前资料不能暂停检索')
+    return
+  }
+
+  const courseId = selectedCourseId.value
+  if (!courseId || doc.courseId !== courseId) {
+    return
+  }
+
+  let reason: string
+  try {
+    const result = await ElMessageBox.prompt(
+      '暂停后，新发起的 AI 问答将不再检索该资料。请填写暂停原因。',
+      '暂停知识库检索',
+      {
+        inputType: 'textarea',
+        inputPlaceholder: '例如：发现资料存在严重缺页，需要重新上传',
+        inputValidator: value =>
+          Boolean(value?.trim()) || '请填写暂停原因',
+        confirmButtonText: '确认暂停',
+        cancelButtonText: '取消',
+        type: 'warning',
+      },
+    )
+    reason = result.value.trim()
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') {
+      notifyError(error, '无法确认暂停检索')
+    }
+    return
+  }
+
+  actionDocId.value = doc.id
+  try {
+    await suspendQualityDocument(courseId, doc.id, reason)
+    notifySuccess('资料检索已暂停')
+    await loadDocs()
+  } catch (error) {
+    notifyError(error, '暂停检索失败')
+  } finally {
+    actionDocId.value = null
+  }
+}
+
+/**
+ * 恢复资料检索。
+ */
+async function onResumeRetrieval(
+  doc: KnowledgeDoc,
+): Promise<void> {
+  if (!canControlRetrieval(doc)) {
+    notifyWarning('当前资料不能恢复检索')
+    return
+  }
+
+  if (doc.qualityStatus !== 'SUSPENDED') {
+    return
+  }
+
+  const courseId = selectedCourseId.value
+  if (!courseId || doc.courseId !== courseId) {
+    return
+  }
+
+  let reason: string
+  try {
+    const result = await ElMessageBox.prompt(
+      '恢复前，系统会再次检查是否存在未完成的抽检任务和质量问题。',
+      '恢复知识库检索',
+      {
+        inputType: 'textarea',
+        inputPlaceholder: '填写恢复原因',
+        inputValidator: value =>
+          Boolean(value?.trim()) || '请填写恢复原因',
+        confirmButtonText: '确认恢复',
+        cancelButtonText: '取消',
+        type: 'warning',
+      },
+    )
+    reason = result.value.trim()
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') {
+      notifyError(error, '无法确认恢复检索')
+    }
+    return
+  }
+
+  actionDocId.value = doc.id
+  try {
+    await resumeQualityDocument(courseId, doc.id, reason)
+    notifySuccess('资料检索已恢复')
+    await loadDocs()
+  } catch (error) {
+    notifyError(error, '恢复检索失败')
+  } finally {
+    actionDocId.value = null
+  }
+}
+
 function documentTone(doc: KnowledgeDoc): Tone {
   const tone = documentStatusTagType(doc.status)
   return tone === 'info' ? 'neutral' : tone
@@ -1299,6 +1421,31 @@ function documentTone(doc: KnowledgeDoc): Tone {
                     </el-tag>
                   </template>
                 </el-table-column>
+                <el-table-column
+                  v-if="canManageDocuments"
+                  label="质量状态"
+                  width="120"
+                >
+                  <template #default="{ row }">
+                    <el-tooltip
+                      v-if="row.qualityStatus === 'SUSPENDED'"
+                      :content="row.qualityBlockReason || '资料已暂停检索'"
+                      placement="top"
+                    >
+                      <el-tag type="danger" size="small">
+                        已暂停检索
+                      </el-tag>
+                    </el-tooltip>
+
+                    <el-tag
+                      v-else
+                      type="success"
+                      size="small"
+                    >
+                      正常
+                    </el-tag>
+                  </template>
+                </el-table-column>
                 <el-table-column label="状态" :width="compact ? 85 : 100">
                   <template #default="{ row }">
                     <TagBadge
@@ -1326,7 +1473,7 @@ function documentTone(doc: KnowledgeDoc): Tone {
                 </el-table-column>
                 <el-table-column
                   label="操作"
-                  :width="compact ? 240 : 500"
+                  :width="compact ? 250 : 520"
                   fixed="right"
                 >
                   <template #default="{ row }">
@@ -1375,6 +1522,32 @@ function documentTone(doc: KnowledgeDoc): Tone {
                         @click="openReviewManager(row)"
                       >
                         {{ row.reviewStatus === 'APPROVED' ? '审核记录' : '发布审核' }}
+                      </el-button>
+
+                      <el-button
+                        v-if="
+                          canControlRetrieval(row)
+                          && row.qualityStatus !== 'SUSPENDED'
+                        "
+                        text
+                        type="danger"
+                        :loading="actionDocId === row.id"
+                        @click="onSuspendRetrieval(row)"
+                      >
+                        暂停检索
+                      </el-button>
+
+                      <el-button
+                        v-if="
+                          canControlRetrieval(row)
+                          && row.qualityStatus === 'SUSPENDED'
+                        "
+                        text
+                        type="success"
+                        :loading="actionDocId === row.id"
+                        @click="onResumeRetrieval(row)"
+                      >
+                        恢复检索
                       </el-button>
 
                       <el-button
