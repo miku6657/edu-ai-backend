@@ -736,6 +736,27 @@ ChatService {
                         "Python SSE stream ended unexpectedly");
             }
 
+            // Python 没有明确发送 no_evidence，
+            // 但模型可能已经通过自然语言明确拒答。
+            // 对最终回答进行二次判断。
+            if (!noEvidence && isNoEvidenceAnswer(answer.toString())) {
+
+                noEvidence = true;
+
+                noEvidenceReason = "NO_RETRIEVAL_MATCH";
+
+                log.info(
+                        "检测到模型自然语言拒答，转为无依据状态，questionMessageId={}",
+                        questionMessageId
+                );
+            }
+
+            // 无依据拒答不保留误导性的检索引用。
+            // 这些资料虽然被检索到，但不能作为回答依据。
+            if (noEvidence) {
+                sourcesJson = "[]";
+            }
+
             // 第一步：尝试进入 COMPLETING
             // 如果用户取消已经成功，这里就不能继续保存
             if (!running.beginCompletion()) {
@@ -893,6 +914,50 @@ ChatService {
 
             emitter.complete();
         }
+    }
+
+    /**
+     * 识别 AI 模型生成的自然语言拒答。
+     *
+     * 有些情况下，向量检索能够找到相关度较低的资料，
+     * 但模型判断这些资料不足以回答问题。
+     *
+     * 这种情况 Python 不一定会发送 no_evidence 事件，
+     * 因此 Java 需要对最终回答进行二次判断。
+     */
+    private boolean isNoEvidenceAnswer(String answer) {
+
+        if (answer == null || answer.isBlank()) {
+            return false;
+        }
+
+        // 去除空白字符，方便匹配不同排版的拒答文本
+        String text = answer.replaceAll("\\s+", "");
+
+        // 明确的无依据拒答表达
+        if (text.contains("资料中未找到相关内容")
+                || text.contains("课程资料中未找到相关内容")
+                || text.contains("当前课程资料未涉及")
+                || text.contains("无法根据课程资料回答")
+                || text.contains("课程资料不足以回答")) {
+            return true;
+        }
+
+        // 课程资料范围不包含学生询问的知识点
+        boolean mentionsCourseMaterial =
+                text.contains("课程资料")
+                        || text.contains("本轮提供的资料")
+                        || text.contains("当前资料");
+
+        boolean indicatesMissingContent =
+                text.contains("并未涉及")
+                        || text.contains("没有涉及")
+                        || text.contains("未包含相关内容")
+                        || text.contains("没有提及")
+                        || text.contains("未找到相关内容");
+
+        return mentionsCourseMaterial
+                && indicatesMissingContent;
     }
 
     private void send(
