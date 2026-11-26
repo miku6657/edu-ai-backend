@@ -175,4 +175,23 @@ public final class DocumentQualityVO {
             String role
 
     ) {}
+
+    /**
+     * 文档质量控制状态。
+     */
+    public record Control(
+
+            String documentId,
+
+            String qualityStatus,
+
+            String qualityBlockReason,
+
+            String qualityBlockedBy,
+
+            LocalDateTime qualityBlockedAt,
+
+            boolean retrievable
+
+    ) {}
 }

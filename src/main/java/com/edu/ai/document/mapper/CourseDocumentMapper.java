@@ -26,6 +26,7 @@ public interface CourseDocumentMapper
               AND status = 'READY'
               AND version_status = 'CURRENT'
               AND review_status = 'APPROVED'
+              AND quality_status = 'NORMAL'
             ORDER BY id ASC
             """)
     List<CourseDocument> selectReadyByCourseId(
@@ -47,6 +48,7 @@ public interface CourseDocumentMapper
               AND status = 'READY'
               AND version_status = 'CURRENT'
               AND review_status = 'APPROVED'
+              AND quality_status = 'NORMAL'
             ORDER BY id ASC
             """)
     List<Long> selectReadyDocumentIds(

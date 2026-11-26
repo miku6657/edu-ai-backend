@@ -53,6 +53,18 @@ public class DocumentVO {
 
     private String reviewComment;
 
+    /**
+     * F2-05 质量控制状态。
+     */
+    private String qualityStatus;
+
+    private String qualityBlockReason;
+
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long qualityBlockedBy;
+
+    private LocalDateTime qualityBlockedAt;
+
     private String status;
 
     private String errorMessage;
@@ -108,6 +120,22 @@ public class DocumentVO {
 
         vo.setReviewComment(
                 doc.getReviewComment()
+        );
+
+        vo.setQualityStatus(
+                doc.getQualityStatus()
+        );
+
+        vo.setQualityBlockReason(
+                doc.getQualityBlockReason()
+        );
+
+        vo.setQualityBlockedBy(
+                doc.getQualityBlockedBy()
+        );
+
+        vo.setQualityBlockedAt(
+                doc.getQualityBlockedAt()
         );
 
         vo.setStatus(doc.getStatus());

@@ -329,4 +329,78 @@ public class DocumentQualityController {
                 )
         );
     }
+
+    /**
+     * 查询文档质量控制状态。
+     */
+    @GetMapping("/documents/{documentId}/control")
+    public Result<DocumentQualityVO.Control>
+            getDocumentControl(
+
+            @PathVariable Long courseId,
+
+            @PathVariable Long documentId,
+
+            Authentication auth) {
+
+        return Result.success(
+                service.getDocumentControl(
+                        courseId,
+                        documentId,
+                        userId(auth)
+                )
+        );
+    }
+
+    /**
+     * 暂停资料检索。
+     */
+    @PostMapping("/documents/{documentId}/suspend")
+    public Result<DocumentQualityVO.Control>
+            suspendDocument(
+
+            @PathVariable Long courseId,
+
+            @PathVariable Long documentId,
+
+            @RequestBody
+            DocumentQualityRequest.ControlAction request,
+
+            Authentication auth) {
+
+        return Result.success(
+                service.suspendDocument(
+                        courseId,
+                        documentId,
+                        userId(auth),
+                        request
+                )
+        );
+    }
+
+    /**
+     * 恢复资料检索。
+     */
+    @PostMapping("/documents/{documentId}/resume")
+    public Result<DocumentQualityVO.Control>
+            resumeDocument(
+
+            @PathVariable Long courseId,
+
+            @PathVariable Long documentId,
+
+            @RequestBody
+            DocumentQualityRequest.ControlAction request,
+
+            Authentication auth) {
+
+        return Result.success(
+                service.resumeDocument(
+                        courseId,
+                        documentId,
+                        userId(auth),
+                        request
+                )
+        );
+    }
 }

@@ -1,5 +1,7 @@
 package com.edu.ai.document.service;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+
 import com.edu.ai.common.BusinessException;
 
 import com.edu.ai.course.service.CoursePermissionService;
@@ -33,6 +35,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
@@ -314,6 +317,52 @@ public class DocumentQualityService {
                     "课程当前不可用"
             );
         }
+    }
+
+    /**
+     * 获取文档行锁。
+     *
+     * 调用前必须已经获得课程行锁。
+     */
+    private CourseDocument lockQualityDocument(
+
+            Long courseId,
+
+            Long documentId,
+
+            Long userId) {
+
+        lockCourse(
+                courseId,
+                userId
+        );
+
+        CourseDocument document =
+                documentMapper.selectOne(
+                        new LambdaQueryWrapper<CourseDocument>()
+                                .eq(
+                                        CourseDocument::getId,
+                                        documentId
+                                )
+                                .eq(
+                                        CourseDocument::getCourseId,
+                                        courseId
+                                )
+                                .last("LIMIT 1 FOR UPDATE")
+                );
+
+        if (document == null) {
+            throw notFound("当前课程中不存在该资料");
+        }
+
+        if (!"READY".equals(document.getStatus())
+                || !"CURRENT".equals(document.getVersionStatus())
+                || !"APPROVED".equals(document.getReviewStatus())) {
+
+            throw conflict("只有当前已正式发布的资料才能执行质量控制");
+        }
+
+        return document;
     }
 
     /**
@@ -754,31 +803,47 @@ public class DocumentQualityService {
                 );
 
         // 锁定文档并读取最新状态。
-        List<String> documentStatuses =
+        List<Map<String, Object>> documentStates =
                 jdbc.queryForList(
-
                         """
-                        SELECT status
+                        SELECT
+                            status,
+                            version_status,
+                            review_status
                         FROM course_document
                         WHERE id = ?
                           AND course_id = ?
                         FOR UPDATE
                         """,
-
-                        String.class,
-
                         documentId,
-
                         courseId
                 );
 
-        if (documentStatuses.isEmpty()
-                || !"READY".equals(
-                        documentStatuses.get(0))) {
+        if (documentStates.isEmpty()) {
+            throw notFound("抽检文档不存在");
+        }
 
-            throw conflict(
-                    "文档尚未完成解析"
-            );
+        Map<String, Object> state =
+                documentStates.get(0);
+
+        if (!"READY".equals(state.get("status"))) {
+            throw conflict("文档尚未完成解析");
+        }
+
+        String versionStatus =
+                Objects.toString(
+                        state.get("version_status"),
+                        ""
+                );
+
+        if (!"PENDING".equals(versionStatus)
+                && !"CURRENT".equals(versionStatus)) {
+
+            throw conflict("历史版本不能创建新的抽检任务");
+        }
+
+        if ("PENDING".equals(state.get("review_status"))) {
+            throw conflict("资料正在等待发布审核，请先撤回审核");
         }
 
         if (document.getResourceId() == null
@@ -2265,5 +2330,292 @@ public class DocumentQualityService {
         if (reason != null) {
             throw conflict(reason);
         }
+    }
+
+    /**
+     * 查询文档质量控制状态。
+     */
+    public DocumentQualityVO.Control getDocumentControl(
+
+            Long courseId,
+
+            Long documentId,
+
+            Long userId) {
+
+        requireManage(
+                courseId,
+                userId
+        );
+
+        List<DocumentQualityVO.Control> rows =
+                jdbc.query(
+                        """
+                        SELECT
+                            id AS document_id,
+                            status,
+                            version_status,
+                            review_status,
+                            quality_status,
+                            quality_block_reason,
+                            quality_blocked_by,
+                            quality_blocked_at
+                        FROM course_document
+                        WHERE id = ?
+                          AND course_id = ?
+                        """,
+                        (rs, rowNum) -> {
+
+                            String qualityStatus =
+                                    rs.getString("quality_status");
+
+                            boolean retrievable =
+                                    "READY".equals(
+                                            rs.getString("status")
+                                    )
+                                    && "CURRENT".equals(
+                                            rs.getString("version_status")
+                                    )
+                                    && "APPROVED".equals(
+                                            rs.getString("review_status")
+                                    )
+                                    && "NORMAL".equals(qualityStatus);
+
+                            return new DocumentQualityVO.Control(
+                                    stringId(rs, "document_id"),
+                                    qualityStatus,
+                                    rs.getString("quality_block_reason"),
+                                    stringId(rs, "quality_blocked_by"),
+                                    dateTime(rs, "quality_blocked_at"),
+                                    retrievable
+                            );
+                        },
+                        documentId,
+                        courseId
+                );
+
+        if (rows.isEmpty()) {
+            throw notFound("文档不存在");
+        }
+
+        return rows.get(0);
+    }
+
+    /**
+     * 保存质量控制操作记录。
+     */
+    private void saveQualityControlLog(
+
+            Long courseId,
+
+            Long documentId,
+
+            Long userId,
+
+            String action,
+
+            String previousStatus,
+
+            String nextStatus,
+
+            String reason) {
+
+        jdbc.update(
+                """
+                INSERT INTO course_document_quality_control_log (
+                    course_id,
+                    document_id,
+                    operator_id,
+                    action,
+                    previous_status,
+                    next_status,
+                    reason
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                courseId,
+                documentId,
+                userId,
+                action,
+                previousStatus,
+                nextStatus,
+                reason
+        );
+    }
+
+    /**
+     * 暂停已发布资料的 RAG 检索。
+     */
+    @Transactional(
+            rollbackFor = Exception.class,
+            isolation = Isolation.READ_COMMITTED
+    )
+    public DocumentQualityVO.Control suspendDocument(
+
+            Long courseId,
+
+            Long documentId,
+
+            Long userId,
+
+            DocumentQualityRequest.ControlAction request) {
+
+        if (request == null) {
+            throw badRequest("暂停原因不能为空");
+        }
+
+        String reason = text(
+                request.reason(),
+                1000,
+                true,
+                "暂停原因"
+        );
+
+        CourseDocument document =
+                lockQualityDocument(
+                        courseId,
+                        documentId,
+                        userId
+                );
+
+        String previousStatus =
+                document.getQualityStatus() == null
+                        ? "NORMAL"
+                        : document.getQualityStatus();
+
+        if ("SUSPENDED".equals(previousStatus)) {
+            throw conflict("该资料已经处于暂停检索状态");
+        }
+
+        if (!"NORMAL".equals(previousStatus)) {
+            throw conflict("当前资料质量状态异常");
+        }
+
+        int updated = jdbc.update(
+                """
+                UPDATE course_document
+                SET quality_status = 'SUSPENDED',
+                    quality_block_reason = ?,
+                    quality_blocked_by = ?,
+                    quality_blocked_at = NOW(),
+                    update_time = NOW()
+                WHERE id = ?
+                  AND course_id = ?
+                  AND quality_status = 'NORMAL'
+                """,
+                reason,
+                userId,
+                documentId,
+                courseId
+        );
+
+        requireUpdated(
+                updated,
+                "暂停检索失败，资料状态已经变化"
+        );
+
+        saveQualityControlLog(
+                courseId,
+                documentId,
+                userId,
+                "SUSPEND",
+                previousStatus,
+                "SUSPENDED",
+                reason
+        );
+
+        return getDocumentControl(
+                courseId,
+                documentId,
+                userId
+        );
+    }
+
+    /**
+     * 恢复已完成整改的资料检索。
+     */
+    @Transactional(
+            rollbackFor = Exception.class,
+            isolation = Isolation.READ_COMMITTED
+    )
+    public DocumentQualityVO.Control resumeDocument(
+
+            Long courseId,
+
+            Long documentId,
+
+            Long userId,
+
+            DocumentQualityRequest.ControlAction request) {
+
+        if (request == null) {
+            throw badRequest("恢复原因不能为空");
+        }
+
+        String reason = text(
+                request.reason(),
+                1000,
+                true,
+                "恢复原因"
+        );
+
+        CourseDocument document =
+                lockQualityDocument(
+                        courseId,
+                        documentId,
+                        userId
+                );
+
+        if (!"SUSPENDED".equals(
+                document.getQualityStatus())) {
+
+            throw conflict("当前资料没有处于暂停检索状态");
+        }
+
+        // 必须保证：
+        // 1. 不存在进行中的质量抽检任务。
+        // 2. 不存在尚未关闭的质量问题。
+        // 3. 不存在要求使用新版本整改的历史问题。
+        requirePublishable(
+                courseId,
+                documentId
+        );
+
+        int updated = jdbc.update(
+                """
+                UPDATE course_document
+                SET quality_status = 'NORMAL',
+                    quality_block_reason = NULL,
+                    quality_blocked_by = NULL,
+                    quality_blocked_at = NULL,
+                    update_time = NOW()
+                WHERE id = ?
+                  AND course_id = ?
+                  AND quality_status = 'SUSPENDED'
+                """,
+                documentId,
+                courseId
+        );
+
+        requireUpdated(
+                updated,
+                "恢复检索失败，资料状态已经变化"
+        );
+
+        saveQualityControlLog(
+                courseId,
+                documentId,
+                userId,
+                "RESUME",
+                "SUSPENDED",
+                "NORMAL",
+                reason
+        );
+
+        return getDocumentControl(
+                courseId,
+                documentId,
+                userId
+        );
     }
 }

@@ -80,4 +80,13 @@ public final class DocumentQualityRequest {
             String comment
 
     ) {}
+
+    /**
+     * 暂停或恢复检索请求。
+     */
+    public record ControlAction(
+
+            String reason
+
+    ) {}
 }

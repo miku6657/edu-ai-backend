@@ -83,6 +83,29 @@ public class CourseDocument {
     private String reviewComment;
 
     /**
+     * 知识库质量状态。
+     *
+     * NORMAL：正常，可以参与检索。
+     * SUSPENDED：质量异常，暂停检索。
+     */
+    private String qualityStatus;
+
+    /**
+     * 暂停检索原因。
+     */
+    private String qualityBlockReason;
+
+    /**
+     * 执行暂停操作的用户。
+     */
+    private Long qualityBlockedBy;
+
+    /**
+     * 暂停检索时间。
+     */
+    private LocalDateTime qualityBlockedAt;
+
+    /**
      * 切片算法版本。
      */
     private Integer chunkingVersion;
