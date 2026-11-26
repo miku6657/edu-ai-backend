@@ -200,6 +200,32 @@ ChatService {
     }
 
     /**
+     * 兼容字符串和整数类型的文档ID。
+     */
+    private String readCitationDocumentId(JsonNode source) {
+
+        if (source == null || !source.isObject()) {
+            return null;
+        }
+
+        JsonNode idNode = source.get("documentId");
+
+        if (idNode == null || idNode.isNull()) {
+            return null;
+        }
+
+        if (idNode.isString()) {
+            return idNode.asString();
+        }
+
+        if (idNode.isIntegralNumber()) {
+            return idNode.toString();
+        }
+
+        return null;
+    }
+
+    /**
      * 补充引用资料名称。
      *
      * 只允许查询当前课程下的资料，
@@ -219,15 +245,10 @@ ChatService {
 
         for (JsonNode source : sources) {
 
-            JsonNode idNode = source.path("documentId");
+            String idText = readCitationDocumentId(source);
 
-            if (idNode.isMissingNode() || idNode.isNull()) {
-                continue;
-            }
-
-            String idText = idNode.asString();
-
-            if (!idText.matches("[1-9][0-9]*")) {
+            if (idText == null
+                    || !idText.matches("[1-9][0-9]*")) {
                 continue;
             }
 
@@ -271,8 +292,12 @@ ChatService {
 
             ObjectNode citation = (ObjectNode) source.deepCopy();
 
-            String idText =
-                    citation.path("documentId").asString();
+            String idText = readCitationDocumentId(citation);
+
+            if (idText == null
+                    || !idText.matches("[1-9][0-9]*")) {
+                continue;
+            }
 
             String documentName = "未知资料";
 
