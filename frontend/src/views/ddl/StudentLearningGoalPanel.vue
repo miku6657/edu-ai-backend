@@ -75,6 +75,18 @@ const form = ref({
   targetDate: '',
 })
 
+/**
+ * 学生端课程知识点折叠状态。
+ * 默认收起，展开后加载知识点相关内容。
+ */
+const knowledgeCollapse = ref<string[]>([])
+
+/**
+ * 学习路径和复习建议折叠状态。
+ * 默认展开学习路径，收起复习建议。
+ */
+const learningSectionCollapse = ref<string[]>(['path'])
+
 onMounted(async () => {
   try {
     courses.value = await listJoinedCourses()
@@ -103,6 +115,8 @@ watch(courseId, async (id) => {
     weeklyHours: 6,
     targetDate: '',
   }
+  knowledgeCollapse.value = []
+  learningSectionCollapse.value = ['path']
 
   if (!id) {
     loading.value = false
@@ -244,6 +258,7 @@ async function generatePath(): Promise<void> {
       goal.value.id,
     )
 
+    learningSectionCollapse.value = ['path']
     learningPathProgress.value = null
     await refreshPathProgress()
     notifySuccess('学习路径生成成功')
@@ -582,15 +597,40 @@ defineExpose({ refreshPathProgress })
         学习目标已确认。下一阶段将根据目标、每周可用时间和课程知识点生成学习路径。
       </p>
 
-      <StudentKnowledgeMasteryPanel
+      <!-- 学生端课程知识点折叠区域 -->
+      <el-collapse
         v-if="courseId"
-        :course-id="courseId"
-      />
+        v-model="knowledgeCollapse"
+        class="student-section-collapse"
+      >
+        <el-collapse-item
+          name="knowledge"
+          lazy
+        >
+          <template #title>
+            <div class="section-collapse-title">
+              <div class="section-collapse-title__main">
+                <strong>课程知识点与学习分析</strong>
+                <span>知识点掌握程度、知识地图和 AI 薄弱点分析</span>
+              </div>
 
-      <StudentWeakPointPanel
-        v-if="courseId"
-        :course-id="courseId"
-      />
+              <el-tag size="small" type="info">
+                学习辅助
+              </el-tag>
+            </div>
+          </template>
+
+          <div class="section-collapse-content">
+            <StudentKnowledgeMasteryPanel
+              :course-id="courseId"
+            />
+
+            <StudentWeakPointPanel
+              :course-id="courseId"
+            />
+          </div>
+        </el-collapse-item>
+      </el-collapse>
 
       <el-button
         v-if="goal?.status === 'CONFIRMED' && !generatedPath"
@@ -601,64 +641,124 @@ defineExpose({ refreshPathProgress })
         生成学习路径
       </el-button>
 
-      <div v-if="generatedPath">
-        <el-divider content-position="left">
-          我的学习路径
-        </el-divider>
-
-        <el-alert
-          type="success"
-          :closable="false"
-          :title="`共 ${generatedPath.totalWeeks} 周，预计 ${(
-            generatedPath.totalMinutes / 60
-          ).toFixed(1)} 小时`"
-        />
-
-        <div
-          v-if="learningPathProgress"
-          class="goal-path-progress"
+      <div
+        v-if="generatedPath"
+        class="learning-path-sections"
+      >
+        <el-collapse
+          v-model="learningSectionCollapse"
+          class="student-section-collapse"
         >
-          <div class="goal-path-progress__item">
-            <strong>{{ learningPathProgress.total }}</strong>
-            <span>总阶段任务数</span>
-          </div>
-          <div class="goal-path-progress__item">
-            <strong>{{ learningPathProgress.completed }}</strong>
-            <span>已完成任务数</span>
-          </div>
-          <div class="goal-path-progress__item">
-            <strong>{{ learningPathProgress.percentage }}%</strong>
-            <span>完成百分比</span>
-          </div>
-          <div class="goal-path-progress__item">
-            <strong>{{ currentWeekLabel }}</strong>
-            <span>当前学习进度</span>
-          </div>
-        </div>
-
-        <el-timeline style="margin-top: 20px">
-          <el-timeline-item
-            v-for="item in generatedPath.items"
-            :key="item.id"
-            :timestamp="`第 ${item.weekNo} 周 · ${item.plannedDueDate}`"
+          <el-collapse-item
+            name="path"
+            lazy
           >
-            <strong>{{ item.title }}</strong>
+            <template #title>
+              <div class="section-collapse-title">
+                <div class="section-collapse-title__main">
+                  <strong>我的学习路径</strong>
+                  <span>
+                    共 {{ generatedPath.totalWeeks }} 周
+                    · 预计 {{ (generatedPath.totalMinutes / 60).toFixed(1) }} 小时
+                    · {{ currentWeekLabel }}
+                  </span>
+                </div>
 
-            <div>
-              预计学习 {{ item.plannedMinutes }} 分钟
+                <el-tag size="small" type="success">
+                  学习计划
+                </el-tag>
+              </div>
+            </template>
+
+            <div class="section-collapse-content">
+              <el-alert
+                type="success"
+                :closable="false"
+                :title="`共 ${generatedPath.totalWeeks} 周，预计 ${(
+                  generatedPath.totalMinutes / 60
+                ).toFixed(1)} 小时`"
+              />
+
+              <div
+                v-if="learningPathProgress"
+                class="goal-path-progress"
+              >
+                <div class="goal-path-progress__item">
+                  <strong>{{ learningPathProgress.total }}</strong>
+                  <span>总阶段任务数</span>
+                </div>
+
+                <div class="goal-path-progress__item">
+                  <strong>{{ learningPathProgress.completed }}</strong>
+                  <span>已完成任务数</span>
+                </div>
+
+                <div class="goal-path-progress__item">
+                  <strong>{{ learningPathProgress.percentage }}%</strong>
+                  <span>完成百分比</span>
+                </div>
+
+                <div class="goal-path-progress__item">
+                  <strong>{{ currentWeekLabel }}</strong>
+                  <span>当前学习进度</span>
+                </div>
+              </div>
+
+              <div class="path-timeline">
+                <strong>阶段学习安排</strong>
+
+                <el-timeline>
+                  <el-timeline-item
+                    v-for="item in generatedPath.items"
+                    :key="item.id"
+                    :timestamp="`第 ${item.weekNo} 周 · ${item.plannedDueDate}`"
+                  >
+                    <strong>{{ item.title }}</strong>
+
+                    <div>
+                      预计学习 {{ item.plannedMinutes }} 分钟
+                    </div>
+                  </el-timeline-item>
+                </el-timeline>
+              </div>
+
+              <div class="path-actions">
+                <el-button
+                  :icon="RefreshCw"
+                  :loading="adjusting"
+                  @click="previewAdjustment"
+                >
+                  调整学习路径
+                </el-button>
+              </div>
             </div>
-          </el-timeline-item>
-        </el-timeline>
+          </el-collapse-item>
 
-        <el-divider content-position="left">
-          高频提问复习建议
-        </el-divider>
+          <el-collapse-item
+            name="review"
+            lazy
+          >
+            <template #title>
+              <div class="section-collapse-title">
+                <div class="section-collapse-title__main">
+                  <strong>高频提问复习建议</strong>
+                  <span>
+                    分析薄弱知识点，制定个性化复习计划
+                  </span>
+                </div>
 
-        <el-alert
-          type="info"
-          :closable="false"
-          title="系统根据最近30天的提问频率，分析可能需要加强复习的知识点。该结果仅供学习规划参考。"
-        />
+                <el-tag size="small" type="warning">
+                  AI 学习分析
+                </el-tag>
+              </div>
+            </template>
+
+            <div class="section-collapse-content">
+              <el-alert
+                type="info"
+                :closable="false"
+                title="系统根据最近30天的提问频率，分析可能需要加强复习的知识点。该结果仅供学习规划参考。"
+              />
 
         <div class="goal-weak-review__action">
           <el-button
@@ -870,13 +970,9 @@ defineExpose({ refreshPathProgress })
           </div>
         </div>
 
-        <el-button
-          :icon="RefreshCw"
-          :loading="adjusting"
-          @click="previewAdjustment"
-        >
-          调整学习路径
-        </el-button>
+            </div>
+          </el-collapse-item>
+        </el-collapse>
 
         <el-dialog
           v-model="adjustmentVisible"
@@ -1021,5 +1117,83 @@ defineExpose({ refreshPathProgress })
   display: flex;
   flex-wrap: wrap;
   gap: 28px;
+}
+
+/* 学生端统一折叠面板 */
+.student-section-collapse {
+  border-top: 1px solid var(--el-border-color-light);
+  border-bottom: 1px solid var(--el-border-color-light);
+}
+
+.student-section-collapse :deep(.el-collapse-item__header) {
+  min-height: 64px;
+  height: auto;
+  line-height: normal;
+  padding: 10px 0;
+}
+
+.section-collapse-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: 1;
+  min-width: 0;
+  gap: 12px;
+  padding-right: 12px;
+}
+
+.section-collapse-title__main {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.section-collapse-title__main strong {
+  color: var(--el-text-color-primary);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.section-collapse-title__main span {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  font-weight: normal;
+  line-height: 1.5;
+}
+
+.section-collapse-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 8px 0 16px;
+}
+
+.learning-path-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.path-timeline {
+  display: grid;
+  gap: 16px;
+  margin-top: 8px;
+}
+
+.path-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 600px) {
+  .section-collapse-title__main span {
+    max-width: 240px;
+  }
+
+  .goal-path-progress {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 </style>
