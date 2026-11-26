@@ -17,6 +17,8 @@ import { listKnowledgePoints } from '@/api/learning-path'
 import type { KnowledgePoint } from '@/api/learning-path'
 import {
   deleteDoc,
+  documentReviewStatusLabel,
+  documentReviewStatusTagType,
   listDocs,
   RESOURCE_TYPE_OPTIONS,
   resourceTypeLabel,
@@ -30,6 +32,7 @@ import type {
   ResourceType,
   ResourceTypeSelection,
 } from '@/api/knowledge'
+import type { DocumentReviewDetail } from '@/api/document-review'
 import type { BigIntId } from '@/api/types'
 import BaseCard from '@/components/ui/BaseCard.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
@@ -39,6 +42,7 @@ import { useCourseStore } from '@/stores/course'
 import { notifyError, notifySuccess, notifyWarning } from '@/utils/notify'
 import DocumentClassificationPanel from '@/views/knowledge/DocumentClassificationPanel.vue'
 import DocumentChunkDialog from '@/views/knowledge/DocumentChunkDialog.vue'
+import DocumentReviewDialog from '@/views/knowledge/DocumentReviewDialog.vue'
 import DocumentMergeDialog from '@/views/knowledge/DocumentMergeDialog.vue'
 import DocumentPreviewDialog from '@/views/knowledge/DocumentPreviewDialog.vue'
 import DocumentVersionDialog from '@/views/knowledge/DocumentVersionDialog.vue'
@@ -93,6 +97,8 @@ const versionDocument = ref<KnowledgeDoc | null>(null)
 const mergeDialogVisible = ref(false)
 const chunkDialogVisible = ref(false)
 const chunkDocument = ref<KnowledgeDoc | null>(null)
+const reviewDialogVisible = ref(false)
+const reviewDocument = ref<KnowledgeDoc | null>(null)
 const resourceFilterOptions = [
   { value: '', label: '全部类型' },
   ...RESOURCE_TYPE_OPTIONS.filter(
@@ -272,6 +278,8 @@ watch(
     mergeDialogVisible.value = false
     chunkDialogVisible.value = false
     chunkDocument.value = null
+    reviewDialogVisible.value = false
+    reviewDocument.value = null
     void loadResourceClassifications()
   },
   { immediate: true },
@@ -502,6 +510,73 @@ function openChunkManager(doc: KnowledgeDoc): void {
 
   chunkDocument.value = doc
   chunkDialogVisible.value = true
+}
+
+/**
+ * 打开知识库发布审核页面。
+ */
+function openReviewManager(doc: KnowledgeDoc): void {
+  if (!canManageDocuments.value) {
+    notifyWarning('无权进行知识库发布审核')
+    return
+  }
+  if (doc.courseId !== selectedCourseId.value) {
+    notifyWarning('该资料不属于当前课程')
+    return
+  }
+  if (doc.status !== 'READY') {
+    notifyWarning('资料尚未完成解析')
+    return
+  }
+
+  reviewDocument.value = doc
+  reviewDialogVisible.value = true
+}
+
+/**
+ * 审核操作成功后同步更新文档数据。
+ */
+async function onReviewChanged(
+  detail: DocumentReviewDetail,
+): Promise<void> {
+  if (detail.courseId !== selectedCourseId.value) return
+
+  function updateDocument(document: KnowledgeDoc): KnowledgeDoc {
+    return {
+      ...document,
+      status: detail.status,
+      versionStatus: detail.versionStatus,
+      reviewStatus: detail.reviewStatus,
+      reviewSubmitterId: detail.reviewSubmitterId,
+      reviewSubmitTime: detail.reviewSubmitTime,
+      reviewerId: detail.reviewerId,
+      reviewTime: detail.reviewTime,
+      reviewComment: detail.reviewComment,
+    }
+  }
+
+  if (reviewDocument.value?.id === detail.documentId) {
+    reviewDocument.value = updateDocument(reviewDocument.value)
+  }
+  if (chunkDocument.value?.id === detail.documentId) {
+    chunkDocument.value = updateDocument(chunkDocument.value)
+  }
+
+  await loadDocs()
+  await loadResourceClassifications()
+  if (detail.courseId !== selectedCourseId.value) return
+
+  if (chunkDocument.value) {
+    const latest = docs.value.find(
+      doc => doc.id === chunkDocument.value?.id,
+    )
+    if (latest) {
+      chunkDocument.value = latest
+    } else {
+      chunkDialogVisible.value = false
+      chunkDocument.value = null
+    }
+  }
 }
 
 function openVersionManager(doc: KnowledgeDoc): void {
@@ -1162,6 +1237,20 @@ function documentTone(doc: KnowledgeDoc): Tone {
                     </div>
                   </template>
                 </el-table-column>
+                <el-table-column
+                  v-if="canManageDocuments"
+                  label="发布审核"
+                  width="110"
+                >
+                  <template #default="{ row }">
+                    <el-tag
+                      size="small"
+                      :type="documentReviewStatusTagType(row.reviewStatus)"
+                    >
+                      {{ documentReviewStatusLabel(row.reviewStatus) }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
                 <el-table-column label="状态" :width="compact ? 85 : 100">
                   <template #default="{ row }">
                     <TagBadge
@@ -1189,7 +1278,7 @@ function documentTone(doc: KnowledgeDoc): Tone {
                 </el-table-column>
                 <el-table-column
                   label="操作"
-                  :width="compact ? 200 : 340"
+                  :width="compact ? 220 : 420"
                   fixed="right"
                 >
                   <template #default="{ row }">
@@ -1213,6 +1302,18 @@ function documentTone(doc: KnowledgeDoc): Tone {
                         @click="openChunkManager(row)"
                       >
                         切片管理
+                      </el-button>
+
+                      <el-button
+                        v-if="
+                          canManageDocuments
+                          && row.status === 'READY'
+                        "
+                        text
+                        type="primary"
+                        @click="openReviewManager(row)"
+                      >
+                        {{ row.reviewStatus === 'APPROVED' ? '审核记录' : '发布审核' }}
                       </el-button>
 
                       <el-button
@@ -1288,6 +1389,14 @@ function documentTone(doc: KnowledgeDoc): Tone {
       :document="chunkDocument"
       :chapters="chapters"
       @preview="openPreview"
+    />
+    <DocumentReviewDialog
+      v-model="reviewDialogVisible"
+      :course-id="selectedCourseId"
+      :document="reviewDocument"
+      @changed="onReviewChanged"
+      @preview="openPreview"
+      @chunks="openChunkManager"
     />
     <DocumentMergeDialog
       v-model="mergeDialogVisible"

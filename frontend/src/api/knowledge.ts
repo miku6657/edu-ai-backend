@@ -16,6 +16,17 @@ export type DocumentVersionStatus =
   | 'CURRENT'
   | 'HISTORY'
 
+/**
+ * 知识库发布审核状态。
+ *
+ * 与文档解析状态、版本状态相互独立。
+ */
+export type DocumentReviewStatus =
+  | 'DRAFT'
+  | 'PENDING'
+  | 'APPROVED'
+  | 'REJECTED'
+
 export type ResourceType =
   | 'LESSON_PLAN'
   | 'COURSEWARE'
@@ -56,6 +67,14 @@ export interface KnowledgeDoc {
 
   resourceType: ResourceType
   sourceInfo: string | null
+
+  // F2-04 知识库发布审核
+  reviewStatus: DocumentReviewStatus
+  reviewSubmitterId: BigIntId | null
+  reviewSubmitTime: string | null
+  reviewerId: BigIntId | null
+  reviewTime: string | null
+  reviewComment: string | null
 
   status: DocumentStatus
   errorMessage: string | null
@@ -237,5 +256,72 @@ export function mergeDocuments(
       method: 'POST',
       body: data,
     },
+  )
+}
+
+/**
+ * 审核状态显示名称。
+ */
+export function documentReviewStatusLabel(
+  status: DocumentReviewStatus | null | undefined,
+): string {
+  switch (status) {
+    case 'DRAFT':
+      return '待提交'
+    case 'PENDING':
+      return '待审核'
+    case 'APPROVED':
+      return '审核通过'
+    case 'REJECTED':
+      return '审核驳回'
+    default:
+      return '未知状态'
+  }
+}
+
+/**
+ * 审核状态标签样式。
+ */
+export function documentReviewStatusTagType(
+  status: DocumentReviewStatus | null | undefined,
+): 'info' | 'warning' | 'success' | 'danger' {
+  switch (status) {
+    case 'PENDING':
+      return 'warning'
+    case 'APPROVED':
+      return 'success'
+    case 'REJECTED':
+      return 'danger'
+    default:
+      return 'info'
+  }
+}
+
+/**
+ * 判断文档是否正式发布。
+ */
+export function isDocumentPublished(
+  document: KnowledgeDoc,
+): boolean {
+  return (
+    document.status === 'READY'
+    && document.versionStatus === 'CURRENT'
+    && document.reviewStatus === 'APPROVED'
+  )
+}
+
+/**
+ * 判断文档是否允许修改知识切片。
+ */
+export function isDocumentKnowledgeEditable(
+  document: KnowledgeDoc | null | undefined,
+): boolean {
+  return (
+    document?.status === 'READY'
+    && document.versionStatus === 'PENDING'
+    && (
+      document.reviewStatus === 'DRAFT'
+      || document.reviewStatus === 'REJECTED'
+    )
   )
 }

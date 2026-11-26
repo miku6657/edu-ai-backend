@@ -5,6 +5,11 @@ import { ElMessageBox } from 'element-plus'
 
 import type { BigIntId } from '@/api/types'
 import type { KnowledgeDoc } from '@/api/knowledge'
+import {
+  documentReviewStatusLabel,
+  documentReviewStatusTagType,
+  isDocumentKnowledgeEditable,
+} from '@/api/knowledge'
 import type { CourseChapter } from '@/api/document-classification'
 import {
   assignChunkChapter,
@@ -98,10 +103,24 @@ const busy = computed(
 )
 const canEdit = computed(
   () =>
-    props.document?.status === 'READY'
-    && props.document?.versionStatus !== 'HISTORY'
-    && pageData.value?.versionStatus !== 'HISTORY',
+    isDocumentKnowledgeEditable(props.document)
+    && pageData.value?.versionStatus === 'PENDING',
 )
+const reviewReadonlyMessage = computed(() => {
+  const document = props.document
+  if (!document) return ''
+
+  if (document.versionStatus === 'HISTORY') {
+    return '历史版本仅供查看，不允许修改知识切片。'
+  }
+  if (document.reviewStatus === 'PENDING') {
+    return '当前资料正在等待发布审核，请撤回审核后再修改。'
+  }
+  if (document.reviewStatus === 'APPROVED') {
+    return '当前资料已经正式发布，请通过新版本进行修改。'
+  }
+  return ''
+})
 const canBackfill = computed(
   () =>
     props.document?.status === 'READY'
@@ -492,6 +511,13 @@ watch(
               V{{ document.versionNo }}
             </el-tag>
             <el-tag
+              v-if="document"
+              size="small"
+              :type="documentReviewStatusTagType(document.reviewStatus)"
+            >
+              {{ documentReviewStatusLabel(document.reviewStatus) }}
+            </el-tag>
+            <el-tag
               v-if="pageData"
               size="small"
               type="info"
@@ -585,6 +611,14 @@ watch(
       </div>
 
       <template v-if="pageData?.initialized">
+        <el-alert
+          v-if="reviewReadonlyMessage"
+          :title="reviewReadonlyMessage"
+          type="info"
+          :closable="false"
+          show-icon
+        />
+
         <ChunkKnowledgeProgress
           v-if="modelValue"
           :key="document?.id"
@@ -794,13 +828,12 @@ watch(
                 设置章节
               </el-button>
               <el-button
-                v-if="canEdit"
                 type="primary"
                 link
                 :disabled="busy || loading"
                 @click="openKnowledgeDialog(row)"
               >
-                知识点关联
+                {{ canEdit ? '知识点关联' : '关联详情' }}
               </el-button>
             </template>
           </el-table-column>
