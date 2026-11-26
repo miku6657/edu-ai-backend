@@ -324,7 +324,8 @@ public class DocumentIndexTask {
 
             lease.assertValid();
 
-            // 同一事务内完成切片保存及文档生效。
+            // 同一事务内完成切片保存及索引状态更新。
+            // 文档索引完成后等待知识库发布审核。
             documentVersionService.finishIndexAndActivate(
                     documentId,
                     token,

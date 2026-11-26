@@ -107,16 +107,19 @@ public class DocumentVersionService {
     }
 
     /**
-     * 将指定文档标记为READY，
-     * 并切换为当前生效版本。
+     * 完成文档索引及切片持久化。
      *
-     * 必须在Python索引成功、
-     * 且索引任务仍持有有效令牌后调用。
+     * F2-04修改：
+     * 索引完成后不再自动激活文档版本，
+     * 而是等待人工审核发布。
      */
     @Transactional(rollbackFor = Exception.class)
     public void finishIndexAndActivate(
+
             Long documentId,
+
             String processingToken,
+
             List<DocumentChunkService.ChunkData> chunks) {
 
         if (processingToken == null
@@ -130,8 +133,30 @@ public class DocumentVersionService {
         VersionDocument document =
                 requireDocument(documentId);
 
-        // 统一锁定资源根记录，
-        // 保证同一资源的版本切换串行执行。
+        // 锁定课程，协调知识点维护与审核操作。
+        List<Integer> courseStatuses =
+                jdbc.queryForList(
+                        """
+                        SELECT status
+                        FROM course
+                        WHERE id = ?
+                        FOR UPDATE
+                        """,
+                        Integer.class,
+                        document.courseId()
+                );
+
+        if (courseStatuses.isEmpty()
+                || !Integer.valueOf(1)
+                           .equals(courseStatuses.get(0))) {
+
+            throw new BusinessException(
+                    409,
+                    "课程当前不可用"
+            );
+        }
+
+        // 锁定资源根记录。
         List<Long> roots = jdbc.queryForList(
                 """
                 SELECT id
@@ -146,16 +171,24 @@ public class DocumentVersionService {
         );
 
         if (roots.isEmpty()) {
+
             throw new BusinessException(
-                    409, "资源根记录不存在"
+                    409,
+                    "资源根记录不存在"
             );
         }
 
-        // 确认本次索引任务仍然有效。
+        // 索引完成，但仍然保持待生效状态。
         int finished = jdbc.update(
                 """
                 UPDATE course_document
                 SET status = 'READY',
+                    review_status = 'DRAFT',
+                    review_submitter_id = NULL,
+                    review_submit_time = NULL,
+                    reviewer_id = NULL,
+                    review_time = NULL,
+                    review_comment = NULL,
                     processing_token = NULL,
                     processing_started_at = NULL,
                     error_message = NULL,
@@ -172,91 +205,28 @@ public class DocumentVersionService {
         );
 
         if (finished != 1) {
+
             throw new BusinessException(
-                    409, "文档索引任务状态已经变化"
+                    409,
+                    "文档索引任务状态已经变化"
             );
         }
 
-        // 保存本次索引实际使用的全部知识切片。
-        // 必须在版本正式切换之前执行。
+        // 保存Python索引实际使用的全部知识切片。
         chunkService.saveIndexedChunks(
+
                 document.courseId(),
+
                 documentId,
+
                 chunks
         );
 
-        // 如果较新的版本已经生效，
-        // 较旧版本即使较晚完成索引，也不能覆盖新版本。
-        List<Integer> activeVersions =
-                jdbc.queryForList(
-                        """
-                        SELECT version_no
-                        FROM course_document
-                        WHERE resource_id = ?
-                          AND course_id = ?
-                          AND version_status = 'CURRENT'
-                        FOR UPDATE
-                        """,
-                        Integer.class,
-                        document.resourceId(),
-                        document.courseId()
-                );
-
-        boolean newerVersionExists =
-                activeVersions.stream()
-                        .anyMatch(version ->
-                                version > document.versionNo()
-                        );
-
-        if (newerVersionExists) {
-
-            jdbc.update(
-                    """
-                    UPDATE course_document
-                    SET version_status = 'HISTORY',
-                        update_time = NOW()
-                    WHERE id = ?
-                    """,
-                    documentId
-            );
-
-            return;
-        }
-
-        // 原生效版本转为历史版本。
-        jdbc.update(
-                """
-                UPDATE course_document
-                SET version_status = 'HISTORY',
-                    update_time = NOW()
-                WHERE resource_id = ?
-                  AND course_id = ?
-                  AND version_status = 'CURRENT'
-                  AND id <> ?
-                """,
-                document.resourceId(),
-                document.courseId(),
-                documentId
-        );
-
-        // 新版本正式生效。
-        int activated = jdbc.update(
-                """
-                UPDATE course_document
-                SET version_status = 'CURRENT',
-                    update_time = NOW()
-                WHERE id = ?
-                  AND status = 'READY'
-                  AND version_status = 'PENDING'
-                """,
-                documentId
-        );
-
-        if (activated != 1) {
-            throw new BusinessException(
-                    409, "资源版本切换失败"
-            );
-        }
+        // 注意：
+        // 不再将原版本修改为HISTORY。
+        // 不再将当前文档修改为CURRENT。
+        //
+        // 版本激活由DocumentReviewService负责。
     }
 
     private VersionDocument requireDocument(

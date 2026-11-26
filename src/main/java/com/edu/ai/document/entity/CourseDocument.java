@@ -23,26 +23,22 @@ public class CourseDocument {
     private String contentType;
 
     /**
-     * 教学资源类型：
-     * LESSON_PLAN / COURSEWARE /
-     * EXERCISE / PRACTICAL_GUIDE / OTHER
+     * 教学资源类型。
      */
     private String resourceType;
 
     /**
-     * 资源来源，例如：
-     * 教师自编、教材配套、实验室资料等
+     * 资源来源。
      */
     private String sourceInfo;
 
     /**
-     * 资源根ID。
-     * 同一资源的所有版本使用相同的resourceId。
+     * 同一资源的所有版本共享resourceId。
      */
     private Long resourceId;
 
     /**
-     * 资源版本号，从1开始。
+     * 资源版本号。
      */
     private Integer versionNo;
 
@@ -54,25 +50,57 @@ public class CourseDocument {
     private String versionStatus;
 
     /**
+     * DRAFT：待提交
+     * PENDING：待审核
+     * APPROVED：审核通过
+     * REJECTED：审核驳回
+     */
+    private String reviewStatus;
+
+    /**
+     * 最近一次提交审核的用户。
+     */
+    private Long reviewSubmitterId;
+
+    /**
+     * 最近一次提交审核的时间。
+     */
+    private LocalDateTime reviewSubmitTime;
+
+    /**
+     * 最近一次审核的用户。
+     */
+    private Long reviewerId;
+
+    /**
+     * 最近一次审核时间。
+     */
+    private LocalDateTime reviewTime;
+
+    /**
+     * 最近一次审核意见。
+     */
+    private String reviewComment;
+
+    /**
      * 切片算法版本。
-     *
-     * 1：固定字符窗口切片。
-     * 2：段落感知切片。
      */
     private Integer chunkingVersion;
 
+    /**
+     * 文档解析及索引状态。
+     */
     private String status;
+
     private String errorMessage;
 
-    // 当前索引执行任务的唯一标识
     private String processingToken;
 
-    // 开始处理的时间
     private LocalDateTime processingStartedAt;
 
-    // 索引累计尝试次数
     private Integer attemptCount;
 
     private LocalDateTime createTime;
+
     private LocalDateTime updateTime;
 }

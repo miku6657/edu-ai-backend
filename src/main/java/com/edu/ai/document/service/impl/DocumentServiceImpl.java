@@ -116,6 +116,9 @@ public class DocumentServiceImpl implements DocumentService {
 
         validatePdf(file);
 
+        // F2-04：课程迁移期间禁止创建新资源。
+        requireDocumentCreationAllowed(courseId);
+
         String originalName =
                 cleanFilename(file.getOriginalFilename());
 
@@ -182,6 +185,7 @@ public class DocumentServiceImpl implements DocumentService {
             doc.setResourceId(resourceId);
             doc.setVersionNo(versionNo);
             doc.setVersionStatus("PENDING");
+            doc.setReviewStatus("DRAFT");
             doc.setChunkingVersion(2);
 
             doc.setStatus("UPLOADED");
@@ -245,6 +249,65 @@ public class DocumentServiceImpl implements DocumentService {
             }
 
             throw e;
+        }
+    }
+
+    /**
+     * 锁定课程，并确保当前没有活动的Embedding迁移。
+     *
+     * 必须在事务内部调用。
+     * 必须先于资源根记录锁、文档记录锁执行。
+     */
+    private void requireDocumentCreationAllowed(
+            Long courseId) {
+
+        List<Integer> statuses =
+                jdbc.queryForList(
+                        """
+                        SELECT status
+                        FROM course
+                        WHERE id = ?
+                        FOR UPDATE
+                        """,
+                        Integer.class,
+                        courseId
+                );
+
+        if (statuses.isEmpty()) {
+            throw new BusinessException(
+                    404,
+                    "课程不存在"
+            );
+        }
+
+        if (!Integer.valueOf(1)
+                .equals(statuses.get(0))) {
+
+            throw new BusinessException(
+                    409,
+                    "课程当前不可用"
+            );
+        }
+
+        Long activeCount = jdbc.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM course_embedding_migration
+                WHERE course_id = ?
+                  AND status IN ('PENDING', 'RUNNING')
+                """,
+                Long.class,
+                courseId
+        );
+
+        if (activeCount != null
+                && activeCount > 0) {
+
+            throw new BusinessException(
+                    409,
+                    "课程正在进行Embedding迁移，"
+                    + "暂时不能上传或合并教学资料"
+            );
         }
     }
 
@@ -325,6 +388,9 @@ public class DocumentServiceImpl implements DocumentService {
                     409, "资源尚未完成版本初始化"
             );
         }
+
+        // 必须先锁定课程，再锁定资源根记录。
+        requireDocumentCreationAllowed(courseId);
 
         // 与DocumentVersionService使用相同的根记录锁。
         List<Long> roots = jdbc.queryForList(
@@ -481,6 +547,9 @@ public class DocumentServiceImpl implements DocumentService {
             );
         }
 
+        // PDF合并也会创建新的待发布资源。
+        requireDocumentCreationAllowed(courseId);
+
         // 1. 校验合并数量
         if (documentIds == null
                 || documentIds.size() < 2
@@ -598,11 +667,13 @@ public class DocumentServiceImpl implements DocumentService {
 
             if (!"READY".equals(doc.getStatus())
                     || !"CURRENT".equals(
-                            doc.getVersionStatus())) {
+                            doc.getVersionStatus())
+                    || !"APPROVED".equals(
+                            doc.getReviewStatus())) {
 
                 throw new BusinessException(
                         409,
-                        "只能合并已完成处理的当前生效版本"
+                        "只能合并已正式发布的当前生效版本"
                 );
             }
 
@@ -767,6 +838,9 @@ public class DocumentServiceImpl implements DocumentService {
                                     ).eq(
                                             CourseDocument::getStatus,
                                             "READY"
+                                    ).eq(
+                                            CourseDocument::getReviewStatus,
+                                            "APPROVED"
                                     )
                             );
 
@@ -826,13 +900,22 @@ public class DocumentServiceImpl implements DocumentService {
                 doc.getCourseId(), userId
         );
 
-        if (!"READY".equals(doc.getStatus())
-                && !coursePermissionService.canManage(
-                        doc.getCourseId(), userId
-                )) {
+        boolean published =
+                "READY".equals(doc.getStatus())
+                && "CURRENT".equals(doc.getVersionStatus())
+                && "APPROVED".equals(doc.getReviewStatus());
+
+        boolean canManage =
+                coursePermissionService.canManage(
+                        doc.getCourseId(),
+                        userId
+                );
+
+        if (!published && !canManage) {
+
             throw new BusinessException(
                     403,
-                    "该资料尚未完成处理"
+                    "该资料尚未正式发布"
             );
         }
 

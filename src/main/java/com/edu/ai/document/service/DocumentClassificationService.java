@@ -500,6 +500,7 @@ public class DocumentClassificationService {
                       (
                           version_status = 'CURRENT'
                           AND status = 'READY'
+                          AND review_status = 'APPROVED'
                       )
                       OR (
                           version_status = 'PENDING'
@@ -692,7 +693,7 @@ public class DocumentClassificationService {
             boolean forUpdate) {
 
         String sql = """
-                SELECT course_id, uploader_id, status, version_status
+                SELECT course_id, uploader_id, status, version_status, review_status
                 FROM course_document
                 WHERE id = ?
                 """
@@ -738,17 +739,29 @@ public class DocumentClassificationService {
             );
         }
 
-        if (!forUpdate && !"READY".equals(status)) {
+        if (!forUpdate) {
 
-            Long uploaderId = ((Number)
-                    row.get("uploader_id")).longValue();
+            // F2-04：非管理者仅能查看已正式发布的资料。
+            boolean canManage = permissions.canManage(
+                    courseId,
+                    userId
+            );
 
-            // 未完成索引的文档仅课程管理者可查看
-            if (!permissions.canManage(
-                    courseId, userId)) {
-                throw new BusinessException(
-                        403, "文档尚未完成处理"
-                );
+            if (!canManage) {
+
+                boolean published =
+                        "READY".equals(status)
+                        && "CURRENT".equals(
+                                row.get("version_status"))
+                        && "APPROVED".equals(
+                                row.get("review_status"));
+
+                if (!published) {
+                    throw new BusinessException(
+                            403,
+                            "该资料尚未正式发布"
+                    );
+                }
             }
         }
     }

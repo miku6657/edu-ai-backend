@@ -136,20 +136,26 @@ public class ChunkKnowledgeService {
     }
 
     /**
-     * 修改切片关联之前统一锁定课程和文档。
+     * 修改切片关联前统一检查权限、文档状态和审核状态。
      */
     private void lockDocument(
+
             Long courseId,
+
             Long documentId,
+
             Long userId) {
 
-        // 复用原有课程管理权限检查。
         chunkService.requireManagedDocument(
+
                 courseId,
+
                 documentId,
+
                 userId
         );
 
+        // 统一锁定课程。
         List<Integer> statuses =
                 jdbc.queryForList(
                         """
@@ -171,36 +177,74 @@ public class ChunkKnowledgeService {
             );
         }
 
-        List<String> versions =
+        // 同时读取版本状态和审核状态。
+        List<java.util.Map<String, Object>> rows =
                 jdbc.queryForList(
                         """
-                        SELECT version_status
+                        SELECT
+                            version_status,
+                            review_status
                         FROM course_document
                         WHERE id = ?
                           AND course_id = ?
                           AND status = 'READY'
                         FOR UPDATE
                         """,
-                        String.class,
                         documentId,
                         courseId
                 );
 
-        if (versions.isEmpty()) {
+        if (rows.isEmpty()) {
 
             throw conflict(
                     "文档状态已经变化"
             );
         }
 
-        String versionStatus =
-                versions.get(0);
+        java.util.Map<String, Object> row =
+                rows.get(0);
 
-        if (!"CURRENT".equals(versionStatus)
-                && !"PENDING".equals(versionStatus)) {
+        String versionStatus =
+                (String) row.get("version_status");
+
+        String reviewStatus =
+                (String) row.get("review_status");
+
+        if ("HISTORY".equals(versionStatus)) {
+
+            throw conflict(
+                    "历史版本不允许修改知识点关联"
+            );
+        }
+
+        if ("PENDING".equals(reviewStatus)) {
+
+            throw conflict(
+                    "当前资料正在等待审核，"
+                    + "请撤回审核后再修改知识点关联"
+            );
+        }
+
+        if ("APPROVED".equals(reviewStatus)) {
+
+            throw conflict(
+                    "当前资料已经正式发布，"
+                    + "请通过新版本进行修改"
+            );
+        }
+
+        if (!"PENDING".equals(versionStatus)) {
 
             throw conflict(
                     "当前文档版本不允许修改知识点关联"
+            );
+        }
+
+        if (!"DRAFT".equals(reviewStatus)
+                && !"REJECTED".equals(reviewStatus)) {
+
+            throw conflict(
+                    "当前审核状态不允许修改知识点关联"
             );
         }
     }

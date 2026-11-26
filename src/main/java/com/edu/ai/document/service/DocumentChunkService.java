@@ -973,23 +973,23 @@ public class DocumentChunkService {
             }
         }
 
-        // 锁定文档，防止调整过程中被删除。
-        List<String> versionStatuses =
+        List<java.util.Map<String, Object>> documents =
                 jdbc.queryForList(
                         """
-                        SELECT version_status
+                        SELECT
+                            version_status,
+                            review_status
                         FROM course_document
                         WHERE id = ?
                           AND course_id = ?
                           AND status = 'READY'
                         FOR UPDATE
                         """,
-                        String.class,
                         documentId,
                         courseId
                 );
 
-        if (versionStatuses.isEmpty()) {
+        if (documents.isEmpty()) {
 
             throw new BusinessException(
                     409,
@@ -997,12 +997,49 @@ public class DocumentChunkService {
             );
         }
 
-        if ("HISTORY".equals(
-                versionStatuses.get(0))) {
+        java.util.Map<String, Object> documentState =
+                documents.get(0);
+
+        String versionStatus =
+                (String) documentState.get("version_status");
+
+        String reviewStatus =
+                (String) documentState.get("review_status");
+
+        if ("HISTORY".equals(versionStatus)) {
 
             throw new BusinessException(
                     409,
                     "历史版本的知识切片不允许修改"
+            );
+        }
+
+        if ("PENDING".equals(reviewStatus)) {
+
+            throw new BusinessException(
+                    409,
+                    "待审核文档不允许调整切片章节"
+            );
+        }
+
+        if ("APPROVED".equals(reviewStatus)) {
+
+            throw new BusinessException(
+                    409,
+                    "已发布文档不允许调整切片章节，"
+                    + "请上传新的资源版本"
+            );
+        }
+
+        if (!"PENDING".equals(versionStatus)
+                || (
+                        !"DRAFT".equals(reviewStatus)
+                        && !"REJECTED".equals(reviewStatus)
+                )) {
+
+            throw new BusinessException(
+                    409,
+                    "当前文档状态不允许修改章节"
             );
         }
 

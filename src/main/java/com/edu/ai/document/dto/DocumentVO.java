@@ -1,6 +1,7 @@
 package com.edu.ai.document.dto;
 
 import com.edu.ai.document.entity.CourseDocument;
+
 import lombok.Data;
 
 import tools.jackson.databind.annotation.JsonSerialize;
@@ -21,10 +22,11 @@ public class DocumentVO {
     private Long uploaderId;
 
     private String originalName;
+
     private Long fileSize;
 
-    // 新增资源元数据
     private String resourceType;
+
     private String sourceInfo;
 
     @JsonSerialize(using = ToStringSerializer.class)
@@ -34,30 +36,89 @@ public class DocumentVO {
 
     private String versionStatus;
 
+    /**
+     * F2-04发布审核状态。
+     */
+    private String reviewStatus;
+
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long reviewSubmitterId;
+
+    private LocalDateTime reviewSubmitTime;
+
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long reviewerId;
+
+    private LocalDateTime reviewTime;
+
+    private String reviewComment;
+
     private String status;
+
     private String errorMessage;
+
     private LocalDateTime createTime;
 
-    public static DocumentVO from(CourseDocument doc) {
+    public static DocumentVO from(
+            CourseDocument doc) {
 
         DocumentVO vo = new DocumentVO();
 
         vo.setId(doc.getId());
+
         vo.setCourseId(doc.getCourseId());
+
         vo.setUploaderId(doc.getUploaderId());
+
         vo.setOriginalName(doc.getOriginalName());
+
         vo.setFileSize(doc.getFileSize());
 
         vo.setResourceType(doc.getResourceType());
+
         vo.setSourceInfo(doc.getSourceInfo());
 
         vo.setResourceId(doc.getResourceId());
+
         vo.setVersionNo(doc.getVersionNo());
-        vo.setVersionStatus(doc.getVersionStatus());
+
+        vo.setVersionStatus(
+                doc.getVersionStatus()
+        );
+
+        vo.setReviewStatus(
+                doc.getReviewStatus()
+        );
+
+        vo.setReviewSubmitterId(
+                doc.getReviewSubmitterId()
+        );
+
+        vo.setReviewSubmitTime(
+                doc.getReviewSubmitTime()
+        );
+
+        vo.setReviewerId(
+                doc.getReviewerId()
+        );
+
+        vo.setReviewTime(
+                doc.getReviewTime()
+        );
+
+        vo.setReviewComment(
+                doc.getReviewComment()
+        );
 
         vo.setStatus(doc.getStatus());
-        vo.setErrorMessage(doc.getErrorMessage());
-        vo.setCreateTime(doc.getCreateTime());
+
+        vo.setErrorMessage(
+                doc.getErrorMessage()
+        );
+
+        vo.setCreateTime(
+                doc.getCreateTime()
+        );
 
         return vo;
     }

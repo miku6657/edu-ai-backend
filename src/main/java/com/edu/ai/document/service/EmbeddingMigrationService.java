@@ -101,6 +101,33 @@ public class EmbeddingMigrationService {
                     409, "该课程已有正在进行的Embedding迁移任务");
         }
 
+        List<CourseDocument> pendingDocuments =
+                documentMapper.selectList(
+                        new LambdaQueryWrapper<CourseDocument>()
+                                .eq(
+                                        CourseDocument::getCourseId,
+                                        courseId
+                                )
+                                .eq(
+                                        CourseDocument::getVersionStatus,
+                                        "PENDING"
+                                )
+                                .ne(
+                                        CourseDocument::getStatus,
+                                        "DELETED"
+                                )
+                                .last("LIMIT 1 FOR UPDATE")
+                );
+
+        if (!pendingDocuments.isEmpty()) {
+
+            throw new BusinessException(
+                    409,
+                    "课程存在尚未发布的资源版本，"
+                    + "请完成发布审核或删除待发布版本后再进行迁移"
+            );
+        }
+
         // 读取当前用户已经保存的模型配置。
         UserConfig config = userConfigMapper.selectOne(
                 new LambdaQueryWrapper<UserConfig>()
@@ -127,11 +154,21 @@ public class EmbeddingMigrationService {
         // 只迁移当前生效且已完成索引的资源版本。
         long totalDocuments = documentMapper.selectCount(
                 new LambdaQueryWrapper<CourseDocument>()
-                        .eq(CourseDocument::getCourseId, courseId)
-                        .eq(CourseDocument::getStatus, "READY")
+                        .eq(
+                                CourseDocument::getCourseId,
+                                courseId
+                        )
+                        .eq(
+                                CourseDocument::getStatus,
+                                "READY"
+                        )
                         .eq(
                                 CourseDocument::getVersionStatus,
                                 "CURRENT"
+                        )
+                        .eq(
+                                CourseDocument::getReviewStatus,
+                                "APPROVED"
                         )
         );
 

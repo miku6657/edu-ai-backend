@@ -1,6 +1,7 @@
 package com.edu.ai.document.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+
 import com.edu.ai.document.entity.CourseDocument;
 
 import org.apache.ibatis.annotations.Mapper;
@@ -14,9 +15,9 @@ public interface CourseDocumentMapper
         extends BaseMapper<CourseDocument> {
 
     /**
-     * 查询课程中已完成索引且当前生效的文档。
+     * 查询已经正式发布的课程文档。
      *
-     * 用于Embedding迁移，排除历史版本和待生效版本。
+     * 用于Embedding迁移。
      */
     @Select("""
             SELECT *
@@ -24,6 +25,7 @@ public interface CourseDocumentMapper
             WHERE course_id = #{courseId}
               AND status = 'READY'
               AND version_status = 'CURRENT'
+              AND review_status = 'APPROVED'
             ORDER BY id ASC
             """)
     List<CourseDocument> selectReadyByCourseId(
@@ -31,11 +33,12 @@ public interface CourseDocumentMapper
     );
 
     /**
-     * 查询当前课程生效文档ID。
+     * 查询当前课程允许检索的文档ID。
      *
-     * 用途：
-     * 1. RAG检索文档白名单。
-     * 2. Embedding迁移集合一致性校验。
+     * 只有同时满足以下条件的文档才可参与RAG：
+     * 1. 已完成解析和向量化
+     * 2. 当前生效版本
+     * 3. 已通过知识库发布审核
      */
     @Select("""
             SELECT id
@@ -43,6 +46,7 @@ public interface CourseDocumentMapper
             WHERE course_id = #{courseId}
               AND status = 'READY'
               AND version_status = 'CURRENT'
+              AND review_status = 'APPROVED'
             ORDER BY id ASC
             """)
     List<Long> selectReadyDocumentIds(
