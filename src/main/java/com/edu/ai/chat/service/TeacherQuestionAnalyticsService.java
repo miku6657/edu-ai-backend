@@ -42,12 +42,17 @@ public class TeacherQuestionAnalyticsService {
           ON u.id = s.user_id
         LEFT JOIN student_question_knowledge qk
           ON qk.chat_message_id = m.id
+         AND qk.session_id = m.session_id
+         AND qk.student_id = s.user_id
          AND qk.course_id = s.course_id
         LEFT JOIN course_knowledge_point kp
           ON kp.id = qk.point_id
          AND kp.course_id = s.course_id
         LEFT JOIN course_qa_ticket t
           ON t.question_message_id = m.id
+         AND t.session_id = s.id
+         AND t.student_id = s.user_id
+         AND t.course_id = s.course_id
         """;
 
     private static String time(
@@ -375,6 +380,14 @@ public class TeacherQuestionAnalyticsService {
                                 WHERE a.session_id = m.session_id
                                   AND a.role = 'assistant'
                                   AND a.id > m.id
+                                  AND NOT EXISTS (
+                                      SELECT 1
+                                      FROM chat_message next_user
+                                      WHERE next_user.session_id = m.session_id
+                                        AND next_user.role = 'user'
+                                        AND next_user.id > m.id
+                                        AND next_user.id < a.id
+                                  )
                                 ORDER BY a.id ASC
                                 LIMIT 1
                             ) AS ai_answer_preview
@@ -491,7 +504,7 @@ public class TeacherQuestionAnalyticsService {
                     kp.title,
                     SHA2(TRIM(m.content), 256)
 
-                HAVING COUNT(DISTINCT m.id) >= 2
+                HAVING COUNT(DISTINCT s.user_id) >= 2
 
                 ORDER BY
                     question_count DESC,
