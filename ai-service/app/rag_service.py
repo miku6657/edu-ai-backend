@@ -179,7 +179,20 @@ def rag_stream(
     # 1. 空白名单直接拒答，不调用 Embedding 与 LLM。
     if not allowed_document_ids:
         yield sse_event("sources", {"sources": []})
-        yield sse_event("token", {"content": "当前课程暂无可检索的生效资料。"})
+        yield sse_event(
+            "no_evidence",
+            {
+                "reason": "NO_ACTIVE_DOCUMENTS",
+                "message": "当前课程暂无可检索的生效资料。",
+            },
+        )
+        yield sse_event(
+            "token",
+            {
+                "content": "当前课程暂无可检索的生效资料，"
+                           "系统将为你转交任课教师答疑。",
+            },
+        )
         yield sse_event("done", {})
         return
 
@@ -205,7 +218,20 @@ def rag_stream(
     # 3. 检索不到切片时直接拒答，避免模型编造答案。
     if not sources:
         yield sse_event("sources", {"sources": []})
-        yield sse_event("token", {"content": "资料中未找到相关内容。"})
+        yield sse_event(
+            "no_evidence",
+            {
+                "reason": "NO_RETRIEVAL_MATCH",
+                "message": "资料中未找到相关内容。",
+            },
+        )
+        yield sse_event(
+            "token",
+            {
+                "content": "资料中未找到相关内容，"
+                           "系统将为你转交任课教师答疑。",
+            },
+        )
         yield sse_event("done", {})
         return
 

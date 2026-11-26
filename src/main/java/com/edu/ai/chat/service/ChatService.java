@@ -13,6 +13,7 @@ import com.edu.ai.course.mapper.CourseMapper;
 import com.edu.ai.course.service.CoursePermissionService;
 import com.edu.ai.document.entity.CourseDocument;
 import com.edu.ai.document.mapper.CourseDocumentMapper;
+import com.edu.ai.qa.service.QaTicketService;
 import com.edu.ai.system.service.UserModelResolver;
 import com.edu.ai.task.service.QuestionKnowledgeService;
 
@@ -68,6 +69,7 @@ ChatService {
     private final ObjectMapper objectMapper;
     private final ChatStreamRegistry streamRegistry;
     private final QuestionKnowledgeService questionKnowledgeService;
+    private final QaTicketService qaTicketService;
     private final ChatCitationVersionService citationVersionService;
     private final HttpClient httpClient;
 
@@ -86,6 +88,7 @@ ChatService {
             ObjectMapper objectMapper,
             ChatStreamRegistry streamRegistry,
             QuestionKnowledgeService questionKnowledgeService,
+            QaTicketService qaTicketService,
             ChatCitationVersionService citationVersionService,
             @Value("${ai.service.url}") String serviceUrl,
             @Value("${ai.service.internal-key}") String internalKey) {
@@ -100,6 +103,7 @@ ChatService {
         this.objectMapper = objectMapper;
         this.streamRegistry = streamRegistry;
         this.questionKnowledgeService = questionKnowledgeService;
+        this.qaTicketService = qaTicketService;
         this.citationVersionService = citationVersionService;
         this.serviceUrl = serviceUrl;
         this.internalKey = internalKey;
@@ -474,8 +478,16 @@ ChatService {
             int embeddingVersion) {
 
         StringBuilder answer = new StringBuilder();
+
         String sourcesJson = "[]";
+
         boolean completed = false;
+
+        // 本次RAG是否明确返回无依据事件
+        boolean noEvidence = false;
+
+        // 无依据原因
+        String noEvidenceReason = "NO_RETRIEVAL_MATCH";
 
         try {
             ObjectNode body =
@@ -643,6 +655,19 @@ ChatService {
                                 );
                             }
 
+                            // 识别无依据拒答
+                            if ("no_evidence".equals(event)) {
+
+                                noEvidence = true;
+
+                                String reason =
+                                        payload.path("reason").asString();
+
+                                if (reason != null && !reason.isBlank()) {
+                                    noEvidenceReason = reason;
+                                }
+                            }
+
                             if ("sources".equals(event)) {
 
                                 JsonNode sources = payload.path("sources");
@@ -681,7 +706,9 @@ ChatService {
                                 completed = true;
                             }
 
-                            if (!"done".equals(event)) {
+                            if (!"done".equals(event)
+                                    && !"no_evidence".equals(event)) {
+
                                 send(
                                         emitter,
                                         event,
@@ -737,22 +764,92 @@ ChatService {
                         "聊天任务状态异常，无法标记成功");
             }
 
-            // 成功完成一次RAG问答后，统计对应知识点。
-            // 统计失败不影响已经生成的AI回答。
-            try {
-                questionKnowledgeService.recordSuccessfulQuestion(
-                        questionMessageId,
-                        session.getId(),
-                        session.getUserId(),
-                        session.getCourseId(),
-                        question
-                );
-            } catch (Exception e) {
-                log.warn(
-                        "知识点提问统计失败, messageId={}",
-                        questionMessageId,
-                        e
-                );
+            if (noEvidence) {
+
+                // 无依据拒答不计入成功问答统计
+                try {
+
+                    QaTicketService.CreatedTicket ticket =
+                            qaTicketService.createFromNoEvidence(
+                                    session.getCourseId(),
+                                    session.getUserId(),
+                                    session.getId(),
+                                    questionMessageId,
+                                    question,
+                                    noEvidenceReason
+                            );
+
+                    // 通知前端工单已经创建
+                    ObjectNode handoffPayload =
+                            objectMapper.createObjectNode();
+
+                    handoffPayload.put("created", true);
+                    handoffPayload.put("ticketId", ticket.ticketId());
+                    handoffPayload.put("status", ticket.status());
+                    handoffPayload.put(
+                            "message",
+                            "问题已转交任课教师，请关注答疑工单。"
+                    );
+
+                    send(
+                            emitter,
+                            "handoff",
+                            handoffPayload
+                    );
+
+                    log.info(
+                            "无依据问答已转人工，ticketId={}, questionMessageId={}",
+                            ticket.ticketId(),
+                            questionMessageId
+                    );
+
+                } catch (Exception e) {
+
+                    // 工单创建失败不能丢弃已经生成的拒答消息
+                    log.error(
+                            "自动创建答疑工单失败, courseId={}, questionMessageId={}",
+                            session.getCourseId(),
+                            questionMessageId,
+                            e
+                    );
+
+                    ObjectNode handoffPayload =
+                            objectMapper.createObjectNode();
+
+                    handoffPayload.put("created", false);
+                    handoffPayload.put(
+                            "message",
+                            "暂时无法自动创建答疑工单，请联系任课教师。"
+                    );
+
+                    send(
+                            emitter,
+                            "handoff",
+                            handoffPayload
+                    );
+                }
+
+            } else {
+
+                // 只有正常检索回答才计入知识点提问统计
+                try {
+
+                    questionKnowledgeService.recordSuccessfulQuestion(
+                            questionMessageId,
+                            session.getId(),
+                            session.getUserId(),
+                            session.getCourseId(),
+                            question
+                    );
+
+                } catch (Exception e) {
+
+                    log.warn(
+                            "知识点提问统计失败, messageId={}",
+                            questionMessageId,
+                            e
+                    );
+                }
             }
 
             // 第五步：通知前端
