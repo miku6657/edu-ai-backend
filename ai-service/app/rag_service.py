@@ -126,26 +126,29 @@ def build_retrieval_query(question: str, history: list[dict]) -> str:
 
 
 def build_system_prompt(context: str) -> str:
-    """基于本轮检索证据构建支持多轮追问的系统提示词。"""
+    """基于检索资料构建可溯源的课程问答提示词。"""
     return (
-        "你是一名严谨的课程助教，负责回答学生关于当前课程的问题。\n"
-        "【事实依据】"
-        "你只能使用本轮提供的【课程资料】作为课程事实依据。"
-        "历史对话只用于理解学生的指代、省略和追问关系，不能作为事实来源；"
-        "此前助手的回答也不能代替课程资料。\n"
-        "【多轮对话】"
-        "当学生使用‘它’‘这个’‘上面提到的’‘第二个’等表达时，"
-        "结合历史对话判断其指向，再从本轮课程资料中查找依据。"
-        "不得因为历史回答中出现过某个结论，就默认该结论正确。\n"
-        "【拒答规则】"
-        "如果本轮课程资料没有足够依据回答当前问题，"
-        "明确说明‘资料中未找到相关内容’，"
-        "不要猜测、编造或用外部常识补全。\n"
-        "【回答要求】"
-        "优先直接回答问题；解释概念时条理清晰；"
-        "涉及资料依据时使用对应的[资料1]、[资料2]标记。"
-        "不得虚构资料编号、章节、页码或引用。\n\n"
-        f"【本轮课程资料】\n{context}"
+        "你是一名严谨的课程助教。\n"
+        "【事实依据】\n"
+        "只能使用本轮提供的课程资料作为课程事实依据。"
+        "历史对话只用于理解上下文，不是事实来源。\n"
+        "【引用规则】\n"
+        "1. 回答中的课程知识结论必须尽可能标注来源。\n"
+        "2. 引用格式必须使用 [资料1]、[资料2] 等编号。\n"
+        "3. 编号必须与下方课程资料中的编号一致。\n"
+        "4. 多份资料共同支持一个结论时，可以同时引用多个编号。\n"
+        "5. 不得虚构引用编号，不得引用未提供的资料。\n"
+        "【多轮追问】\n"
+        "结合历史对话理解指代和省略，"
+        "但当前回答仍然必须有本轮课程资料作为依据。\n"
+        "【拒答规则】\n"
+        "如果当前课程资料没有足够依据回答，"
+        "明确说明：资料中未找到相关内容。"
+        "不要猜测或编造。\n"
+        "【回答要求】\n"
+        "直接回答学生的问题，表达清晰，分点组织内容。"
+        "不要输出虚假的页码、章节或文档名称。\n\n"
+        f"【课程资料】\n{context}"
     )
 
 
@@ -206,12 +209,27 @@ def rag_stream(
         yield sse_event("done", {})
         return
 
-    # 4. 返回命中的资料来源（documentId 使用字符串，避免前端精度丢失）
+    # 4. 返回完整引用信息，供 Java 保存和前端展示
+    citation_sources = []
+    for index, item in enumerate(sources, start=1):
+        document_id = str(item["document_id"])
+        page = int(item["page"])
+        chunk_index = int(item.get("chunk_index") or 0)
+        citation_sources.append({
+            "documentId": document_id,
+            "page": page,
+            "pageStart": page,
+            "pageEnd": page,
+            "chunkIndex": chunk_index,
+            "parentChunkId": f"{document_id}:{page}:{chunk_index}",
+            "sectionTitle": item.get("section_title"),
+            "content": item.get("text", ""),
+            "similarityScore": item.get("score"),
+            "citationIndex": index,
+        })
+
     yield sse_event("sources", {
-        "sources": [
-            {"documentId": str(item["document_id"]), "page": int(item["page"])}
-            for item in sources
-        ]
+        "sources": citation_sources
     })
 
     # 5. 构建 Prompt

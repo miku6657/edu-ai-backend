@@ -11,6 +11,7 @@ import com.edu.ai.common.BusinessException;
 import com.edu.ai.course.entity.Course;
 import com.edu.ai.course.mapper.CourseMapper;
 import com.edu.ai.course.service.CoursePermissionService;
+import com.edu.ai.document.entity.CourseDocument;
 import com.edu.ai.document.mapper.CourseDocumentMapper;
 import com.edu.ai.system.service.UserModelResolver;
 import com.edu.ai.task.service.QuestionKnowledgeService;
@@ -39,7 +40,11 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -192,6 +197,103 @@ ChatService {
         }
 
         return message.getId();
+    }
+
+    /**
+     * 补充引用资料名称。
+     *
+     * 只允许查询当前课程下的资料，
+     * 避免通过引用数据访问其他课程的资源。
+     */
+    private ArrayNode enrichCitationSources(
+            Long courseId,
+            JsonNode sources) {
+
+        ArrayNode result = objectMapper.createArrayNode();
+
+        if (sources == null || !sources.isArray()) {
+            return result;
+        }
+
+        Set<Long> documentIds = new LinkedHashSet<>();
+
+        for (JsonNode source : sources) {
+
+            JsonNode idNode = source.path("documentId");
+
+            if (idNode.isMissingNode() || idNode.isNull()) {
+                continue;
+            }
+
+            String idText = idNode.asString();
+
+            if (!idText.matches("[1-9][0-9]*")) {
+                continue;
+            }
+
+            try {
+                documentIds.add(Long.parseLong(idText));
+            } catch (NumberFormatException ignored) {
+                // 忽略非法文档ID
+            }
+        }
+
+        Map<Long, String> documentNames = new HashMap<>();
+
+        if (!documentIds.isEmpty()) {
+
+            List<CourseDocument> documents =
+                    documentMapper.selectList(
+                            new LambdaQueryWrapper<CourseDocument>()
+                                    .eq(
+                                            CourseDocument::getCourseId,
+                                            courseId
+                                    )
+                                    .in(
+                                            CourseDocument::getId,
+                                            documentIds
+                                    )
+                    );
+
+            for (CourseDocument document : documents) {
+                documentNames.put(
+                        document.getId(),
+                        document.getOriginalName()
+                );
+            }
+        }
+
+        for (JsonNode source : sources) {
+
+            if (!source.isObject()) {
+                continue;
+            }
+
+            ObjectNode citation = (ObjectNode) source.deepCopy();
+
+            String idText =
+                    citation.path("documentId").asString();
+
+            String documentName = "未知资料";
+
+            try {
+                Long documentId = Long.parseLong(idText);
+
+                documentName = documentNames.getOrDefault(
+                        documentId,
+                        "文档 " + idText
+                );
+
+            } catch (NumberFormatException ignored) {
+                continue;
+            }
+
+            citation.put("docName", documentName);
+
+            result.add(citation);
+        }
+
+        return result;
     }
 
     // 获取本次提问之前的最近10条消息
@@ -504,31 +606,50 @@ ChatService {
                     } else if (line.isEmpty()) {
 
                         if (!data.isEmpty()) {
+
                             JsonNode payload =
-                                    objectMapper.readTree(
-                                            data.toString());
+                                    objectMapper.readTree(data.toString());
+
+                            JsonNode outboundPayload = payload;
 
                             if ("token".equals(event)) {
                                 answer.append(
-                                        payload.path("content")
-                                                .asString());
+                                        payload.path("content").asString()
+                                );
                             }
 
                             if ("sources".equals(event)) {
 
-                                JsonNode sources =
-                                        payload.path("sources");
+                                JsonNode sources = payload.path("sources");
 
                                 if (sources.isArray()) {
-                                    sourcesJson = objectMapper
-                                            .writeValueAsString(
-                                                    sources);
+
+                                    ArrayNode enrichedSources =
+                                            enrichCitationSources(
+                                                    session.getCourseId(),
+                                                    sources
+                                            );
+
+                                    sourcesJson = objectMapper.writeValueAsString(
+                                            enrichedSources
+                                    );
+
+                                    ObjectNode enrichedPayload =
+                                            (ObjectNode) payload.deepCopy();
+
+                                    enrichedPayload.set(
+                                            "sources",
+                                            enrichedSources
+                                    );
+
+                                    outboundPayload = enrichedPayload;
                                 }
                             }
 
                             if ("error".equals(event)) {
                                 throw new IOException(
-                                        "Python RAG stream failed");
+                                        "Python RAG stream failed"
+                                );
                             }
 
                             if ("done".equals(event)) {
@@ -536,7 +657,11 @@ ChatService {
                             }
 
                             if (!"done".equals(event)) {
-                                send(emitter, event, payload);
+                                send(
+                                        emitter,
+                                        event,
+                                        outboundPayload
+                                );
                             }
                         }
 

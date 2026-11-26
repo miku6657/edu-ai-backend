@@ -66,7 +66,8 @@ class RagMultiTurnTest(unittest.TestCase):
     def test_system_prompt_mentions_history_rule(self):
         prompt = build_system_prompt("【资料】")
         self.assertIn("历史对话只用于理解", prompt)
-        self.assertIn("【本轮课程资料】", prompt)
+        self.assertIn("【课程资料】", prompt)
+        self.assertIn("[资料1]", prompt)
 
     @patch("app.rag_service.chat_stream")
     @patch("app.rag_service.search_course_by_collection")
