@@ -242,7 +242,7 @@ public class TeacherQuestionAnalyticsService {
         args.add(courseId);
 
         if (pointId != null) {
-            where.append(" AND qk.point_id = ?");
+            where.append(" AND qk.point_id = ? ");
             args.add(pointId);
         }
 
@@ -266,12 +266,12 @@ public class TeacherQuestionAnalyticsService {
         if (keyword != null
                 && !keyword.isBlank()) {
 
-            where.append(" AND m.content LIKE ?");
+            where.append(" AND m.content LIKE ? ");
             args.add("%" + keyword.trim() + "%");
         }
 
         if (startDate != null) {
-            where.append(" AND m.create_time >= ?");
+            where.append(" AND m.create_time >= ? ");
             args.add(
                     Timestamp.valueOf(
                             startDate.atStartOfDay()
@@ -280,7 +280,7 @@ public class TeacherQuestionAnalyticsService {
         }
 
         if (endDate != null) {
-            where.append(" AND m.create_time < ?");
+            where.append(" AND m.create_time < ? ");
             args.add(
                     Timestamp.valueOf(
                             endDate.plusDays(1).atStartOfDay()
