@@ -10,6 +10,8 @@ import {
   assignChunkChapter,
   backfillDocumentChunks,
   chunkingVersionLabel,
+  chunkKnowledgeStatusLabel,
+  chunkKnowledgeStatusTagType,
   listDocumentChunks,
 } from '@/api/document-chunk'
 import type {
@@ -21,6 +23,9 @@ import {
   notifySuccess,
   notifyWarning,
 } from '@/utils/notify'
+import ChunkKnowledgeDialog from './ChunkKnowledgeDialog.vue'
+import ChunkKnowledgeProgress from './ChunkKnowledgeProgress.vue'
+import ChunkKnowledgeBatchActions from './ChunkKnowledgeBatchActions.vue'
 
 const props = defineProps<{
   modelValue: boolean
@@ -37,6 +42,9 @@ const emit = defineEmits<{
 const loading = ref(false)
 const saving = ref(false)
 const backfilling = ref(false)
+const knowledgeBatchBusy = ref(false)
+const knowledgeSingleBusy = ref(false)
+const knowledgeProgressRefreshKey = ref(0)
 const pageData = ref<DocumentChunkPage | null>(null)
 const keyword = ref('')
 const filterPageNo = ref<number | undefined>()
@@ -46,6 +54,8 @@ const pageSize = ref(20)
 const selectedChunks = ref<DocumentChunk[]>([])
 const detailVisible = ref(false)
 const detailChunk = ref<DocumentChunk | null>(null)
+const knowledgeDialogVisible = ref(false)
+const knowledgeChunk = ref<DocumentChunk | null>(null)
 const chapterDialogVisible = ref(false)
 const targetChapterId = ref('')
 const assigningIds = ref<BigIntId[]>([])
@@ -80,7 +90,11 @@ const classifiedPercent = computed(() => {
   )
 })
 const busy = computed(
-  () => saving.value || backfilling.value,
+  () =>
+    saving.value
+    || backfilling.value
+    || knowledgeBatchBusy.value
+    || knowledgeSingleBusy.value,
 )
 const canEdit = computed(
   () =>
@@ -109,6 +123,9 @@ function resetState(): void {
   pageSize.value = 20
   detailVisible.value = false
   detailChunk.value = null
+  knowledgeDialogVisible.value = false
+  knowledgeChunk.value = null
+  knowledgeProgressRefreshKey.value++
   chapterDialogVisible.value = false
   targetChapterId.value = ''
   assigningIds.value = []
@@ -241,6 +258,32 @@ function openDetail(chunk: DocumentChunk): void {
   detailVisible.value = true
 }
 
+/**
+ * 打开知识点关联管理弹窗。
+ */
+function openKnowledgeDialog(chunk: DocumentChunk): void {
+  if (!props.courseId || !props.document) return
+
+  knowledgeChunk.value = chunk
+  knowledgeDialogVisible.value = true
+}
+
+/**
+ * 知识点关联发生变化后，同步刷新切片列表和文档关联进度。
+ */
+async function onKnowledgeChanged(): Promise<void> {
+  knowledgeProgressRefreshKey.value++
+  await loadChunks()
+}
+
+function onKnowledgeBatchBusyChange(value: boolean): void {
+  knowledgeBatchBusy.value = value
+}
+
+function onKnowledgeSingleBusyChange(value: boolean): void {
+  knowledgeSingleBusy.value = value
+}
+
 function openPdf(): void {
   if (props.document) {
     emit('preview', props.document)
@@ -320,7 +363,7 @@ async function saveChapterAssignment(): Promise<void> {
       detailVisible.value = false
       detailChunk.value = null
       assigningIds.value = []
-      await loadChunks()
+      await onKnowledgeChanged()
     }
   } catch (error) {
     notifyError(error)
@@ -542,6 +585,31 @@ watch(
       </div>
 
       <template v-if="pageData?.initialized">
+        <ChunkKnowledgeProgress
+          v-if="modelValue"
+          :key="document?.id"
+          :course-id="courseId"
+          :document-id="document?.id ?? null"
+          :refresh-key="knowledgeProgressRefreshKey"
+        />
+
+        <ChunkKnowledgeBatchActions
+          v-if="canEdit"
+          :key="document?.id"
+          :course-id="courseId"
+          :document-id="document?.id ?? null"
+          :selected-chunks="selectedChunks"
+          :editable="canEdit"
+          :disabled="
+            loading
+              || saving
+              || backfilling
+              || knowledgeSingleBusy
+          "
+          @changed="onKnowledgeChanged"
+          @busy-change="onKnowledgeBatchBusyChange"
+        />
+
         <div class="chunk-filters">
           <el-input
             v-model="keyword"
@@ -625,6 +693,7 @@ watch(
             v-if="canEdit"
             type="selection"
             width="44"
+            :selectable="() => !busy && !loading"
           />
           <el-table-column
             label="定位"
@@ -684,8 +753,27 @@ watch(
             </template>
           </el-table-column>
           <el-table-column
+            label="知识点关联"
+            min-width="145"
+          >
+            <template #default="{ row }">
+              <div class="knowledge-status-cell">
+                <el-tag
+                  size="small"
+                  :type="chunkKnowledgeStatusTagType(row.knowledgeStatus)"
+                >
+                  {{ chunkKnowledgeStatusLabel(row.knowledgeStatus) }}
+                </el-tag>
+                <span class="chunk-muted">
+                  已确认 {{ row.confirmedPointCount ?? 0 }}
+                  · 待确认 {{ row.pendingPointCount ?? 0 }}
+                </span>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column
             label="操作"
-            width="150"
+            width="240"
             fixed="right"
           >
             <template #default="{ row }">
@@ -704,6 +792,15 @@ watch(
                 @click="openChapterAssignment([row])"
               >
                 设置章节
+              </el-button>
+              <el-button
+                v-if="canEdit"
+                type="primary"
+                link
+                :disabled="busy || loading"
+                @click="openKnowledgeDialog(row)"
+              >
+                知识点关联
               </el-button>
             </template>
           </el-table-column>
@@ -801,6 +898,16 @@ watch(
         </el-button>
       </template>
     </el-dialog>
+
+    <ChunkKnowledgeDialog
+      v-model="knowledgeDialogVisible"
+      :course-id="courseId"
+      :document-id="document?.id ?? null"
+      :chunk="knowledgeChunk"
+      :editable="canEdit && !knowledgeBatchBusy"
+      @changed="onKnowledgeChanged"
+      @busy-change="onKnowledgeSingleBusyChange"
+    />
 
     <el-dialog
       v-model="chapterDialogVisible"
@@ -966,6 +1073,13 @@ watch(
   font-size: 12px;
   line-height: 1.7;
   color: var(--el-text-color-secondary);
+}
+
+.knowledge-status-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
 }
 
 .chunk-position {
