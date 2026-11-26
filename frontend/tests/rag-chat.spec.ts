@@ -200,6 +200,42 @@ describe('rag chat presentation', () => {
     )
   })
 
+  it('解析编号引用并仅关联存在的资料', () => {
+    const citations = [
+      {
+        parent_chunk_id: '101:3:0',
+        doc_id: '101',
+        doc_name: 'Java基础.pdf',
+        page_start: 3,
+        page_end: 3,
+        section_title: '1.1 Java概述',
+        content: 'Java是一种面向对象的语言。',
+      },
+      {
+        parent_chunk_id: '102:8:1',
+        doc_id: '102',
+        doc_name: 'Java进阶.pdf',
+        page_start: 8,
+        page_end: 8,
+        section_title: '2.1 集合框架',
+        content: 'Java集合框架包括List和Set。',
+      },
+    ]
+    const content = 'Java是一种面向对象的语言[资料1]，'
+      + '集合框架包括List和Set【资料2】，'
+      + '错误引用[资料3]。'
+
+    const result = splitInlineCitations(content, citations)
+
+    expect(
+      result.filter(item => item.citationIndex !== null),
+    ).toEqual([
+      { text: '[资料1]', citationIndex: 0 },
+      { text: '【资料2】', citationIndex: 1 },
+    ])
+    expect(result.map(item => item.text).join('')).toBe(content)
+  })
+
   it('没有引用时正文整体作为纯文本', () => {
     expect(splitInlineCitations('结论[来源：a.pdf - 第1页]', null)).toEqual([
       { text: '结论[来源：a.pdf - 第1页]', citationIndex: null },

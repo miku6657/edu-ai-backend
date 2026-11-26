@@ -1,5 +1,10 @@
 <script setup lang="ts">
-import { onUnmounted, ref, watch } from 'vue'
+import {
+  computed,
+  onUnmounted,
+  ref,
+  watch,
+} from 'vue'
 
 import {
   downloadDocumentFile,
@@ -14,6 +19,7 @@ const props = defineProps<{
     KnowledgeDoc,
     'id' | 'originalName'
   > | null
+  page?: number | null
 }>()
 
 const emit = defineEmits<{
@@ -23,6 +29,22 @@ const emit = defineEmits<{
 const loading = ref(false)
 const downloading = ref(false)
 const previewUrl = ref('')
+const previewSrc = computed(() => {
+  if (!previewUrl.value) {
+    return ''
+  }
+
+  const page = props.page
+  if (
+    typeof page !== 'number'
+    || !Number.isSafeInteger(page)
+    || page <= 0
+  ) {
+    return previewUrl.value
+  }
+
+  return `${previewUrl.value}#page=${page}`
+})
 const errorMessage = ref('')
 
 let controller: AbortController | null = null
@@ -172,7 +194,7 @@ onUnmounted(() => {
     >
       <iframe
         v-if="previewUrl"
-        :src="previewUrl"
+        :src="previewSrc"
         title="课程PDF资料预览"
         class="pdf-preview-frame"
         referrerpolicy="no-referrer"

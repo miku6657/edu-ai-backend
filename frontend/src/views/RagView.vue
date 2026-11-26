@@ -84,6 +84,7 @@ const citationPreviewVisible = ref(false)
 const citationPreviewDocument = ref<
   Pick<KnowledgeDoc, 'id' | 'originalName'> | null
 >(null)
+const citationPreviewPage = ref<number | null>(null)
 const historyItems = ref<ChatHistoryMessage[]>([])
 const query = ref('')
 const loadingCourses = ref(true)
@@ -160,6 +161,7 @@ async function onCourseChange(): Promise<void> {
   stopStreaming()
   citationPreviewVisible.value = false
   citationPreviewDocument.value = null
+  citationPreviewPage.value = null
   courseStore.select(selectedCourseId.value)
   messages.value = []
   historyItems.value = []
@@ -415,15 +417,20 @@ function outdatedCitations(message: UiMessage): RagCitation[] {
   })
 }
 
-function previewOriginalCitation(citation: RagCitation): void {
+function previewOriginalCitation(
+  citation: RagCitation,
+): void {
   citationPreviewDocument.value = {
     id: citation.doc_id,
     originalName: citation.doc_name,
   }
+  citationPreviewPage.value = citation.page_start
   citationPreviewVisible.value = true
 }
 
-function previewCurrentCitation(citation: RagCitation): void {
+function previewCurrentCitation(
+  citation: RagCitation,
+): void {
   const version = citation.version
 
   if (!version?.currentDocumentId) {
@@ -435,11 +442,31 @@ function previewCurrentCitation(citation: RagCitation): void {
     id: version.currentDocumentId,
     originalName: version.currentDocumentName || citation.doc_name,
   }
+  citationPreviewPage.value = null
   citationPreviewVisible.value = true
 }
 
 function inlineSegments(message: UiMessage): InlineSegment[] {
   return splitInlineCitations(message.content, message.citations)
+}
+
+/**
+ * 点击回答中的 [资料N]，打开对应资料页码。
+ */
+function previewInlineCitation(
+  message: UiMessage,
+  citationIndex: number | null,
+): void {
+  if (citationIndex === null) {
+    return
+  }
+
+  const citation = message.citations?.[citationIndex]
+  if (!citation) {
+    return
+  }
+
+  previewOriginalCitation(citation)
 }
 
 function messageMeta(message: UiMessage): string {
@@ -619,8 +646,26 @@ function relativeTime(value: string): string {
                     v-for="(segment, index) in inlineSegments(message)"
                     :key="`seg-${index}`"
                   >
-                    <span v-if="segment.citationIndex === null">{{ segment.text }}</span>
-                    <span v-else class="rag-inline-citation">{{ segment.text }}</span>
+                    <span
+                      v-if="segment.citationIndex === null"
+                    >
+                      {{ segment.text }}
+                    </span>
+
+                    <button
+                      v-else
+                      type="button"
+                      class="rag-inline-citation"
+                      :aria-label="`打开引用资料${segment.citationIndex + 1}`"
+                      @click="
+                        previewInlineCitation(
+                          message,
+                          segment.citationIndex
+                        )
+                      "
+                    >
+                      {{ segment.text }}
+                    </button>
                   </template>
                 </div>
 
@@ -870,6 +915,7 @@ function relativeTime(value: string): string {
     <DocumentPreviewDialog
       v-model="citationPreviewVisible"
       :document="citationPreviewDocument"
+      :page="citationPreviewPage"
     />
   </div>
 </template>
@@ -1157,10 +1203,31 @@ function relativeTime(value: string): string {
 }
 
 .rag-inline-citation {
-  padding: 0 2px;
+  display: inline;
+  padding: 0 4px;
+  margin: 0 2px;
+
+  border: none;
   border-radius: 4px;
+
   color: var(--sc-primary-strong);
   background: var(--sc-primary-soft);
+
+  font: inherit;
+  font-weight: 600;
+
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.rag-inline-citation:hover {
+  background: var(--el-color-primary-light-7);
+  text-decoration: underline;
+}
+
+.rag-inline-citation:focus-visible {
+  outline: 2px solid var(--sc-primary);
+  outline-offset: 2px;
 }
 
 .rag-supplement {

@@ -168,10 +168,14 @@ export function citationScoreLabel(citation: RagCitation): string | null {
 const INLINE_CITATION_PATTERN =
   /[[【]\s*来源\s*[:：]\s*(.+?)\s*[-－—–‑]\s*第\s*(\d+)\s*页\s*[\]】]/g
 
+// 新版引用格式：[资料1]、【资料1】
+const NUMBERED_CITATION_PATTERN =
+  /[\[【]\s*资料\s*(\d+)\s*[\]】]/g
+
 /**
  * 把回答正文拆成普通文本与已验证引用片段。
  *
- * 只有文件名与页码同时命中后端 `citations` 的标签才高亮；其余保持纯文本，
+ * 只有能够匹配后端 `citations` 的标签才高亮；其余保持纯文本，
  * 渲染时一律文本插值（不使用 `v-html`）。
  */
 export function splitInlineCitations(
@@ -179,35 +183,99 @@ export function splitInlineCitations(
   citations: RagCitation[] | null,
 ): InlineSegment[] {
   const single: InlineSegment[] = [{ text: content, citationIndex: null }]
+
   if (content === '' || citations === null || citations.length === 0) {
     return single
   }
-  const pattern = new RegExp(INLINE_CITATION_PATTERN.source, 'g')
-  const segments: InlineSegment[] = []
-  let last = 0
-  for (const match of content.matchAll(pattern)) {
-    const docName = (match[1] ?? '').trim()
-    const page = Number(match[2])
-    const index = citations.findIndex(
-      (citation) =>
-        citation.doc_name.trim() === docName &&
-        citation.page_start <= page &&
-        page <= citation.page_end,
-    )
-    if (index === -1) {
+
+  const matches: Array<{
+    start: number
+    end: number
+    citationIndex: number
+  }> = []
+
+  const numberedPattern = new RegExp(
+    NUMBERED_CITATION_PATTERN.source,
+    'g',
+  )
+
+  for (const match of content.matchAll(numberedPattern)) {
+    const number = Number(match[1])
+    const citationIndex = number - 1
+
+    if (
+      !Number.isInteger(number)
+      || citationIndex < 0
+      || citationIndex >= citations.length
+    ) {
       continue
     }
+
     const start = match.index ?? 0
-    if (start > last) {
-      segments.push({ text: content.slice(last, start), citationIndex: null })
-    }
-    segments.push({ text: match[0], citationIndex: index })
-    last = start + match[0].length
+    matches.push({
+      start,
+      end: start + match[0].length,
+      citationIndex,
+    })
   }
+
+  const legacyPattern = new RegExp(
+    INLINE_CITATION_PATTERN.source,
+    'g',
+  )
+
+  for (const match of content.matchAll(legacyPattern)) {
+    const docName = (match[1] ?? '').trim()
+    const page = Number(match[2])
+    const citationIndex = citations.findIndex(
+      citation =>
+        citation.doc_name.trim() === docName
+        && citation.page_start <= page
+        && page <= citation.page_end,
+    )
+
+    if (citationIndex === -1) {
+      continue
+    }
+
+    const start = match.index ?? 0
+    matches.push({
+      start,
+      end: start + match[0].length,
+      citationIndex,
+    })
+  }
+
+  matches.sort((a, b) => a.start - b.start)
+
+  const segments: InlineSegment[] = []
+  let last = 0
+
+  for (const match of matches) {
+    if (match.start < last) {
+      continue
+    }
+
+    if (match.start > last) {
+      segments.push({
+        text: content.slice(last, match.start),
+        citationIndex: null,
+      })
+    }
+
+    segments.push({
+      text: content.slice(match.start, match.end),
+      citationIndex: match.citationIndex,
+    })
+
+    last = match.end
+  }
+
   if (last < content.length) {
     segments.push({ text: content.slice(last), citationIndex: null })
   }
-  return segments.length === 0 ? single : segments
+
+  return segments.length > 0 ? segments : single
 }
 
 export function formatDuration(ms: number | null): string | null {
