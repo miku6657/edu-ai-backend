@@ -11,6 +11,7 @@ import {
   Home,
   Library,
   LogIn,
+  MessagesSquare,
   Settings,
   Sparkles,
 } from '@lucide/vue'
@@ -59,7 +60,7 @@ const primaryNav = computed<NavEntry[]>(() => {
       { key: 'login', label: '登录 / 注册', icon: LogIn, routeName: 'login' },
     ]
   }
-  return [
+  const entries: NavEntry[] = [
     { key: 'home', label: '首页', icon: Home, routeName: 'home' },
     { key: 'rag', label: 'AI 学习', icon: Sparkles, routeName: 'rag' },
     { key: 'qa-tickets', label: '课程答疑', icon: ClipboardList, routeName: 'qa-tickets' },
@@ -67,6 +68,15 @@ const primaryNav = computed<NavEntry[]>(() => {
     { key: 'courses', label: '我的课程', icon: BookOpen, routeName: 'courses' },
     { key: 'ddl', label: 'DDL 任务', icon: CalendarClock, routeName: 'ddl' },
   ]
+  if (auth.isTeacher || auth.isAdmin) {
+    entries.splice(3, 0, {
+      key: 'teacher-questions',
+      label: '教师问答分析',
+      icon: MessagesSquare,
+      routeName: 'teacher-questions',
+    })
+  }
+  return entries
 })
 
 const ddlBadge = computed(() => unreadBadge(props.ddlPendingCount))

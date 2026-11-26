@@ -12,6 +12,7 @@ import NotFoundView from '@/views/NotFoundView.vue'
 import QaTicketsView from '@/views/QaTicketsView.vue'
 import RagView from '@/views/RagView.vue'
 import SettingsView from '@/views/SettingsView.vue'
+import TeacherQuestionsView from '@/views/TeacherQuestionsView.vue'
 
 /**
  * 路由表（`06` TASK-103 / TASK-205）。
@@ -68,6 +69,15 @@ const routes: RouteRecordRaw[] = [
         component: QaTicketsView,
         meta: {
           title: '课程答疑',
+          requiresAuth: true,
+        },
+      },
+      {
+        path: 'teacher-questions',
+        name: 'teacher-questions',
+        component: TeacherQuestionsView,
+        meta: {
+          title: '教师问答分析',
           requiresAuth: true,
         },
       },
