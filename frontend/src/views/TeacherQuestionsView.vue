@@ -212,7 +212,7 @@ function handlePageChange(value: number): void {
 function handlePointStatClick(
   row: KnowledgePointQuestionStat,
 ): void {
-  selectedPointId.value = row.pointId
+  selectedPointId.value = String(row.pointId)
   page.value = 1
   void loadAnalytics()
 }
@@ -502,12 +502,14 @@ onMounted(async () => {
                 />
                 <el-table-column
                   label="操作"
-                  width="90"
+                  width="110"
+                  fixed="right"
                 >
-                  <template #default>
+                  <template #default="{ row }">
                     <el-button
                       text
                       type="primary"
+                      @click.stop="handlePointStatClick(row)"
                     >
                       查看问题
                     </el-button>
