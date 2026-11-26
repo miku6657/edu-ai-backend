@@ -82,7 +82,7 @@ class IndexRequest(BaseModel):
     chunking_version: int = Field(
         default=1,
         ge=1,
-        le=2,
+        le=3,
     )
     embedding_version: int = Field(
         default=1,
@@ -355,7 +355,7 @@ class MigrationDocument(BaseModel):
     chunking_version: int = Field(
         default=1,
         ge=1,
-        le=2,
+        le=3,
     )
 
 
@@ -521,7 +521,7 @@ class ReadDocumentChunksRequest(BaseModel):
     chunking_version: int = Field(
         default=1,
         ge=1,
-        le=2,
+        le=3,
     )
 
 

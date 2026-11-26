@@ -229,8 +229,8 @@ public class DocumentIndexTask {
                             ? 1
                             : doc.getChunkingVersion();
 
-            if (chunkingVersion != 1
-                    && chunkingVersion != 2) {
+            if (chunkingVersion < 1
+                    || chunkingVersion > 3) {
 
                 throw new IllegalStateException(
                         "文档切片算法版本不合法"

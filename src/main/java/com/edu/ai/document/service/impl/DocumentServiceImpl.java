@@ -186,7 +186,7 @@ public class DocumentServiceImpl implements DocumentService {
             doc.setVersionNo(versionNo);
             doc.setVersionStatus("PENDING");
             doc.setReviewStatus("DRAFT");
-            doc.setChunkingVersion(2);
+            doc.setChunkingVersion(3);
 
             doc.setStatus("UPLOADED");
 

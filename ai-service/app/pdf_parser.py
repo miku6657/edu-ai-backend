@@ -8,6 +8,9 @@ from .config import MAX_PAGES, MAX_EXTRACTED_CHARS
 
 LEGACY_CHUNKING_VERSION = 1
 PARAGRAPH_CHUNKING_VERSION = 2
+SECTION_CHUNKING_VERSION = 3
+# 一个章节最多6000字符
+MAX_SECTION_CHARS = 6000
 
 DEFAULT_CHUNK_SIZE = 800
 DEFAULT_OVERLAP = 120
@@ -171,6 +174,101 @@ def _parse_page_paragraphs(
     return chunks
 
 
+def _extract_heading(line: str) -> str | None:
+    """识别教材章节标题。"""
+    line = re.sub(r"\s+", " ", line).strip()
+    if not line or len(line) > 120:
+        return None
+
+    # 1.1、1.1.2、1.1.2.3 等编号
+    match = re.match(
+        r"^(\d{1,3}(?:\.\d{1,3}){1,5})\s*[、.．]?\s*"
+        r"([一-鿿A-Za-z（(【《].{0,100})$",
+        line,
+    )
+    if match:
+        return f"{match.group(1)} {match.group(2).strip()}"
+
+    # 第一章、第二节等
+    match = re.match(
+        r"^(第[一二三四五六七八九十百零〇\d]+[章节篇]\s*"
+        r"[一-鿿A-Za-z0-9（(【《].{0,100})$",
+        line,
+    )
+    if match:
+        return match.group(1).strip()
+
+    return None
+
+
+def _read_lines(page) -> list[str]:
+    """按照PDF阅读顺序获取文本行。"""
+    text = page.get_text("text", sort=True) or ""
+    return [
+        line.strip()
+        for line in text.split("\n")
+        if line.strip()
+    ]
+
+
+def _parse_v3(doc) -> list[dict]:
+    """V3章节聚合切片：按识别出的章节标题聚合文本。
+
+    每个切片不超过 MAX_SECTION_CHARS，超长章节拆分后保留章节标题。
+    """
+    chunks = []
+    chunk_index = 0
+    current_section = None
+    current_page = None
+    buffer = []
+    buffer_len = 0
+
+    def flush():
+        nonlocal chunk_index, buffer_len
+        text = "\n".join(buffer).strip()
+        if text:
+            chunks.append({
+                "page": current_page,
+                "chunk_index": chunk_index,
+                "section_title": current_section,
+                "text": text,
+            })
+            chunk_index += 1
+        buffer.clear()
+        buffer_len = 0
+
+    for page_no, page in enumerate(doc, start=1):
+        for line in _read_lines(page):
+            heading = _extract_heading(line)
+
+            if heading is not None:
+                flush()
+                current_section = heading
+                current_page = page_no
+                buffer.append(line)
+                buffer_len = len(line)
+                continue
+
+            if current_page is None:
+                current_page = page_no
+
+            # 加入新行后（含换行符）是否超过上限。
+            new_len = buffer_len + (1 if buffer else 0) + len(line)
+
+            if buffer and new_len > MAX_SECTION_CHARS:
+                flush()
+                # 超长章节拆分后保留章节标题。
+                current_page = page_no
+                buffer.append(line)
+                buffer_len = len(line)
+            else:
+                buffer.append(line)
+                buffer_len = new_len
+
+    flush()
+    return chunks
+
+
 def parse_pdf(
     path: str | Path,
     chunking_version: int = 1,
@@ -191,6 +289,7 @@ def parse_pdf(
     if chunking_version not in (
         LEGACY_CHUNKING_VERSION,
         PARAGRAPH_CHUNKING_VERSION,
+        SECTION_CHUNKING_VERSION,
     ):
         raise ValueError("不支持的切片算法版本")
 
@@ -204,6 +303,19 @@ def parse_pdf(
     with pymupdf.open(path) as doc:
         if doc.page_count > MAX_PAGES:
             raise ValueError(f"PDF 页数超过限制 {MAX_PAGES}")
+
+        # V3章节聚合切片
+        if chunking_version == SECTION_CHUNKING_VERSION:
+            results = _parse_v3(doc)
+            total_chars = sum(
+                len(item["text"])
+                for item in results
+            )
+
+            if total_chars > MAX_EXTRACTED_CHARS:
+                raise ValueError("PDF 文本内容超过提取上限")
+
+            return results
 
         section_map = _build_section_map(doc)
         section_pages = sorted(section_map.keys())

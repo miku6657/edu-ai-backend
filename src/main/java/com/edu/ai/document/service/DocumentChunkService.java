@@ -189,10 +189,10 @@ public class DocumentChunkService {
                     content.length()
             );
 
-            if (charCount > 800) {
+            if (charCount > 6000) {
 
                 throw new IllegalStateException(
-                        "切片长度超过800字符"
+                        "切片长度超过6000字符"
                 );
             }
 
