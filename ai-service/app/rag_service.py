@@ -9,6 +9,36 @@ logger = logging.getLogger(__name__)
 # 检索时取回的课程资料切片数量
 RAG_TOP_K = 5
 
+# 多轮追问识别：以这些词开头的问句视为依赖上文
+FOLLOW_UP_PREFIXES = (
+    "它", "这个", "那个", "这种", "那种", "那",
+    "上述", "上面", "刚才", "前面",
+    "第一个", "第二个", "第三个", "前者", "后者",
+)
+
+# 整句匹配即为追问的短问句
+FOLLOW_UP_ONLY_QUESTIONS = {
+    "有什么特点",
+    "有什么区别",
+    "为什么",
+    "怎么理解",
+    "怎么实现",
+    "具体说说",
+    "详细说说",
+    "继续",
+    "继续解释",
+    "还有呢",
+    "然后呢",
+    "分别呢",
+    "为什么呢",
+    "怎么回事",
+    "再解释一下",
+}
+
+# 用于构建检索文本的历史消息裁剪参数
+MAX_HISTORY_MESSAGES = 6
+MAX_MESSAGE_CHARS = 300
+
 
 def sse_event(event: str, data: dict) -> str:
     return (
@@ -40,13 +70,82 @@ def build_context(
     return "\n\n".join(parts)
 
 
-def build_system_prompt(context: str) -> str:
-    """根据检索到的课程资料构建系统提示词。"""
+def build_retrieval_query(question: str, history: list[dict]) -> str:
+    """为多轮追问构建检索文本，普通新问题原样返回。
+
+    只有明显依赖上文的追问（代词开头、固定短问句、以“呢”结尾的短句）
+    才会拼接最近历史，帮助向量检索理解省略和指代。
+    """
+    current_question = question.strip()
+    normalized_question = current_question
+
+    is_follow_up = (
+        normalized_question.startswith(FOLLOW_UP_PREFIXES)
+        or normalized_question in FOLLOW_UP_ONLY_QUESTIONS
+        or (
+            len(normalized_question) <= 8
+            and normalized_question.endswith("呢")
+        )
+    )
+
+    # 普通新问题不混入之前的话题
+    if not is_follow_up:
+        return current_question
+
+    valid_history = []
+    for item in history:
+        if not isinstance(item, dict):
+            continue
+        role = item.get("role")
+        content = item.get("content")
+        if role not in ("user", "assistant"):
+            continue
+        if not isinstance(content, str) or not content.strip():
+            continue
+        valid_history.append((role, content.strip()))
+
+    context_lines = []
+    for role, content in valid_history[-MAX_HISTORY_MESSAGES:]:
+        content = content[:MAX_MESSAGE_CHARS]
+        label = (
+            "此前学生提问"
+            if role == "user"
+            else "此前助手回复（仅作指代线索）"
+        )
+        context_lines.append(f"{label}：{content}")
+
+    if not context_lines:
+        return current_question
+
     return (
-        "你是一名课程助教，请严格依据下面的当前课程资料回答学生的问题。\n"
-        "请以当前提供的资料为准，不要使用资料之外或历史对话中的信息。\n"
-        "如果资料中没有相关内容，请直接说明“资料中未找到相关内容”，不要编造。\n\n"
-        f"【课程资料】\n{context}"
+        "以下对话内容仅用于理解当前问题中的省略、指代和上下文，"
+        "不能作为课程知识事实依据。\n"
+        + "\n".join(context_lines)
+        + f"\n当前学生问题：{current_question}"
+    )
+
+
+def build_system_prompt(context: str) -> str:
+    """基于本轮检索证据构建支持多轮追问的系统提示词。"""
+    return (
+        "你是一名严谨的课程助教，负责回答学生关于当前课程的问题。\n"
+        "【事实依据】"
+        "你只能使用本轮提供的【课程资料】作为课程事实依据。"
+        "历史对话只用于理解学生的指代、省略和追问关系，不能作为事实来源；"
+        "此前助手的回答也不能代替课程资料。\n"
+        "【多轮对话】"
+        "当学生使用‘它’‘这个’‘上面提到的’‘第二个’等表达时，"
+        "结合历史对话判断其指向，再从本轮课程资料中查找依据。"
+        "不得因为历史回答中出现过某个结论，就默认该结论正确。\n"
+        "【拒答规则】"
+        "如果本轮课程资料没有足够依据回答当前问题，"
+        "明确说明‘资料中未找到相关内容’，"
+        "不要猜测、编造或用外部常识补全。\n"
+        "【回答要求】"
+        "优先直接回答问题；解释概念时条理清晰；"
+        "涉及资料依据时使用对应的[资料1]、[资料2]标记。"
+        "不得虚构资料编号、章节、页码或引用。\n\n"
+        f"【本轮课程资料】\n{context}"
     )
 
 
@@ -83,9 +182,16 @@ def rag_stream(
 
     # 2. 检索课程知识库：只按 Profile 指定的 Collection 检索，
     #    并且只允许白名单中的当前生效文档。
+    # 构建当前问题的检索文本
+    retrieval_query = build_retrieval_query(
+        question=question,
+        history=history,
+    )
+
+    # 使用上下文增强后的问题进行向量检索
     sources = search_course_by_collection(
         collection_name_value=collection_name_value,
-        query=question,
+        query=retrieval_query,
         allowed_document_ids=allowed_document_ids,
         top_k=RAG_TOP_K,
         model=embedding_model,
