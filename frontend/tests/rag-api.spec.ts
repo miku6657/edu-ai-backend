@@ -135,6 +135,52 @@ describe('Java chat API', () => {
     expect(closed).toBe(true)
   })
 
+  it('完整解析 SSE 引用信息', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(sseResponse([
+        'event: session\ndata: {"sessionId":"701"}\n\n',
+        'event: sources\ndata: {"sources":[{' +
+          '"documentId":"9007199254740993",' +
+          '"docName":"Java基础教程.pdf",' +
+          '"page":12,' +
+          '"pageStart":12,' +
+          '"pageEnd":12,' +
+          '"chunkIndex":2,' +
+          '"parentChunkId":"9007199254740993:12:2",' +
+          '"sectionTitle":"1.1.2 Java概述",' +
+          '"content":"Java是一种面向对象的程序设计语言。",' +
+          '"similarityScore":0.8721,' +
+          '"citationIndex":1' +
+          '}]}\n\n',
+        'event: done\ndata: {"sessionId":"701"}\n\n',
+      ]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const citations: RagCitation[][] = []
+
+    await streamRagQa(
+      {
+        courseId: '7001',
+        query: '什么是Java',
+      },
+      {
+        onCitation: payload => citations.push(payload.citations),
+      },
+    )
+
+    expect(citations[0]?.[0]).toMatchObject({
+      parent_chunk_id: '9007199254740993:12:2',
+      doc_id: '9007199254740993',
+      doc_name: 'Java基础教程.pdf',
+      page_start: 12,
+      page_end: 12,
+      section_title: '1.1.2 Java概述',
+      content: 'Java是一种面向对象的程序设计语言。',
+      similarity_score: 0.8721,
+    })
+  })
+
   it('继续当前课程最近更新的会话', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse([]))
@@ -352,6 +398,14 @@ describe('Java chat API', () => {
             {
               documentId: '101',
               page: 3,
+              pageStart: 2,
+              pageEnd: 4,
+              docName: '课程考核说明.pdf',
+              chunkIndex: 1,
+              parentChunkId: '101:2:1',
+              sectionTitle: '考核方式',
+              content: '期末考试占比为60%。',
+              similarityScore: 0.91,
             },
           ]),
           citationVersions: [
@@ -378,7 +432,12 @@ describe('Java chat API', () => {
     expect(result.items[0]?.citations?.[0]).toMatchObject({
       doc_id: '101',
       doc_name: '课程考核说明.pdf',
-      page_start: 3,
+      parent_chunk_id: '101:2:1',
+      page_start: 2,
+      page_end: 4,
+      section_title: '考核方式',
+      content: '期末考试占比为60%。',
+      similarity_score: 0.91,
       version: {
         outdated: true,
         versionNo: 1,

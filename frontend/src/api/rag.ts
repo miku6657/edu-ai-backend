@@ -137,6 +137,15 @@ export interface ParsedSseFrame {
 interface JavaSource {
   documentId: number | string
   page: number
+  pageStart?: number
+  pageEnd?: number
+  docName?: string
+  chunkIndex?: number
+  parentChunkId?: string
+  sectionTitle?: string | null
+  content?: string
+  similarityScore?: number | null
+  citationIndex?: number
 }
 
 const sessionCache = new Map<string, BigIntId>()
@@ -159,15 +168,28 @@ function requireSessionId(value: unknown): BigIntId {
 }
 
 function sourceToCitation(source: JavaSource): RagCitation {
+  const documentId = String(source.documentId)
+  const pageStart = source.pageStart ?? source.page
+  const pageEnd = source.pageEnd ?? source.page
+  const chunkIndex = source.chunkIndex ?? 0
+
   return {
-    parent_chunk_id: `${source.documentId}-${source.page}`,
-    doc_id: String(source.documentId),
-    doc_name: `文档 ${source.documentId}`,
-    page_start: source.page,
-    page_end: source.page,
-    section_title: null,
-    content: '',
-    similarity_score: null,
+    parent_chunk_id:
+      source.parentChunkId
+      ?? `${documentId}:${pageStart}:${chunkIndex}`,
+    doc_id: documentId,
+    doc_name:
+      source.docName?.trim()
+      || `文档 ${documentId}`,
+    page_start: pageStart,
+    page_end: pageEnd,
+    section_title: source.sectionTitle ?? null,
+    content: source.content ?? '',
+    similarity_score:
+      typeof source.similarityScore === 'number'
+      && Number.isFinite(source.similarityScore)
+        ? source.similarityScore
+        : null,
   }
 }
 
@@ -196,11 +218,31 @@ function isJavaSource(
       && id > 0
     )
 
+  const validContent =
+    source.content === undefined
+    || typeof source.content === 'string'
+
+  const validSection =
+    source.sectionTitle === undefined
+    || source.sectionTitle === null
+    || typeof source.sectionTitle === 'string'
+
+  const validScore =
+    source.similarityScore === undefined
+    || source.similarityScore === null
+    || (
+      typeof source.similarityScore === 'number'
+      && Number.isFinite(source.similarityScore)
+    )
+
   return (
     validId
     && typeof page === 'number'
     && Number.isSafeInteger(page)
     && page > 0
+    && validContent
+    && validSection
+    && validScore
   )
 }
 
