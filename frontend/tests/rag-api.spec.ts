@@ -135,6 +135,45 @@ describe('Java chat API', () => {
     expect(closed).toBe(true)
   })
 
+  it('解析 SSE 人工转交事件并校验工单信息', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(sseResponse([
+        'event: handoff\ndata: {"created":true,"ticketId":"9007199254740993","status":"PENDING","message":"问题已转交任课教师"}\n\n',
+        'event: handoff\ndata: {"created":false,"ticketId":12,"status":"UNKNOWN","message":null}\n\n',
+        'event: done\ndata: {"sessionId":"702"}\n\n',
+      ]))
+    vi.stubGlobal('fetch', fetchMock)
+    const handoffs: Array<{
+      created: boolean
+      ticketId?: string
+      status?: 'PENDING' | 'ANSWERED'
+      message: string
+    }> = []
+
+    await streamRagQa(
+      { courseId: '7002', query: '我需要教师帮助' },
+      {
+        onHandoff: payload => handoffs.push(payload),
+      },
+    )
+
+    expect(handoffs).toEqual([
+      {
+        created: true,
+        ticketId: '9007199254740993',
+        status: 'PENDING',
+        message: '问题已转交任课教师',
+      },
+      {
+        created: false,
+        ticketId: undefined,
+        status: undefined,
+        message: '答疑工单处理状态未知',
+      },
+    ])
+  })
+
   it('完整解析 SSE 引用信息', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse([]))

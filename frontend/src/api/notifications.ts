@@ -19,6 +19,8 @@ export type NotificationBizType =
   | 'DOC_QUALITY_RESOLVED'
   | 'DOC_QUALITY_CLOSED'
   | 'DOC_QUALITY_REJECTED'
+  | 'QA_TICKET_CREATED'
+  | 'QA_TICKET_ANSWERED'
 
 export type NotificationReadStatus = 'UNREAD' | 'READ'
 

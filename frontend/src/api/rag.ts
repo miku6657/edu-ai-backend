@@ -91,6 +91,13 @@ export interface DonePayload {
   sessionId: BigIntId
 }
 
+export interface HandoffPayload {
+  created: boolean
+  ticketId?: BigIntId
+  status?: 'PENDING' | 'ANSWERED'
+  message: string
+}
+
 export interface SessionPayload {
   sessionId: BigIntId
 }
@@ -105,6 +112,7 @@ export interface RagStreamHandlers {
   onSession?: (payload: SessionPayload) => void
   onCitation?: (payload: CitationPayload) => void
   onRejectionNotice?: (payload: RejectionNoticePayload) => void
+  onHandoff?: (payload: HandoffPayload) => void
   onToken?: (payload: TokenPayload) => void
   onDone?: (payload: DonePayload) => void
   onErrorEvent?: (payload: RagErrorPayload) => void
@@ -458,6 +466,26 @@ export async function streamRagQa(
       handlers.onToken?.({
         delta: typeof payload.content === 'string' ? payload.content : '',
         is_general_supplement: false,
+      })
+    } else if (frame.event === 'handoff') {
+      const ticketId = payload.ticketId
+
+      handlers.onHandoff?.({
+        created: payload.created === true,
+        ticketId:
+          typeof ticketId === 'string'
+          && /^[1-9]\d*$/.test(ticketId)
+            ? ticketId
+            : undefined,
+        status:
+          payload.status === 'PENDING'
+          || payload.status === 'ANSWERED'
+            ? payload.status
+            : undefined,
+        message:
+          typeof payload.message === 'string'
+            ? payload.message
+            : '答疑工单处理状态未知',
       })
     } else if (frame.event === 'error') {
       upstreamError = true

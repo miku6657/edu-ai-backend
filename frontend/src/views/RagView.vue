@@ -281,6 +281,16 @@ async function send(): Promise<void> {
           }
           applyRejection(assistantMessage, payload)
         },
+        onHandoff: payload => {
+          if (payload.created) {
+            const ticketLabel = payload.ticketId
+              ? `，工单编号：${payload.ticketId}`
+              : ''
+            notifySuccess(`已转交任课教师${ticketLabel}`)
+          } else {
+            notifyWarning(payload.message)
+          }
+        },
         onToken: (payload) => {
           applyToken(assistantMessage, payload.delta, payload.is_general_supplement)
           void scrollToBottom()

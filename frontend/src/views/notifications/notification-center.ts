@@ -25,6 +25,8 @@ export const BIZ_TYPE_LABELS: Record<NotificationBizType, string> = {
   DOC_QUALITY_RESOLVED: '整改待复核',
   DOC_QUALITY_CLOSED: '质量问题关闭',
   DOC_QUALITY_REJECTED: '整改驳回',
+  QA_TICKET_CREATED: '新答疑工单',
+  QA_TICKET_ANSWERED: '教师已答复',
 }
 
 export type NotificationTagType = 'primary' | 'success' | 'warning' | 'danger' | 'info'
@@ -41,6 +43,8 @@ export const BIZ_TYPE_TAG_TYPES: Record<NotificationBizType, NotificationTagType
   DOC_QUALITY_RESOLVED: 'info',
   DOC_QUALITY_CLOSED: 'success',
   DOC_QUALITY_REJECTED: 'danger',
+  QA_TICKET_CREATED: 'warning',
+  QA_TICKET_ANSWERED: 'success',
 }
 
 export const OUTBOUND_STATUS_LABELS: Record<NotificationOutboundStatus, string> = {
@@ -67,7 +71,12 @@ export function readStatusLabel(status: NotificationReadStatus): string {
 }
 
 /** 通知对应的页面入口；只做页面级跳转，不伪造不存在的深链参数。 */
-export function notificationTarget(type: NotificationBizType): 'ddl' | 'knowledge' | 'courses' {
+export function notificationTarget(
+  type: NotificationBizType,
+): 'ddl' | 'knowledge' | 'courses' | 'qa-tickets' {
+  if (type.startsWith('QA_TICKET_')) {
+    return 'qa-tickets'
+  }
   if (type.startsWith('DDL_')) {
     return 'ddl'
   }

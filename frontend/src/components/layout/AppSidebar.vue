@@ -6,6 +6,7 @@ import {
   Bell,
   BookOpen,
   CalendarClock,
+  ClipboardList,
   CircleHelp,
   Home,
   Library,
@@ -61,6 +62,7 @@ const primaryNav = computed<NavEntry[]>(() => {
   return [
     { key: 'home', label: '首页', icon: Home, routeName: 'home' },
     { key: 'rag', label: 'AI 学习', icon: Sparkles, routeName: 'rag' },
+    { key: 'qa-tickets', label: '课程答疑', icon: ClipboardList, routeName: 'qa-tickets' },
     { key: 'knowledge', label: '知识库', icon: Library, routeName: 'knowledge' },
     { key: 'courses', label: '我的课程', icon: BookOpen, routeName: 'courses' },
     { key: 'ddl', label: 'DDL 任务', icon: CalendarClock, routeName: 'ddl' },

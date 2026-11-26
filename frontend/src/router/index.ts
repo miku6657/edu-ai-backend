@@ -9,6 +9,7 @@ import HomeView from '@/views/HomeView.vue'
 import KnowledgeView from '@/views/KnowledgeView.vue'
 import LoginView from '@/views/LoginView.vue'
 import NotFoundView from '@/views/NotFoundView.vue'
+import QaTicketsView from '@/views/QaTicketsView.vue'
 import RagView from '@/views/RagView.vue'
 import SettingsView from '@/views/SettingsView.vue'
 
@@ -60,6 +61,15 @@ const routes: RouteRecordRaw[] = [
         name: 'rag',
         component: RagView,
         meta: { title: '课程问答', requiresAuth: true },
+      },
+      {
+        path: 'qa-tickets',
+        name: 'qa-tickets',
+        component: QaTicketsView,
+        meta: {
+          title: '课程答疑',
+          requiresAuth: true,
+        },
       },
       {
         path: 'ddl',

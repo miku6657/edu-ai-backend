@@ -43,12 +43,16 @@ describe('notification center helpers', () => {
     expect(bizTypeLabel('DOC_QUALITY_RESOLVED')).toBe('整改待复核')
     expect(bizTypeLabel('DOC_QUALITY_CLOSED')).toBe('质量问题关闭')
     expect(bizTypeLabel('DOC_QUALITY_REJECTED')).toBe('整改驳回')
+    expect(bizTypeLabel('QA_TICKET_CREATED')).toBe('新答疑工单')
+    expect(bizTypeLabel('QA_TICKET_ANSWERED')).toBe('教师已答复')
     expect(bizTypeTagType('DDL_T6H')).toBe('danger')
     expect(bizTypeTagType('DOC_INGEST_READY')).toBe('success')
     expect(bizTypeTagType('DOC_QUALITY_ASSIGNED')).toBe('warning')
     expect(bizTypeTagType('DOC_QUALITY_RESOLVED')).toBe('info')
     expect(bizTypeTagType('DOC_QUALITY_CLOSED')).toBe('success')
     expect(bizTypeTagType('DOC_QUALITY_REJECTED')).toBe('danger')
+    expect(bizTypeTagType('QA_TICKET_CREATED')).toBe('warning')
+    expect(bizTypeTagType('QA_TICKET_ANSWERED')).toBe('success')
   })
 
   it('出站状态与阅读状态使用契约取值', () => {
@@ -86,6 +90,8 @@ describe('notification center helpers', () => {
     expect(notificationTarget('DOC_INGEST_FAILED')).toBe('knowledge')
     expect(notificationTarget('COURSE_REBUILD_DONE')).toBe('courses')
     expect(notificationTarget('DOC_QUALITY_ASSIGNED')).toBe('knowledge')
+    expect(notificationTarget('QA_TICKET_CREATED')).toBe('qa-tickets')
+    expect(notificationTarget('QA_TICKET_ANSWERED')).toBe('qa-tickets')
   })
 
   it('分页合并按 ID 去重且保持顺序', () => {

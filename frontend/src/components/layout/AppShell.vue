@@ -23,6 +23,7 @@ import NotificationCenter from '@/views/notifications/NotificationCenter.vue'
 const PAGE_META: Record<string, { title: string; subtitle?: string }> = {
   home: { title: '首页', subtitle: '连接课程知识库、DDL 与 AI 助手' },
   rag: { title: 'AI 学习', subtitle: '基于课程知识库的智能问答与学习规划' },
+  'qa-tickets': { title: '课程答疑', subtitle: '学生问题提交、教师人工答疑与处理跟踪' },
   knowledge: { title: '知识库', subtitle: '上传课件并跟踪真实解析状态' },
   courses: { title: '我的课程', subtitle: '管理课程空间与 Embedding 绑定' },
   ddl: { title: 'DDL 任务', subtitle: '通知提取、待确认收件箱与任务闭环' },
