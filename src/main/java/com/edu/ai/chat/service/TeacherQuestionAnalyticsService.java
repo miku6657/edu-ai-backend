@@ -344,6 +344,7 @@ public class TeacherQuestionAnalyticsService {
                 jdbc.query(
                         """
                         SELECT DISTINCT
+                            m.id AS sort_id,
                             CAST(m.id AS CHAR) AS message_id,
                             CAST(s.id AS CHAR) AS session_id,
                             CAST(s.user_id AS CHAR) AS student_id,
@@ -396,7 +397,7 @@ public class TeacherQuestionAnalyticsService {
                         + QUESTION_FROM
                         + where
                         + """
-                        ORDER BY m.create_time DESC, m.id DESC
+                        ORDER BY asked_at DESC, sort_id DESC
                         LIMIT ? OFFSET ?
                         """,
                         (rs, rowNum) -> mapRecord(rs),
