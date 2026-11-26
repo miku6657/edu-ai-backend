@@ -31,7 +31,7 @@ function item(id: string, overrides: Partial<NotificationItem> = {}): Notificati
 }
 
 describe('notification center helpers', () => {
-  it('七类通知都有中文标签与稳定标签色', () => {
+  it('通知都有中文标签与稳定标签色', () => {
     expect(bizTypeLabel('DDL_T24H')).toBe('T-24h 提醒')
     expect(bizTypeLabel('DDL_T6H')).toBe('T-6h 紧急')
     expect(bizTypeLabel('DDL_OVERDUE')).toBe('逾期提醒')
@@ -39,8 +39,16 @@ describe('notification center helpers', () => {
     expect(bizTypeLabel('DOC_INGEST_READY')).toBe('课件入库')
     expect(bizTypeLabel('DOC_INGEST_FAILED')).toBe('入库失败')
     expect(bizTypeLabel('COURSE_REBUILD_DONE')).toBe('重建完成')
+    expect(bizTypeLabel('DOC_QUALITY_ASSIGNED')).toBe('质量整改')
+    expect(bizTypeLabel('DOC_QUALITY_RESOLVED')).toBe('整改待复核')
+    expect(bizTypeLabel('DOC_QUALITY_CLOSED')).toBe('质量问题关闭')
+    expect(bizTypeLabel('DOC_QUALITY_REJECTED')).toBe('整改驳回')
     expect(bizTypeTagType('DDL_T6H')).toBe('danger')
     expect(bizTypeTagType('DOC_INGEST_READY')).toBe('success')
+    expect(bizTypeTagType('DOC_QUALITY_ASSIGNED')).toBe('warning')
+    expect(bizTypeTagType('DOC_QUALITY_RESOLVED')).toBe('info')
+    expect(bizTypeTagType('DOC_QUALITY_CLOSED')).toBe('success')
+    expect(bizTypeTagType('DOC_QUALITY_REJECTED')).toBe('danger')
   })
 
   it('出站状态与阅读状态使用契约取值', () => {
@@ -77,6 +85,7 @@ describe('notification center helpers', () => {
     expect(notificationTarget('DOC_INGEST_READY')).toBe('knowledge')
     expect(notificationTarget('DOC_INGEST_FAILED')).toBe('knowledge')
     expect(notificationTarget('COURSE_REBUILD_DONE')).toBe('courses')
+    expect(notificationTarget('DOC_QUALITY_ASSIGNED')).toBe('knowledge')
   })
 
   it('分页合并按 ID 去重且保持顺序', () => {

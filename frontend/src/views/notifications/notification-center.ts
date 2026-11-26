@@ -21,6 +21,10 @@ export const BIZ_TYPE_LABELS: Record<NotificationBizType, string> = {
   DOC_INGEST_READY: '课件入库',
   DOC_INGEST_FAILED: '入库失败',
   COURSE_REBUILD_DONE: '重建完成',
+  DOC_QUALITY_ASSIGNED: '质量整改',
+  DOC_QUALITY_RESOLVED: '整改待复核',
+  DOC_QUALITY_CLOSED: '质量问题关闭',
+  DOC_QUALITY_REJECTED: '整改驳回',
 }
 
 export type NotificationTagType = 'primary' | 'success' | 'warning' | 'danger' | 'info'
@@ -33,6 +37,10 @@ export const BIZ_TYPE_TAG_TYPES: Record<NotificationBizType, NotificationTagType
   DOC_INGEST_READY: 'success',
   DOC_INGEST_FAILED: 'danger',
   COURSE_REBUILD_DONE: 'success',
+  DOC_QUALITY_ASSIGNED: 'warning',
+  DOC_QUALITY_RESOLVED: 'info',
+  DOC_QUALITY_CLOSED: 'success',
+  DOC_QUALITY_REJECTED: 'danger',
 }
 
 export const OUTBOUND_STATUS_LABELS: Record<NotificationOutboundStatus, string> = {

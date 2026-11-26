@@ -49,6 +49,10 @@ const TONE_BY_TYPE: Record<NotificationBizType, Tone> = {
   DOC_INGEST_READY: 'success',
   DOC_INGEST_FAILED: 'danger',
   COURSE_REBUILD_DONE: 'success',
+  DOC_QUALITY_ASSIGNED: 'warning',
+  DOC_QUALITY_RESOLVED: 'primary',
+  DOC_QUALITY_CLOSED: 'success',
+  DOC_QUALITY_REJECTED: 'danger',
 }
 
 function toneFor(type: NotificationBizType): Tone {

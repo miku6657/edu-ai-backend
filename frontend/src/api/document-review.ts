@@ -69,6 +69,8 @@ export interface DocumentReviewDetail {
   knowledgeProgress: ChunkKnowledgeProgress | null
   canSubmit: boolean
   canReview: boolean
+  canApprove: boolean
+  qualityBlockReason: string | null
   canWithdraw: boolean
   published: boolean
   records: DocumentReviewRecord[]

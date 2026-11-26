@@ -59,6 +59,8 @@ describe('document review api', () => {
       knowledgeProgress: null,
       canSubmit: true,
       canReview: false,
+      canApprove: false,
+      qualityBlockReason: null,
       canWithdraw: false,
       published: false,
       records: [],

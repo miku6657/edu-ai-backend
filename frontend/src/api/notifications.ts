@@ -15,6 +15,10 @@ export type NotificationBizType =
   | 'DOC_INGEST_READY'
   | 'DOC_INGEST_FAILED'
   | 'COURSE_REBUILD_DONE'
+  | 'DOC_QUALITY_ASSIGNED'
+  | 'DOC_QUALITY_RESOLVED'
+  | 'DOC_QUALITY_CLOSED'
+  | 'DOC_QUALITY_REJECTED'
 
 export type NotificationReadStatus = 'UNREAD' | 'READ'
 

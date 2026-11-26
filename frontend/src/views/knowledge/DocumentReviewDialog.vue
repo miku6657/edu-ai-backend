@@ -65,6 +65,9 @@ const canSubmit = computed(
 const canReview = computed(
   () => !busy.value && detail.value?.canReview === true,
 )
+const canApprove = computed(
+  () => !busy.value && detail.value?.canApprove === true,
+)
 const canWithdraw = computed(
   () => !busy.value && detail.value?.canWithdraw === true,
 )
@@ -187,6 +190,7 @@ async function executeAction(action: DocumentReviewAction): Promise<void> {
   ) {
     return
   }
+  if (action === 'APPROVE' && !canApprove.value) return
   if (action === 'WITHDRAW' && !canWithdraw.value) return
 
   const normalizedComment = comment.value.trim()
@@ -459,6 +463,24 @@ watch(
           </div>
         </section>
 
+        <section class="review-section">
+          <strong>知识库质量检查</strong>
+          <el-alert
+            v-if="detail.qualityBlockReason"
+            :title="detail.qualityBlockReason"
+            type="warning"
+            :closable="false"
+            show-icon
+          />
+          <el-alert
+            v-else
+            title="当前不存在阻止发布的质量抽检问题"
+            type="success"
+            :closable="false"
+            show-icon
+          />
+        </section>
+
         <section
           v-if="detail.reviewComment"
           class="review-section"
@@ -500,7 +522,7 @@ watch(
             <el-button
               v-if="detail.canReview"
               type="success"
-              :disabled="!canReview"
+              :disabled="!canApprove"
               :loading="saving"
               @click="executeAction('APPROVE')"
             >
