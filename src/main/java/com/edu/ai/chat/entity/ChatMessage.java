@@ -24,5 +24,11 @@ public class ChatMessage {
     // JSON形式保存引用的PDF来源
     private String sourcesJson;
 
+    // AI拒答原因，仅拒答的assistant消息填写
+    private String noEvidenceReason;
+
+    // 拒答回答对应的学生问题ID
+    private Long questionMessageId;
+
     private LocalDateTime createTime;
 }

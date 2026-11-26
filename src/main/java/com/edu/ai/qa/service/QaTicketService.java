@@ -48,6 +48,13 @@ public class QaTicketService {
             String teacherRole
     ) {}
 
+    private record RejectedQuestion(
+            Long courseId,
+            Long sessionId,
+            String questionText,
+            String reason
+    ) {}
+
     private static final RowMapper<QaTicketVO> ROW_MAPPER =
             QaTicketService::mapTicket;
 
@@ -223,23 +230,30 @@ public class QaTicketService {
         );
 
         // 4. 无论本次是新建还是重复请求，都取回同一工单
-        List<Long> ticketIds = jdbc.query(
+        List<CreatedTicket> tickets = jdbc.query(
                 """
-                SELECT id
+                SELECT
+                    CAST(id AS CHAR) AS ticket_id,
+                    status
                 FROM course_qa_ticket
                 WHERE question_message_id = ?
+                LIMIT 1
                 """,
-                (rs, rowNum) -> rs.getLong("id"),
+                (rs, rowNum) -> new CreatedTicket(
+                        rs.getString("ticket_id"),
+                        rs.getString("status")
+                ),
                 questionMessageId
         );
 
-        if (ticketIds.isEmpty()) {
+        if (tickets.isEmpty()) {
             throw new IllegalStateException(
                     "答疑工单创建失败"
             );
         }
 
-        Long ticketId = ticketIds.get(0);
+        CreatedTicket ticket = tickets.get(0);
+        Long ticketId = Long.parseLong(ticket.ticketId());
 
         // 5. 给任课教师发送站内通知
         try {
@@ -256,10 +270,121 @@ public class QaTicketService {
             // 具体告警交由统一日志监控处理
         }
 
-        return new CreatedTicket(
-                ticketId.toString(),
-                "PENDING"
+        return ticket;
+    }
+
+    /**
+     * 学生确认后创建答疑工单。
+     *
+     * 不能相信前端传入的课程、学生、问题内容和拒答原因。
+     * 所有数据必须从数据库中重新查询。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public CreatedTicket createFromStudentConfirmation(
+            Long questionMessageId,
+            Long studentId) {
+
+        if (questionMessageId == null || questionMessageId <= 0) {
+            throw new BusinessException(
+                    400,
+                    "问题消息ID不合法"
+            );
+        }
+
+        // 1. 必须是正常状态的学生账号
+        requireRole(studentId, "STUDENT");
+
+        // 2. 查询该学生真实提出的问题，
+        //    并确认系统确实为该问题生成了无依据拒答。
+        List<RejectedQuestion> questions = jdbc.query(
+                """
+                SELECT
+                    s.course_id,
+                    s.id AS session_id,
+                    q.content AS question_text,
+                    a.no_evidence_reason
+
+                FROM chat_message q
+
+                JOIN chat_session s
+                  ON s.id = q.session_id
+
+                JOIN chat_message a
+                  ON a.session_id = q.session_id
+                 AND a.question_message_id = q.id
+                 AND a.role = 'assistant'
+
+                WHERE q.id = ?
+                  AND q.role = 'user'
+                  AND s.user_id = ?
+                  AND a.no_evidence_reason IS NOT NULL
+
+                ORDER BY a.id DESC
+                LIMIT 1
+                """,
+                (rs, rowNum) -> new RejectedQuestion(
+                        rs.getLong("course_id"),
+                        rs.getLong("session_id"),
+                        rs.getString("question_text"),
+                        rs.getString("no_evidence_reason")
+                ),
+                questionMessageId,
+                studentId
         );
+
+        if (questions.isEmpty()) {
+            throw new BusinessException(
+                    409,
+                    "该问题不是可以申请人工答疑的拒答问题"
+            );
+        }
+
+        RejectedQuestion question = questions.get(0);
+
+        // 3. 复用原有工单创建逻辑
+        return createFromNoEvidence(
+                question.courseId(),
+                studentId,
+                question.sessionId(),
+                questionMessageId,
+                question.questionText(),
+                question.reason()
+        );
+    }
+
+    /**
+     * 查询某条拒答问题是否已经创建工单。
+     * 用于恢复聊天历史中的工单状态。
+     */
+    public CreatedTicket findExistingForQuestion(
+            Long questionMessageId,
+            Long studentId) {
+
+        if (questionMessageId == null || studentId == null) {
+            return null;
+        }
+
+        List<CreatedTicket> tickets = jdbc.query(
+                """
+                SELECT
+                    CAST(id AS CHAR) AS ticket_id,
+                    status
+                FROM course_qa_ticket
+                WHERE question_message_id = ?
+                  AND student_id = ?
+                LIMIT 1
+                """,
+                (rs, rowNum) -> new CreatedTicket(
+                        rs.getString("ticket_id"),
+                        rs.getString("status")
+                ),
+                questionMessageId,
+                studentId
+        );
+
+        return tickets.isEmpty()
+                ? null
+                : tickets.get(0);
     }
 
     private String normalizeReason(String reason) {

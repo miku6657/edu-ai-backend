@@ -2,6 +2,7 @@ package com.edu.ai.qa.controller;
 
 import com.edu.ai.common.BusinessException;
 import com.edu.ai.common.Result;
+import com.edu.ai.qa.dto.QaTicketCreateRequest;
 import com.edu.ai.qa.dto.QaTicketReplyRequest;
 import com.edu.ai.qa.dto.QaTicketVO;
 import com.edu.ai.qa.service.QaTicketService;
@@ -34,6 +35,27 @@ public class QaTicketController {
         }
 
         return id;
+    }
+
+    /**
+     * 学生确认后申请教师人工答疑。
+     *
+     * POST /api/v1/qa-tickets/from-chat
+     */
+    @PostMapping("/from-chat")
+    @PreAuthorize("hasRole('STUDENT')")
+    public Result<QaTicketService.CreatedTicket> createFromChat(
+            @Valid
+            @RequestBody QaTicketCreateRequest request,
+            Authentication auth) {
+
+        QaTicketService.CreatedTicket ticket =
+                service.createFromStudentConfirmation(
+                        request.questionMessageId(),
+                        userId(auth)
+                );
+
+        return Result.success(ticket);
     }
 
     /**

@@ -189,8 +189,8 @@ def rag_stream(
         yield sse_event(
             "token",
             {
-                "content": "当前课程暂无可检索的生效资料，"
-                           "系统将为你转交任课教师答疑。",
+                "content": "当前课程暂无可检索的生效资料。"
+                           "你可以选择是否申请任课教师人工答疑。",
             },
         )
         yield sse_event("done", {})
@@ -228,8 +228,8 @@ def rag_stream(
         yield sse_event(
             "token",
             {
-                "content": "资料中未找到相关内容，"
-                           "系统将为你转交任课教师答疑。",
+                "content": "资料中未找到相关内容。"
+                           "你可以选择是否申请任课教师人工答疑。",
             },
         )
         yield sse_event("done", {})

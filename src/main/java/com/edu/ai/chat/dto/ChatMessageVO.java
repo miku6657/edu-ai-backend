@@ -21,10 +21,18 @@ public class ChatMessageVO {
 
     private LocalDateTime createTime;
 
-    /**
-     * 历史引用的版本信息。
-     * 动态查询生成，不写入数据库。
-     */
+    // AI拒答原因
+    private String noEvidenceReason;
+
+    // 对应学生问题ID
+    private String questionMessageId;
+
+    // 已创建的工单ID
+    private String ticketId;
+
+    // 工单状态
+    private String ticketStatus;
+
     private List<CitationVersion> citationVersions = List.of();
 
     public record CitationVersion(
@@ -50,6 +58,16 @@ public class ChatMessageVO {
         vo.setContent(message.getContent());
         vo.setSourcesJson(message.getSourcesJson());
         vo.setCreateTime(message.getCreateTime());
+
+        vo.setNoEvidenceReason(
+                message.getNoEvidenceReason()
+        );
+
+        vo.setQuestionMessageId(
+                message.getQuestionMessageId() == null
+                        ? null
+                        : message.getQuestionMessageId().toString()
+        );
 
         return vo;
     }

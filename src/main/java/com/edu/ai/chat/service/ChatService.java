@@ -743,12 +743,32 @@ ChatService {
             }
 
             // 第二步：保存完整 AI 回答
-            saveMessage(
+            Long assistantMessageId = saveMessage(
                     session.getId(),
                     "assistant",
                     answer.toString(),
                     sourcesJson
             );
+
+            // 如果是无依据拒答，保存拒答标记。
+            // 注意：标记保存在 AI 回答消息上，
+            // 并关联对应的学生问题消息。
+            if (noEvidence) {
+
+                ChatMessage rejectionMessage = new ChatMessage();
+
+                rejectionMessage.setId(assistantMessageId);
+
+                rejectionMessage.setNoEvidenceReason(
+                        noEvidenceReason
+                );
+
+                rejectionMessage.setQuestionMessageId(
+                        questionMessageId
+                );
+
+                messageMapper.updateById(rejectionMessage);
+            }
 
             // 第三步：更新会话最后活动时间
             ChatSession update = new ChatSession();
@@ -766,68 +786,44 @@ ChatService {
 
             if (noEvidence) {
 
-                // 无依据拒答不计入成功问答统计
-                try {
+                // 无依据拒答只向前端发送申请邀请。
+                // 此处绝对不能创建工单。
 
-                    QaTicketService.CreatedTicket ticket =
-                            qaTicketService.createFromNoEvidence(
-                                    session.getCourseId(),
-                                    session.getUserId(),
-                                    session.getId(),
-                                    questionMessageId,
-                                    question,
-                                    noEvidenceReason
-                            );
+                ObjectNode rejectionPayload =
+                        objectMapper.createObjectNode();
 
-                    // 通知前端工单已经创建
-                    ObjectNode handoffPayload =
-                            objectMapper.createObjectNode();
+                rejectionPayload.put(
+                        "user_message_id",
+                        questionMessageId.toString()
+                );
 
-                    handoffPayload.put("created", true);
-                    handoffPayload.put("ticketId", ticket.ticketId());
-                    handoffPayload.put("status", ticket.status());
-                    handoffPayload.put(
-                            "message",
-                            "问题已转交任课教师，请关注答疑工单。"
-                    );
+                rejectionPayload.put(
+                        "notice_text",
+                        answer.toString().isBlank()
+                                ? "资料中未找到相关内容。"
+                                : answer.toString()
+                );
 
-                    send(
-                            emitter,
-                            "handoff",
-                            handoffPayload
-                    );
+                rejectionPayload.put(
+                        "reason",
+                        noEvidenceReason
+                );
 
-                    log.info(
-                            "无依据问答已转人工，ticketId={}, questionMessageId={}",
-                            ticket.ticketId(),
-                            questionMessageId
-                    );
+                rejectionPayload.put(
+                        "has_general_supplement",
+                        false
+                );
 
-                } catch (Exception e) {
+                send(
+                        emitter,
+                        "rejection",
+                        rejectionPayload
+                );
 
-                    // 工单创建失败不能丢弃已经生成的拒答消息
-                    log.error(
-                            "自动创建答疑工单失败, courseId={}, questionMessageId={}",
-                            session.getCourseId(),
-                            questionMessageId,
-                            e
-                    );
-
-                    ObjectNode handoffPayload =
-                            objectMapper.createObjectNode();
-
-                    handoffPayload.put("created", false);
-                    handoffPayload.put(
-                            "message",
-                            "暂时无法自动创建答疑工单，请联系任课教师。"
-                    );
-
-                    send(
-                            emitter,
-                            "handoff",
-                            handoffPayload
-                    );
-                }
+                log.info(
+                        "AI拒答，等待学生确认是否创建工单，questionMessageId={}",
+                        questionMessageId
+                );
 
             } else {
 
@@ -976,7 +972,7 @@ ChatService {
     }
 
     /**
-     * 查询会话历史消息，并补充引用版本信息。
+     * 查询会话历史消息，并补充引用版本和人工答疑状态。
      */
     public List<ChatMessageVO> listMessages(
             Long sessionId,
@@ -1000,10 +996,43 @@ ChatService {
                                 )
                 );
 
-        return citationVersionService.enrichMessages(
-                session.getCourseId(),
-                messages
-        );
+        // 先补充引用版本
+        List<ChatMessageVO> result =
+                citationVersionService.enrichMessages(
+                        session.getCourseId(),
+                        messages
+                );
+
+        // 再补充已经创建的工单状态
+        for (int i = 0; i < messages.size(); i++) {
+
+            ChatMessage message = messages.get(i);
+            ChatMessageVO vo = result.get(i);
+
+            if (!"assistant".equalsIgnoreCase(message.getRole())) {
+                continue;
+            }
+
+            if (message.getNoEvidenceReason() == null
+                    || message.getQuestionMessageId() == null) {
+                continue;
+            }
+
+            QaTicketService.CreatedTicket ticket =
+                    qaTicketService.findExistingForQuestion(
+                            message.getQuestionMessageId(),
+                            userId
+                    );
+
+            if (ticket != null) {
+
+                vo.setTicketId(ticket.ticketId());
+
+                vo.setTicketStatus(ticket.status());
+            }
+        }
+
+        return result;
     }
 
     // 停止当前用户正在生成的回答
