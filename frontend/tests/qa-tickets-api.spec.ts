@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { resetApiClient } from '@/api/client'
 import {
+  createQaTicketFromQuestion,
   getQaTicket,
   listAssignedQaTickets,
   listMyQaTickets,
@@ -77,5 +78,25 @@ describe('qa tickets api', () => {
         body: JSON.stringify({ reply: '请查看课程资料中的第二章。' }),
       },
     ])
+  })
+
+  it('creates a ticket from a confirmed question ID', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({
+        ticketId: TICKET_ID,
+        status: 'PENDING',
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(createQaTicketFromQuestion(COURSE_ID)).resolves.toEqual({
+      ticketId: TICKET_ID,
+      status: 'PENDING',
+    })
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/qa-tickets/from-chat')
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      method: 'POST',
+      body: JSON.stringify({ questionMessageId: COURSE_ID }),
+    })
   })
 })

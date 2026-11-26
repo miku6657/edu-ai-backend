@@ -169,6 +169,10 @@ describe('rag chat presentation', () => {
         is_rejected: true,
         content: '📌 检索说明：未找到相关内容。\n\n'
           + SUPPLEMENT_PREFIX + '\n通用补充正文',
+        question_message_id: '90001',
+        no_evidence_reason: 'NO_RETRIEVAL_MATCH',
+        ticket_id: '90003',
+        ticket_status: 'PENDING',
       }),
     ])
 
@@ -176,6 +180,11 @@ describe('rag chat presentation', () => {
     expect(messages[0]?.noticeText).toBe('📌 检索说明：未找到相关内容。')
     expect(messages[0]?.supplement).toBe('通用补充正文')
     expect(messages[0]?.isRejected).toBe(true)
+    expect(messages[0]?.questionMessageId).toBe('90001')
+    expect(messages[0]?.ticketId).toBe('90003')
+    expect(messages[0]?.ticketStatus).toBe('PENDING')
+    expect(messages[0]?.ticketCreating).toBe(false)
+    expect(messages[0]?.handoffDismissed).toBe(false)
   })
 
   it('只高亮同时命中 citation 的文件名与页码', () => {

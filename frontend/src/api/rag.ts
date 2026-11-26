@@ -33,6 +33,10 @@ export interface ChatMessage {
   sourcesJson: string | null
   citationVersions?: CitationVersion[]
   createTime: string
+  noEvidenceReason?: string | null
+  questionMessageId?: BigIntId | null
+  ticketId?: BigIntId | null
+  ticketStatus?: 'PENDING' | 'ANSWERED' | null
 }
 
 /** 历史消息的页面展示模型。 */
@@ -45,6 +49,10 @@ export interface ChatHistoryMessage {
   content: string
   citations: RagCitation[] | null
   is_rejected: boolean
+  question_message_id?: BigIntId | null
+  no_evidence_reason?: string | null
+  ticket_id?: BigIntId | null
+  ticket_status?: 'PENDING' | 'ANSWERED' | null
   trace_id: string | null
   retrieval_cost_ms: number | null
   llm_first_token_ms: number | null
@@ -80,6 +88,7 @@ export interface RejectionNoticePayload {
   user_message_id: string
   notice_text: string
   has_general_supplement: boolean
+  reason?: string
 }
 
 export interface TokenPayload {
@@ -296,7 +305,9 @@ function parseSources(
   }
 }
 
-function toChatHistoryMessage(item: ChatMessage): ChatHistoryMessage {
+function toChatHistoryMessage(
+  item: ChatMessage,
+): ChatHistoryMessage {
   return {
     message_id: item.id,
     course_id: null,
@@ -308,7 +319,16 @@ function toChatHistoryMessage(item: ChatMessage): ChatHistoryMessage {
       item.sourcesJson,
       item.citationVersions ?? [],
     ),
-    is_rejected: false,
+    is_rejected:
+      item.noEvidenceReason != null,
+    question_message_id:
+      item.questionMessageId ?? null,
+    no_evidence_reason:
+      item.noEvidenceReason ?? null,
+    ticket_id:
+      item.ticketId ?? null,
+    ticket_status:
+      item.ticketStatus ?? null,
     trace_id: null,
     retrieval_cost_ms: null,
     llm_first_token_ms: null,
@@ -461,6 +481,25 @@ export async function streamRagQa(
         course_index_status: 'UNKNOWN',
         rebuild_progress_note: null,
         citations: sources,
+      })
+    } else if (frame.event === 'rejection') {
+      const userMessageId = payload.user_message_id
+
+      handlers.onRejectionNotice?.({
+        user_message_id:
+          typeof userMessageId === 'string'
+          && /^[1-9]\d*$/.test(userMessageId)
+            ? userMessageId
+            : '',
+        notice_text:
+          typeof payload.notice_text === 'string'
+            ? payload.notice_text
+            : '资料中未找到相关内容。',
+        has_general_supplement: false,
+        reason:
+          typeof payload.reason === 'string'
+            ? payload.reason
+            : 'NO_RETRIEVAL_MATCH',
       })
     } else if (frame.event === 'token') {
       handlers.onToken?.({

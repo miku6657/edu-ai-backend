@@ -135,6 +135,45 @@ describe('Java chat API', () => {
     expect(closed).toBe(true)
   })
 
+  it('校验并解析拒答 SSE 事件', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(sseResponse([
+        'event: rejection\ndata: {"user_message_id":"9007199254740993","notice_text":"未找到资料","reason":"NO_RETRIEVAL_MATCH"}\n\n',
+        'event: rejection\ndata: {"user_message_id":12}\n\n',
+        'event: done\ndata: {"sessionId":"702"}\n\n',
+      ]))
+    vi.stubGlobal('fetch', fetchMock)
+    const rejections: Array<{
+      user_message_id: string
+      notice_text: string
+      has_general_supplement: boolean
+      reason?: string
+    }> = []
+
+    await streamRagQa(
+      { courseId: '7002', query: '问题' },
+      {
+        onRejectionNotice: payload => rejections.push(payload),
+      },
+    )
+
+    expect(rejections).toEqual([
+      {
+        user_message_id: '9007199254740993',
+        notice_text: '未找到资料',
+        has_general_supplement: false,
+        reason: 'NO_RETRIEVAL_MATCH',
+      },
+      {
+        user_message_id: '',
+        notice_text: '资料中未找到相关内容。',
+        has_general_supplement: false,
+        reason: 'NO_RETRIEVAL_MATCH',
+      },
+    ])
+  })
+
   it('解析 SSE 人工转交事件并校验工单信息', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse([]))
@@ -307,6 +346,10 @@ describe('Java chat API', () => {
           content: '回答',
           sourcesJson: '[{"documentId":501,"page":4}]',
           createTime: '2026-01-03T10:00:01',
+          noEvidenceReason: 'NO_RETRIEVAL_MATCH',
+          questionMessageId: '901',
+          ticketId: '9007199254740995',
+          ticketStatus: 'PENDING',
         },
       ]))
     vi.stubGlobal('fetch', fetchMock)
@@ -323,7 +366,12 @@ describe('Java chat API', () => {
         {
           message_id: '902',
           role: 'ASSISTANT',
+          is_rejected: true,
           citations: [{ doc_id: '501', page_start: 4 }],
+          question_message_id: '901',
+          no_evidence_reason: 'NO_RETRIEVAL_MATCH',
+          ticket_id: '9007199254740995',
+          ticket_status: 'PENDING',
         },
       ],
     })

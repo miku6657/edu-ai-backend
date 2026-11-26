@@ -104,3 +104,31 @@ export function replyQaTicket(
     },
   )
 }
+
+/**
+ * 学生确认创建人工答疑工单的返回结果。
+ */
+export interface CreateQaTicketResult {
+  ticketId: BigIntId
+  status: QaTicketStatus
+}
+
+/**
+ * 学生确认后创建工单。
+ *
+ * 后端根据 questionMessageId 查询真实问题和拒答状态，
+ * 不接受前端指定学生、课程和教师。
+ */
+export function createQaTicketFromQuestion(
+  questionMessageId: BigIntId,
+): Promise<CreateQaTicketResult> {
+  return apiRequest<CreateQaTicketResult>(
+    '/v1/qa-tickets/from-chat',
+    {
+      method: 'POST',
+      body: {
+        questionMessageId,
+      },
+    },
+  )
+}

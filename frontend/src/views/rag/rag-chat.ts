@@ -25,6 +25,15 @@ export interface UiMessage {
   traceId: string | null
   retrievalCostMs: number | null
   llmFirstTokenMs: number | null
+  // 对应学生问题ID
+  questionMessageId: string | null
+  // 已创建工单信息
+  ticketId: string | null
+  ticketStatus: 'PENDING' | 'ANSWERED' | null
+  // 是否正在创建工单
+  ticketCreating: boolean
+  // 学生是否点击了暂不需要
+  handoffDismissed: boolean
 }
 
 export interface SupplementParts {
@@ -72,6 +81,11 @@ export function historyToUiMessages(items: ChatHistoryMessage[]): UiMessage[] {
         traceId: item.trace_id,
         retrievalCostMs: item.retrieval_cost_ms,
         llmFirstTokenMs: item.llm_first_token_ms,
+        questionMessageId: item.question_message_id ?? null,
+        ticketId: item.ticket_id ?? null,
+        ticketStatus: item.ticket_status ?? null,
+        ticketCreating: false,
+        handoffDismissed: false,
       }
     })
 }
@@ -95,6 +109,11 @@ export function createLocalMessage(
     traceId: null,
     retrievalCostMs: null,
     llmFirstTokenMs: null,
+    questionMessageId: null,
+    ticketId: null,
+    ticketStatus: null,
+    ticketCreating: false,
+    handoffDismissed: false,
   }
 }
 
@@ -112,7 +131,10 @@ export function applyRejection(
 ): void {
   message.noticeText = payload.notice_text
   message.isRejected = true
-  // 拒答不得与任何“成功回答”内容或引用卡片同时展示
+
+  message.questionMessageId =
+    payload.user_message_id || null
+
   message.content = ''
   message.supplement = ''
   message.citations = null

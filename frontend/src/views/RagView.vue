@@ -16,6 +16,9 @@ import {
 import { ElMessageBox } from 'element-plus'
 
 import { listAccessibleCourses } from '@/api/course-access'
+import {
+  createQaTicketFromQuestion,
+} from '@/api/qa-tickets'
 import type { Course } from '@/api/course'
 import type { BigIntId } from '@/api/types'
 import type { KnowledgeDoc } from '@/api/knowledge'
@@ -214,6 +217,69 @@ async function loadHistory(reset: boolean): Promise<void> {
 
 function retryHistory(): void {
   void loadHistory(true)
+}
+
+/**
+ * 学生确认申请教师人工答疑。
+ */
+async function requestTeacherHelp(
+  message: UiMessage,
+): Promise<void> {
+  if (!auth.isStudent) {
+    notifyWarning('只有学生可以申请人工答疑。')
+    return
+  }
+
+  const questionMessageId =
+    message.questionMessageId
+
+  if (!questionMessageId) {
+    notifyWarning('无法获取原始问题ID，请刷新后重试。')
+    return
+  }
+
+  if (message.ticketCreating) {
+    return
+  }
+
+  if (message.ticketId) {
+    notifyWarning('该问题已经创建过答疑工单。')
+    return
+  }
+
+  message.ticketCreating = true
+
+  try {
+    const result = await createQaTicketFromQuestion(
+      questionMessageId,
+    )
+
+    message.ticketId = result.ticketId
+    message.ticketStatus = result.status
+    message.handoffDismissed = false
+
+    notifySuccess(
+      `答疑工单创建成功，工单编号：${result.ticketId}`,
+    )
+  } catch (error) {
+    notifyError(error)
+  } finally {
+    message.ticketCreating = false
+  }
+}
+
+/**
+ * 学生暂时不需要人工答疑。
+ * 仅隐藏当前消息的申请区域，不创建任何工单。
+ */
+function dismissTeacherHelp(
+  message: UiMessage,
+): void {
+  if (message.ticketCreating) {
+    return
+  }
+
+  message.handoffDismissed = true
 }
 
 function submitQuery(): void {
@@ -647,8 +713,79 @@ function relativeTime(value: string): string {
               </span>
 
               <div class="rag-bubble">
-                <div v-if="message.noticeText !== null" class="rag-notice">
+                <div
+                  v-if="message.noticeText !== null"
+                  class="rag-notice"
+                >
                   {{ message.noticeText }}
+                </div>
+
+                <div
+                  v-if="
+                    message.isRejected
+                    && auth.isStudent
+                    && message.questionMessageId !== null
+                    && !message.handoffDismissed
+                  "
+                  class="rag-handoff"
+                >
+                  <div
+                    v-if="message.ticketId !== null"
+                    class="rag-handoff__success"
+                  >
+                    <el-tag type="success">
+                      已提交教师答疑
+                    </el-tag>
+
+                    <span>
+                      工单编号：{{ message.ticketId }}
+                    </span>
+
+                    <el-tag
+                      v-if="message.ticketStatus === 'ANSWERED'"
+                      type="info"
+                    >
+                      教师已答复
+                    </el-tag>
+
+                    <el-tag
+                      v-else
+                      type="warning"
+                    >
+                      等待教师答复
+                    </el-tag>
+                  </div>
+
+                  <template v-else>
+                    <div class="rag-handoff__title">
+                      是否需要任课教师进一步解答？
+                    </div>
+
+                    <div class="rag-handoff__description">
+                      如果课程资料中没有相关内容，
+                      可以提交答疑申请，由任课教师人工处理。
+                    </div>
+
+                    <div class="rag-handoff__actions">
+                      <el-button
+                        type="primary"
+                        size="small"
+                        :loading="message.ticketCreating"
+                        :disabled="message.ticketCreating"
+                        @click="requestTeacherHelp(message)"
+                      >
+                        确认创建答疑工单
+                      </el-button>
+
+                      <el-button
+                        size="small"
+                        :disabled="message.ticketCreating"
+                        @click="dismissTeacherHelp(message)"
+                      >
+                        暂不需要
+                      </el-button>
+                    </div>
+                  </template>
                 </div>
 
                 <div v-if="message.content !== ''" class="rag-content">
@@ -1702,5 +1839,42 @@ function relativeTime(value: string): string {
 
 .rag-citation-actions :deep(.el-button) {
   margin-left: 0;
+}
+
+.rag-handoff {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid var(--el-color-primary-light-7);
+  border-radius: 10px;
+  background: var(--el-color-primary-light-9);
+}
+
+.rag-handoff__title {
+  color: var(--sc-text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.rag-handoff__description {
+  color: var(--sc-text-secondary);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.rag-handoff__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.rag-handoff__success {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: var(--sc-text);
+  font-size: 12px;
 }
 </style>
