@@ -2182,18 +2182,17 @@ public class DocumentQualityService {
     // =================================================
 
     /**
-     * 在知识库发布事务内部调用。
+     * 获取当前文档的质量发布阻断原因。
      *
-     * 调用方必须已经获得课程行锁。
+     * null 表示不存在质量抽检方面的发布阻碍。
      */
-    public void requirePublishable(
+    public String getPublishBlockReason(
 
             Long courseId,
 
             Long documentId) {
 
         long activeTasks = count(
-
                 """
                 SELECT COUNT(*)
                 FROM course_document_quality_task
@@ -2201,73 +2200,70 @@ public class DocumentQualityService {
                   AND document_id = ?
                   AND status <> 'COMPLETED'
                 """,
-
                 courseId,
-
                 documentId
         );
 
         if (activeTasks > 0) {
-
-            throw conflict(
-                    "当前文档仍存在未完成的质量抽检任务"
-            );
+            return "当前文档仍存在未完成的质量抽检任务";
         }
 
         long unresolvedIssues = count(
-
                 """
                 SELECT COUNT(*)
                 FROM course_document_quality_issue i
-
                 JOIN course_document_quality_task t
                   ON t.id = i.task_id
-
                 WHERE t.course_id = ?
                   AND t.document_id = ?
                   AND i.status <> 'CLOSED'
                 """,
-
                 courseId,
-
                 documentId
         );
 
         if (unresolvedIssues > 0) {
-
-            throw conflict(
-                    "当前文档仍存在未完成整改的质量问题"
-            );
+            return "当前文档仍存在未完成整改的质量问题";
         }
 
-        // 如果整改依赖新的文档版本，
-        // 不允许继续发布存在问题的原版本。
         long replacedIssues = count(
-
                 """
                 SELECT COUNT(*)
                 FROM course_document_quality_issue i
-
                 JOIN course_document_quality_task t
                   ON t.id = i.task_id
-
                 WHERE t.course_id = ?
                   AND t.document_id = ?
                   AND i.status = 'CLOSED'
                   AND i.replacement_document_id IS NOT NULL
                 """,
-
                 courseId,
-
                 documentId
         );
 
         if (replacedIssues > 0) {
+            return "当前资料已通过新版本整改，请审核发布整改后的资源版本";
+        }
 
-            throw conflict(
-                    "当前资料的质量问题已通过新版本整改，"
-                    + "请审核发布整改后的资源版本"
-            );
+        return null;
+    }
+
+    /**
+     * 发布事务中的强制校验。
+     */
+    public void requirePublishable(
+
+            Long courseId,
+
+            Long documentId) {
+
+        String reason = getPublishBlockReason(
+                courseId,
+                documentId
+        );
+
+        if (reason != null) {
+            throw conflict(reason);
         }
     }
 }

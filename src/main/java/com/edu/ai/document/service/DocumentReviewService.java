@@ -918,6 +918,16 @@ public class DocumentReviewService {
                           )
                         : null;
 
+        String qualityBlockReason = ready
+                ? qualityService.getPublishBlockReason(
+                        courseId,
+                        documentId
+                  )
+                : null;
+
+        boolean qualityReady =
+                qualityBlockReason == null;
+
         boolean canSubmit =
                 ready
                 && pendingVersion
@@ -926,12 +936,23 @@ public class DocumentReviewService {
                         || REJECTED.equals(reviewStatus)
                 )
                 && progress != null
-                && progress.completed();
+                && progress.completed()
+                && qualityReady;
 
         boolean canReview =
                 ready
                 && pendingVersion
                 && PENDING.equals(reviewStatus);
+
+        /**
+         * 可以驳回不代表可以发布。
+         * 质量检查不通过时仍允许审核人员驳回。
+         */
+        boolean canApprove =
+                canReview
+                && progress != null
+                && progress.completed()
+                && qualityReady;
 
         boolean canWithdraw =
                 canReview;
@@ -1005,6 +1026,10 @@ public class DocumentReviewService {
                 canSubmit,
 
                 canReview,
+
+                canApprove,
+
+                qualityBlockReason,
 
                 canWithdraw,
 

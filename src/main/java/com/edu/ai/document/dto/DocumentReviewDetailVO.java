@@ -37,6 +37,10 @@ public record DocumentReviewDetailVO(
 
         boolean canReview,
 
+        boolean canApprove,
+
+        String qualityBlockReason,
+
         boolean canWithdraw,
 
         boolean published,
