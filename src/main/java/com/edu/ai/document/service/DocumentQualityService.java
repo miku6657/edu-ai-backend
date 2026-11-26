@@ -10,6 +10,8 @@ import com.edu.ai.document.dto.DocumentQualityVO;
 import com.edu.ai.document.entity.CourseDocument;
 import com.edu.ai.document.mapper.CourseDocumentMapper;
 
+import com.edu.ai.notification.service.NotificationService;
+
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 
@@ -79,6 +81,8 @@ public class DocumentQualityService {
 
     private final DocumentChunkService chunkService;
 
+    private final NotificationService notificationService;
+
     public DocumentQualityService(
 
             JdbcTemplate jdbc,
@@ -87,7 +91,9 @@ public class DocumentQualityService {
 
             CourseDocumentMapper documentMapper,
 
-            DocumentChunkService chunkService) {
+            DocumentChunkService chunkService,
+
+            NotificationService notificationService) {
 
         this.jdbc = jdbc;
 
@@ -96,6 +102,8 @@ public class DocumentQualityService {
         this.documentMapper = documentMapper;
 
         this.chunkService = chunkService;
+
+        this.notificationService = notificationService;
     }
 
     // =================================================
@@ -332,6 +340,33 @@ public class DocumentQualityService {
                 courseId,
 
                 assigneeId
+        );
+    }
+
+    /**
+     * 为质量问题责任人发送站内通知。
+     */
+    private void notifyIssueAssigned(
+
+            Long issueId,
+
+            Long assigneeId,
+
+            String description) {
+
+        notificationService.createIfAbsent(
+
+                assigneeId,
+
+                "DOC_QUALITY_ASSIGNED",
+
+                issueId,
+
+                "新的知识库质量整改任务",
+
+                "你有一项待整改的知识库质量问题："
+                        + description
+                        + "。请前往对应课程知识库处理。"
         );
     }
 
@@ -1525,6 +1560,36 @@ public class DocumentQualityService {
                 "抽检样本状态已经变化"
         );
 
+        // 查询本次新创建的质量问题并通知责任人。
+        if (FAIL.equals(result)) {
+
+            List<DocumentQualityVO.Issue> createdIssues =
+                    jdbc.query(
+                            """
+                            SELECT *
+                            FROM course_document_quality_issue
+                            WHERE task_id = ?
+                              AND sample_id = ?
+                            """,
+                            issueMapper,
+                            taskId,
+                            sampleId
+                    );
+
+            for (DocumentQualityVO.Issue issue
+                    : createdIssues) {
+
+                notifyIssueAssigned(
+
+                        Long.valueOf(issue.id()),
+
+                        Long.valueOf(issue.assigneeId()),
+
+                        issue.description()
+                );
+            }
+        }
+
         return getDetail(
 
                 courseId,
@@ -1609,6 +1674,15 @@ public class DocumentQualityService {
                 ),
 
                 "质量问题状态已经变化"
+        );
+
+        notifyIssueAssigned(
+
+                issueId,
+
+                assigneeId,
+
+                issue.description()
         );
 
         return getDetail(
@@ -1741,6 +1815,21 @@ public class DocumentQualityService {
                 ),
 
                 "提交整改失败，问题状态已经变化"
+        );
+
+        notificationService.createIfAbsent(
+
+                Long.valueOf(issue.reporterId()),
+
+                "DOC_QUALITY_RESOLVED",
+
+                issueId,
+
+                "知识库质量问题等待复核",
+
+                "相关责任人已提交整改结果："
+                        + issue.description()
+                        + "。请前往知识库进行复核。"
         );
 
         return getDetail(
@@ -1940,6 +2029,38 @@ public class DocumentQualityService {
 
                 "复核失败，问题状态已经变化"
         );
+
+        if ("APPROVE".equals(decision)) {
+
+            notificationService.createIfAbsent(
+
+                    Long.valueOf(issue.assigneeId()),
+
+                    "DOC_QUALITY_CLOSED",
+
+                    issueId,
+
+                    "知识库质量问题已关闭",
+
+                    "你提交的质量整改结果已通过复核。"
+            );
+
+        } else {
+
+            notificationService.createIfAbsent(
+
+                    Long.valueOf(issue.assigneeId()),
+
+                    "DOC_QUALITY_REJECTED",
+
+                    issueId,
+
+                    "知识库质量整改未通过",
+
+                    "整改结果未通过复核，原因："
+                            + comment
+            );
+        }
 
         return getDetail(
 
