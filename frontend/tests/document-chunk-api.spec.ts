@@ -145,7 +145,7 @@ describe('document chunk api', () => {
     ])
     expect(chunkingVersionLabel(1)).toBe('固定窗口切片')
     expect(chunkingVersionLabel(2)).toBe('段落感知切片')
-    expect(chunkingVersionLabel(3)).toBe('未知切片算法')
+    expect(chunkingVersionLabel(3)).toBe('章节聚合切片')
   })
 
   it('calls knowledge association endpoints with string BIGINT IDs', async () => {

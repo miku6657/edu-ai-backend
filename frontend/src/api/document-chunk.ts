@@ -176,6 +176,8 @@ export function chunkingVersionLabel(
       return '固定窗口切片'
     case 2:
       return '段落感知切片'
+    case 3:
+      return '章节聚合切片'
     default:
       return '未知切片算法'
   }
