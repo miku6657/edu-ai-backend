@@ -43,6 +43,7 @@ import { notifyError, notifySuccess, notifyWarning } from '@/utils/notify'
 import DocumentClassificationPanel from '@/views/knowledge/DocumentClassificationPanel.vue'
 import DocumentChunkDialog from '@/views/knowledge/DocumentChunkDialog.vue'
 import DocumentReviewDialog from '@/views/knowledge/DocumentReviewDialog.vue'
+import DocumentQualityDialog from '@/views/knowledge/DocumentQualityDialog.vue'
 import DocumentMergeDialog from '@/views/knowledge/DocumentMergeDialog.vue'
 import DocumentPreviewDialog from '@/views/knowledge/DocumentPreviewDialog.vue'
 import DocumentVersionDialog from '@/views/knowledge/DocumentVersionDialog.vue'
@@ -99,6 +100,8 @@ const chunkDialogVisible = ref(false)
 const chunkDocument = ref<KnowledgeDoc | null>(null)
 const reviewDialogVisible = ref(false)
 const reviewDocument = ref<KnowledgeDoc | null>(null)
+const qualityDialogVisible = ref(false)
+const qualityDocument = ref<KnowledgeDoc | null>(null)
 const resourceFilterOptions = [
   { value: '', label: '全部类型' },
   ...RESOURCE_TYPE_OPTIONS.filter(
@@ -280,6 +283,8 @@ watch(
     chunkDocument.value = null
     reviewDialogVisible.value = false
     reviewDocument.value = null
+    qualityDialogVisible.value = false
+    qualityDocument.value = null
     void loadResourceClassifications()
   },
   { immediate: true },
@@ -510,6 +515,49 @@ function openChunkManager(doc: KnowledgeDoc): void {
 
   chunkDocument.value = doc
   chunkDialogVisible.value = true
+}
+
+/**
+ * 打开知识库质量抽检。
+ */
+function openQualityManager(doc: KnowledgeDoc): void {
+  if (!canManageDocuments.value) {
+    notifyWarning('无权进行知识库质量抽检')
+    return
+  }
+  if (doc.courseId !== selectedCourseId.value) {
+    notifyWarning('该资料不属于当前课程')
+    return
+  }
+  if (doc.status !== 'READY') {
+    notifyWarning('资料尚未完成解析，无法进行质量抽检')
+    return
+  }
+  if (doc.versionStatus === 'HISTORY') {
+    notifyWarning('历史版本仅供查看，不能创建新的抽检任务')
+    return
+  }
+  if (doc.reviewStatus === 'PENDING') {
+    notifyWarning('请先撤回发布审核，再进行质量抽检')
+    return
+  }
+
+  qualityDocument.value = doc
+  qualityDialogVisible.value = true
+}
+
+/**
+ * 抽检数据发生变化后刷新知识库列表。
+ */
+async function onQualityChanged(): Promise<void> {
+  const courseId = selectedCourseId.value
+  await loadDocs()
+  if (selectedCourseId.value !== courseId || !qualityDocument.value) return
+
+  const latest = docs.value.find(
+    doc => doc.id === qualityDocument.value?.id,
+  )
+  if (latest) qualityDocument.value = latest
 }
 
 /**
@@ -1278,7 +1326,7 @@ function documentTone(doc: KnowledgeDoc): Tone {
                 </el-table-column>
                 <el-table-column
                   label="操作"
-                  :width="compact ? 220 : 420"
+                  :width="compact ? 240 : 500"
                   fixed="right"
                 >
                   <template #default="{ row }">
@@ -1302,6 +1350,19 @@ function documentTone(doc: KnowledgeDoc): Tone {
                         @click="openChunkManager(row)"
                       >
                         切片管理
+                      </el-button>
+
+                      <el-button
+                        v-if="
+                          canManageDocuments
+                          && row.status === 'READY'
+                          && row.versionStatus !== 'HISTORY'
+                        "
+                        text
+                        type="primary"
+                        @click="openQualityManager(row)"
+                      >
+                        质量抽检
                       </el-button>
 
                       <el-button
@@ -1397,6 +1458,14 @@ function documentTone(doc: KnowledgeDoc): Tone {
       @changed="onReviewChanged"
       @preview="openPreview"
       @chunks="openChunkManager"
+    />
+    <DocumentQualityDialog
+      v-model="qualityDialogVisible"
+      :course-id="selectedCourseId"
+      :document="qualityDocument"
+      :documents="docs"
+      @changed="onQualityChanged"
+      @preview="openPreview"
     />
     <DocumentMergeDialog
       v-model="mergeDialogVisible"
