@@ -575,7 +575,7 @@ public class TeacherQuestionAnalyticsService {
         args.add(courseId);
 
         if (startDate != null) {
-            sql.append(" AND m.create_time >= ?");
+            sql.append(" AND m.create_time >= ? ");
             args.add(
                     Timestamp.valueOf(
                             startDate.atStartOfDay()
@@ -584,7 +584,7 @@ public class TeacherQuestionAnalyticsService {
         }
 
         if (endDate != null) {
-            sql.append(" AND m.create_time < ?");
+            sql.append(" AND m.create_time < ? ");
             args.add(
                     Timestamp.valueOf(
                             endDate.plusDays(1).atStartOfDay()

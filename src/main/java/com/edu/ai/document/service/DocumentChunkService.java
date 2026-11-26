@@ -631,7 +631,7 @@ public class DocumentChunkService {
         if (pageNo != null) {
 
             where.append(
-                    " AND c.page_no = ?"
+                    " AND c.page_no = ? "
             );
 
             params.add(pageNo);
@@ -641,7 +641,7 @@ public class DocumentChunkService {
         if (chapterId != null) {
 
             where.append(
-                    " AND c.chapter_id = ?"
+                    " AND c.chapter_id = ? "
             );
 
             params.add(chapterId);
@@ -651,7 +651,7 @@ public class DocumentChunkService {
         if (Boolean.TRUE.equals(unclassified)) {
 
             where.append(
-                    " AND c.chapter_id IS NULL"
+                    " AND c.chapter_id IS NULL "
             );
         }
 
@@ -676,7 +676,7 @@ public class DocumentChunkService {
             }
 
             where.append(
-                    " AND c.knowledge_status = ?"
+                    " AND c.knowledge_status = ? "
             );
 
             params.add(normalizedStatus);

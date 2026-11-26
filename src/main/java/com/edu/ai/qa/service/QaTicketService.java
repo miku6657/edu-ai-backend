@@ -294,7 +294,7 @@ public class QaTicketService {
         args.add(userId);
 
         if (status != null) {
-            where += " AND t.status = ?";
+            where += " AND t.status = ? ";
             args.add(status);
         }
 
@@ -333,17 +333,17 @@ public class QaTicketService {
         List<Object> args = new ArrayList<>();
 
         if ("TEACHER".equals(role)) {
-            where.append(" AND t.teacher_id = ?");
+            where.append(" AND t.teacher_id = ? ");
             args.add(userId);
         }
 
         if (courseId != null) {
-            where.append(" AND t.course_id = ?");
+            where.append(" AND t.course_id = ? ");
             args.add(courseId);
         }
 
         if (status != null) {
-            where.append(" AND t.status = ?");
+            where.append(" AND t.status = ? ");
             args.add(status);
         }
 
@@ -556,6 +556,7 @@ public class QaTicketService {
                   ON teacher.id = t.teacher_id
                 """
                 + where
+                + " "
                 + """
                 ORDER BY
                     CASE WHEN t.status = 'PENDING'
