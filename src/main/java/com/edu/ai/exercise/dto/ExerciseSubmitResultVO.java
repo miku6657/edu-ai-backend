@@ -46,7 +46,9 @@ public record ExerciseSubmitResultVO(
 
             BigDecimal earnedScore,
 
-            boolean pendingReview
+            boolean pendingReview,
+
+            String teacherFeedback
 
     ) {}
 }

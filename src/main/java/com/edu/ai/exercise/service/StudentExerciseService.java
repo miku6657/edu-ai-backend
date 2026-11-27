@@ -624,7 +624,8 @@ public class StudentExerciseService {
                             q.explanation,
                             q.score,
                             a.score_earned,
-                            a.pending_review
+                            a.pending_review,
+                            a.teacher_feedback
 
                         FROM course_exercise_attempt_answer a
 
@@ -674,7 +675,8 @@ public class StudentExerciseService {
                                     explanation,
                                     rs.getBigDecimal("score"),
                                     rs.getBigDecimal("score_earned"),
-                                    pending
+                                    pending,
+                                    rs.getString("teacher_feedback")
                             );
                         },
                         attemptId
