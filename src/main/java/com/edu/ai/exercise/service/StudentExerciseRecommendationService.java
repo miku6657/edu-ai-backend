@@ -87,7 +87,13 @@ public class StudentExerciseRecommendationService {
                     )
             );
 
-            if (point == null) {
+            // 已经掌握的知识点不再作为推荐依据
+            if (point == null
+                    || (
+                        point.hasPracticeRecord()
+                        && point.masteryRate() != null
+                        && point.masteryRate() >= 85
+                    )) {
                 continue;
             }
 
@@ -510,10 +516,27 @@ public class StudentExerciseRecommendationService {
 
                 WHERE e.status = 'PUBLISHED'
                   AND c.status = 1
+
+                  -- 学生已经开始但尚未完成的练习不重复推荐
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM course_exercise_attempt a
+                      WHERE a.exercise_id = e.id
+                        AND a.student_id = ?
+                        AND a.status IN (
+                            'IN_PROGRESS',
+                            'PENDING_REVIEW'
+                        )
+                  )
                 """
         );
 
         List<Object> args = new ArrayList<>();
+
+        // course_student.student_id
+        args.add(studentId);
+
+        // NOT EXISTS 中的学生 ID
         args.add(studentId);
 
         if (courseId != null) {
