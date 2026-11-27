@@ -69,6 +69,12 @@ const primaryNav = computed<NavEntry[]>(() => {
     { key: 'ddl', label: 'DDL 任务', icon: CalendarClock, routeName: 'ddl' },
   ]
   if (auth.isTeacher || auth.isAdmin) {
+    entries.splice(5, 0, {
+      key: 'exercises',
+      label: '练习管理',
+      icon: ClipboardList,
+      routeName: 'exercises',
+    })
     entries.splice(3, 0, {
       key: 'teacher-questions',
       label: '教师问答分析',
