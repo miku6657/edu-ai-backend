@@ -9,6 +9,7 @@ import {
   getExerciseReview,
   getExercise,
   getStudentExercise,
+  getStudentExerciseRecommendations,
   getStudentExerciseResult,
   gradeExerciseAttempt,
   getStudentMistake,
@@ -193,5 +194,38 @@ describe('exercises api', () => {
       throw new Error('自我核对请求体不是 JSON 字符串')
     }
     expect(JSON.parse(selfReviewBody)).toEqual({ answers: reviewAnswers })
+  })
+
+  it('个性化练习推荐支持全部课程和指定课程', async () => {
+    const fetchMock = vi.fn<
+      (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
+    >().mockImplementation(() =>
+      Promise.resolve(jsonResponse({
+        weakKnowledgePointCount: 0,
+        recommendedExerciseCount: 0,
+        recommendations: [],
+      })),
+    )
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    await getStudentExerciseRecommendations()
+    await getStudentExerciseRecommendations('2001')
+
+    expect(
+      fetchMock.mock.calls.map(([url, init]) => [
+        requestUrl(url),
+        init?.method,
+      ]),
+    ).toEqual([
+      [
+        '/api/v1/student/exercises/recommendations',
+        'GET',
+      ],
+      [
+        '/api/v1/student/exercises/recommendations?courseId=2001',
+        'GET',
+      ],
+    ])
   })
 })

@@ -36,6 +36,8 @@ const recommendations = ref<StudentExerciseRecommendation[]>([])
 
 const recommendationWeakCount = ref(0)
 
+const recommendationError = ref('')
+
 let loadSequence = 0
 const selectedCourseId = ref<BigIntId>('')
 const searchKeyword = ref('')
@@ -99,6 +101,8 @@ async function loadExercises(): Promise<void> {
 
   const courseId = selectedCourseId.value || undefined
 
+  recommendationError.value = ''
+
   loading.value = true
 
   try {
@@ -111,6 +115,9 @@ async function loadExercises(): Promise<void> {
           error => {
             if (sequence === loadSequence) {
               console.error('加载个性化推荐失败：', error)
+
+              recommendationError.value =
+                '个性化推荐暂时无法加载，请重新尝试。'
             }
 
             return null
@@ -308,7 +315,7 @@ function recommendationDifficultyLabel(
 
       <!-- F5-02 个性化练习推荐 -->
       <section
-        v-if="recommendations.length > 0"
+        v-if="!loading"
         class="recommendation-section"
       >
         <div class="recommendation-header">
@@ -330,6 +337,28 @@ function recommendationDifficultyLabel(
           </div>
         </div>
 
+        <!-- 推荐接口异常 -->
+        <div
+          v-if="recommendationError"
+          class="recommendation-empty"
+        >
+          <el-alert
+            type="warning"
+            :closable="false"
+            show-icon
+            :title="recommendationError"
+          />
+
+          <el-button
+            type="primary"
+            link
+            @click="loadExercises"
+          >
+            重新加载推荐
+          </el-button>
+        </div>
+
+        <template v-else-if="recommendations.length > 0">
         <div
           v-if="recommendationWeakCount > 0"
           class="recommendation-tip"
@@ -401,13 +430,14 @@ function recommendationDifficultyLabel(
                 >
                   {{ point.title }}
 
-                  <template v-if="point.masteryRate !== null">
-                    · {{ point.masteryRate }}%
-                  </template>
+                  ·
+                  {{
+                    point.masteryRate !== null
+                      ? `${point.masteryRate}%`
+                      : '暂无记录'
+                  }}
 
-                  <template v-else>
-                    · 暂无记录
-                  </template>
+                  · 建议{{ recommendationDifficultyLabel(point.targetDifficulty) }}
                 </el-tag>
               </div>
             </div>
@@ -428,6 +458,27 @@ function recommendationDifficultyLabel(
               </el-button>
             </div>
           </article>
+        </div>
+        </template>
+
+        <!-- 没有匹配的推荐练习 -->
+        <div
+          v-else
+          class="recommendation-empty"
+        >
+          <el-empty
+            :image-size="72"
+            description="暂时没有匹配的推荐练习"
+          />
+
+          <p v-if="recommendationWeakCount > 0">
+            当前发现 {{ recommendationWeakCount }} 个需要巩固的知识点，
+            但教师暂未发布匹配的练习。
+          </p>
+
+          <p v-else>
+            暂时没有需要优先推荐的练习，可以从下方课程练习中自主选择。
+          </p>
         </div>
       </section>
 
@@ -916,5 +967,21 @@ function recommendationDifficultyLabel(
   .recommendation-item__footer .el-button {
     width: 100%;
   }
+}
+
+.recommendation-empty {
+  padding: 12px 0;
+  text-align: center;
+}
+
+.recommendation-empty p {
+  margin: 0;
+  color: var(--sc-text-secondary);
+  font-size: 12px;
+  line-height: 1.8;
+}
+
+.recommendation-empty .el-button {
+  margin-top: 8px;
 }
 </style>
