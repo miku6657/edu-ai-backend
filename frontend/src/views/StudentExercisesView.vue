@@ -13,8 +13,15 @@ import {
 import type { Course } from '@/api/course'
 import { listJoinedCourses } from '@/api/course'
 import type { BigIntId } from '@/api/types'
-import { listStudentExercises } from '@/api/exercises'
-import type { StudentExercise } from '@/api/exercises'
+import {
+  getStudentExerciseRecommendations,
+  listStudentExercises,
+} from '@/api/exercises'
+
+import type {
+  StudentExercise,
+  StudentExerciseRecommendation,
+} from '@/api/exercises'
 import BaseCard from '@/components/ui/BaseCard.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { notifyError } from '@/utils/notify'
@@ -24,6 +31,12 @@ defineOptions({ name: 'StudentExercisesView' })
 const router = useRouter()
 const courses = ref<Course[]>([])
 const exercises = ref<StudentExercise[]>([])
+// F5-02 个性化推荐
+const recommendations = ref<StudentExerciseRecommendation[]>([])
+
+const recommendationWeakCount = ref(0)
+
+let loadSequence = 0
 const selectedCourseId = ref<BigIntId>('')
 const searchKeyword = ref('')
 const loading = ref(false)
@@ -82,16 +95,50 @@ async function loadCourses(): Promise<void> {
 }
 
 async function loadExercises(): Promise<void> {
+  const sequence = ++loadSequence
+
+  const courseId = selectedCourseId.value || undefined
+
   loading.value = true
 
   try {
-    exercises.value = await listStudentExercises(
-      selectedCourseId.value || undefined,
-    )
+    // 同时加载普通练习和个性化推荐
+    const [exerciseResult, recommendationResult] =
+      await Promise.all([
+        listStudentExercises(courseId),
+
+        getStudentExerciseRecommendations(courseId).catch(
+          error => {
+            if (sequence === loadSequence) {
+              console.error('加载个性化推荐失败：', error)
+            }
+
+            return null
+          },
+        ),
+      ])
+
+    // 防止切换课程后，旧请求覆盖新数据
+    if (sequence !== loadSequence) {
+      return
+    }
+
+    exercises.value = exerciseResult
+
+    recommendations.value =
+      recommendationResult?.recommendations ?? []
+
+    recommendationWeakCount.value =
+      recommendationResult?.weakKnowledgePointCount ?? 0
+
   } catch (error) {
-    notifyError(error)
+    if (sequence === loadSequence) {
+      notifyError(error)
+    }
   } finally {
-    loading.value = false
+    if (sequence === loadSequence) {
+      loading.value = false
+    }
   }
 }
 
@@ -143,6 +190,32 @@ function openExercise(item: StudentExercise): void {
       exerciseId: item.id,
     },
   })
+}
+
+function openRecommendedExercise(
+  item: StudentExerciseRecommendation,
+): void {
+  void router.push({
+    name: 'student-exercise-detail',
+    params: {
+      exerciseId: item.exerciseId,
+    },
+  })
+}
+
+function recommendationDifficultyLabel(
+  difficulty: number,
+): string {
+  switch (difficulty) {
+    case 1:
+      return '基础巩固'
+    case 2:
+      return '强化练习'
+    case 3:
+      return '进阶提升'
+    default:
+      return '综合练习'
+  }
 }
 </script>
 
@@ -232,6 +305,131 @@ function openExercise(item: StudentExercise): void {
           刷新
         </el-button>
       </div>
+
+      <!-- F5-02 个性化练习推荐 -->
+      <section
+        v-if="recommendations.length > 0"
+        class="recommendation-section"
+      >
+        <div class="recommendation-header">
+          <div>
+            <div class="recommendation-eyebrow">
+              PERSONALIZED FOR YOU
+            </div>
+
+            <h3>为你推荐</h3>
+
+            <p>
+              根据最近答题情况，匹配需要巩固的知识点。
+            </p>
+          </div>
+
+          <div class="recommendation-summary">
+            <strong>{{ recommendations.length }}</strong>
+            <span>份推荐练习</span>
+          </div>
+        </div>
+
+        <div
+          v-if="recommendationWeakCount > 0"
+          class="recommendation-tip"
+        >
+          当前发现
+          <strong>{{ recommendationWeakCount }}</strong>
+          个尚未充分掌握或尚无练习记录的知识点，
+          建议优先完成以下练习。
+        </div>
+
+        <div class="recommendation-list">
+          <article
+            v-for="(item, index) in recommendations"
+            :key="item.exerciseId"
+            class="recommendation-item"
+          >
+            <div class="recommendation-item__top">
+              <div class="recommendation-item__title">
+                <span class="recommendation-rank">
+                  {{ String(index + 1).padStart(2, '0') }}
+                </span>
+
+                <div>
+                  <h4>{{ item.title }}</h4>
+
+                  <span class="recommendation-course">
+                    {{ item.courseName }}
+                  </span>
+                </div>
+              </div>
+
+              <el-tag
+                :type="
+                  item.difficulty === 1
+                    ? 'success'
+                    : item.difficulty === 2
+                      ? 'warning'
+                      : 'danger'
+                "
+                size="small"
+              >
+                {{ recommendationDifficultyLabel(item.difficulty) }}
+              </el-tag>
+            </div>
+
+            <p
+              v-if="item.description"
+              class="recommendation-description"
+            >
+              {{ item.description }}
+            </p>
+
+            <div class="recommendation-reason">
+              <strong>推荐理由</strong>
+              <p>{{ item.recommendationReason }}</p>
+            </div>
+
+            <div class="recommendation-points">
+              <span class="recommendation-points__label">
+                覆盖知识点
+              </span>
+
+              <div class="recommendation-point-tags">
+                <el-tag
+                  v-for="point in item.matchedKnowledgePoints"
+                  :key="point.knowledgePointId"
+                  size="small"
+                  effect="plain"
+                >
+                  {{ point.title }}
+
+                  <template v-if="point.masteryRate !== null">
+                    · {{ point.masteryRate }}%
+                  </template>
+
+                  <template v-else>
+                    · 暂无记录
+                  </template>
+                </el-tag>
+              </div>
+            </div>
+
+            <div class="recommendation-item__footer">
+              <div class="recommendation-meta">
+                <span>{{ item.questionCount }} 道题</span>
+                <span>预计 {{ item.estimatedMinutes }} 分钟</span>
+                <span>{{ item.recommendationLevel }}</span>
+              </div>
+
+              <el-button
+                type="primary"
+                size="small"
+                @click="openRecommendedExercise(item)"
+              >
+                开始练习
+              </el-button>
+            </div>
+          </article>
+        </div>
+      </section>
 
       <el-skeleton
         v-if="loading && exercises.length === 0"
@@ -522,6 +720,201 @@ function openExercise(item: StudentExercise): void {
 
   .exercise-item__meta {
     gap: 10px;
+  }
+}
+
+.recommendation-section {
+  margin-bottom: 22px;
+  padding: 17px;
+  border: 1px solid var(--sc-border);
+  border-radius: 12px;
+  background: var(--sc-surface);
+}
+
+.recommendation-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+}
+
+.recommendation-eyebrow {
+  margin-bottom: 6px;
+  color: var(--sc-primary);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1.6px;
+}
+
+.recommendation-header h3 {
+  margin: 0 0 6px;
+  color: var(--sc-text);
+  font-size: 16px;
+}
+
+.recommendation-header p {
+  margin: 0;
+  color: var(--sc-text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.recommendation-summary {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: none;
+}
+
+.recommendation-summary strong {
+  color: var(--sc-primary);
+  font-size: 24px;
+}
+
+.recommendation-summary span {
+  color: var(--sc-text-secondary);
+  font-size: 10px;
+}
+
+.recommendation-tip {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  color: var(--sc-text-secondary);
+  background: var(--sc-surface-muted);
+  font-size: 11px;
+  line-height: 1.7;
+}
+
+.recommendation-tip strong {
+  color: var(--sc-primary);
+}
+
+.recommendation-list {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  margin-top: 14px;
+}
+
+.recommendation-item {
+  padding: 14px;
+  border: 1px solid var(--sc-border);
+  border-radius: 10px;
+  transition: border-color 0.2s ease;
+}
+
+.recommendation-item:hover {
+  border-color: var(--sc-primary);
+}
+
+.recommendation-item__top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.recommendation-item__title {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.recommendation-rank {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 29px;
+  height: 29px;
+  border-radius: 8px;
+  color: var(--sc-primary);
+  background: var(--sc-primary-soft);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.recommendation-item__title h4 {
+  margin: 1px 0 5px;
+  color: var(--sc-text);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.recommendation-course {
+  color: var(--sc-text-placeholder);
+  font-size: 10px;
+}
+
+.recommendation-description {
+  margin: 10px 0;
+  color: var(--sc-text-secondary);
+  font-size: 11px;
+  line-height: 1.7;
+}
+
+.recommendation-reason {
+  margin-top: 12px;
+}
+
+.recommendation-reason strong,
+.recommendation-points__label {
+  color: var(--sc-text-secondary);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.recommendation-reason p {
+  margin: 5px 0 0;
+  color: var(--sc-text);
+  font-size: 11px;
+  line-height: 1.8;
+}
+
+.recommendation-points {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 12px;
+}
+
+.recommendation-point-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.recommendation-item__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 13px;
+  padding-top: 11px;
+  border-top: 1px solid var(--sc-border);
+}
+
+.recommendation-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  color: var(--sc-text-placeholder);
+  font-size: 10px;
+}
+
+@media (max-width: 600px) {
+  .recommendation-section {
+    padding: 12px;
+  }
+
+  .recommendation-item__footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .recommendation-item__footer .el-button {
+    width: 100%;
   }
 }
 </style>

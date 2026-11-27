@@ -151,6 +151,56 @@ export interface StudentExerciseQuestion {
   sortOrder: number
 }
 
+/* ==========================================
+ * F5-02 学生个性化练习推荐
+ * ========================================== */
+
+export interface StudentExerciseRecommendationPoint {
+  knowledgePointId: BigIntId
+  title: string
+  masteryRate: number | null
+  masteryStatus: 'NO_DATA' | 'NEEDS_PRACTICE' | 'MASTERED'
+  targetDifficulty: number
+  recommendationReason: string
+}
+
+export interface StudentExerciseRecommendation {
+  exerciseId: BigIntId
+  courseId: BigIntId
+  courseName: string
+  title: string
+  description: string | null
+  difficulty: number
+  estimatedMinutes: number
+  questionCount: number
+  relevanceScore: number
+  recommendationLevel: string
+  recommendationReason: string
+  matchedKnowledgePoints: StudentExerciseRecommendationPoint[]
+}
+
+export interface StudentExerciseRecommendationResult {
+  weakKnowledgePointCount: number
+  recommendedExerciseCount: number
+  recommendations: StudentExerciseRecommendation[]
+}
+
+/**
+ * 获取个性化练习推荐。
+ */
+export function getStudentExerciseRecommendations(
+  courseId?: BigIntId,
+): Promise<StudentExerciseRecommendationResult> {
+
+  const query = courseId
+    ? `?courseId=${encodeURIComponent(courseId)}`
+    : ''
+
+  return apiRequest<StudentExerciseRecommendationResult>(
+    `/v1/student/exercises/recommendations${query}`,
+  )
+}
+
 export function listStudentExercises(
   courseId?: BigIntId,
 ): Promise<StudentExercise[]> {
