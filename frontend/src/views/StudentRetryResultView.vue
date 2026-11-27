@@ -7,9 +7,11 @@ import {
   selfReviewStudentRetry,
 } from '@/api/exercises'
 import type {
+  StudentRetryAnswerResult,
   StudentRetryResult,
   StudentRetrySelfReviewItem,
 } from '@/api/exercises'
+import StudentMistakeExplain from '@/components/exercise/StudentMistakeExplain.vue'
 import BaseCard from '@/components/ui/BaseCard.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { notifyError, notifySuccess } from '@/utils/notify'
@@ -67,6 +69,23 @@ const accuracy = computed(() => {
 
   return Math.round(correctCount.value / total * 100)
 })
+
+/**
+ * 只对错误题目或仍需巩固的简答题提供 AI 讲解。
+ */
+function canExplain(
+  answer: StudentRetryAnswerResult,
+): boolean {
+
+  if (answer.questionType === 'SHORT_ANSWER') {
+    return (
+      answer.pendingSelfReview
+      || answer.selfReviewUnderstood === false
+    )
+  }
+
+  return answer.correct === false
+}
 
 onMounted(() => {
   void loadResult()
@@ -323,6 +342,14 @@ async function backToList(): Promise<void> {
 
           <div class="result-question__stem">{{ answer.stem }}</div>
 
+          <div class="result-question__meta">
+            <span>{{ answer.courseName }}</span>
+
+            <span>
+              {{ answer.knowledgePointTitle || '未关联知识点' }}
+            </span>
+          </div>
+
           <div class="result-detail-row">
             <span>我的答案</span>
             <strong>{{ answer.studentAnswer || '未作答' }}</strong>
@@ -384,6 +411,17 @@ async function backToList(): Promise<void> {
               <p>{{ answer.explanation }}</p>
             </div>
           </template>
+
+          <!-- 错题 AI 知识点讲解 -->
+          <div
+            v-if="canExplain(answer)"
+            class="result-question__ai"
+          >
+            <StudentMistakeExplain
+              :mistake="answer"
+              button-label="AI 知识点讲解"
+            />
+          </div>
 
           <div class="result-question__score">
             本题得分：
@@ -655,5 +693,26 @@ async function backToList(): Promise<void> {
   .result-actions .el-button {
     width: 100%;
   }
+}
+
+.result-question__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 9px 0;
+  color: var(--sc-text-secondary);
+  font-size: 11px;
+}
+
+.result-question__meta span {
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--sc-surface-muted);
+}
+
+.result-question__ai {
+  display: flex;
+  align-items: center;
+  margin-top: 12px;
 }
 </style>

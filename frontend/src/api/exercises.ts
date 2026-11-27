@@ -467,6 +467,11 @@ export interface StudentRetryAnswerRequest {
 export interface StudentRetryAnswerResult {
   retryItemId: BigIntId
   questionId: BigIntId
+
+  courseId: BigIntId
+  courseName: string
+  knowledgePointTitle: string | null
+
   questionType: ExerciseQuestionType
   stem: string
   studentAnswer: string
