@@ -21,6 +21,44 @@ export interface WeakKnowledgePoint {
   inferredLevel: number
 }
 
+/**
+ * F6-02：知识点综合诊断。
+ */
+export interface StudentWeakPointDiagnostic {
+  pointId: BigIntId
+  title: string
+
+  effectiveQuestionCount: number
+  questionSessionCount: number
+  questionInferredLevel: number
+
+  practiceQuestionCount: number
+  masteredQuestionCount: number
+  practiceMasteryRate: number | null
+
+  selfAssessmentLevel: number
+  practiceLevel: number | null
+
+  diagnosisLevel: number
+  diagnosisLabel: string
+  diagnosisReason: string
+  suggestion: string
+
+  lastPracticedAt: string | null
+}
+
+/**
+ * 获取课程知识点综合诊断。
+ */
+export function getStudentWeakPointDiagnosis(
+  courseId: BigIntId,
+): Promise<StudentWeakPointDiagnostic[]> {
+
+  return apiRequest<StudentWeakPointDiagnostic[]>(
+    `/v1/learning-paths/courses/${encodeURIComponent(courseId)}/weak-point-diagnosis`,
+  )
+}
+
 export interface WeakReviewItem {
   pointId: BigIntId
   title: string

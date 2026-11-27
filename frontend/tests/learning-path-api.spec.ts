@@ -12,6 +12,7 @@ import {
   getLearningPathByGoal,
   getLearningPathProgress,
   getMyKnowledgeMastery,
+  getStudentWeakPointDiagnosis,
   knowledgeDifficultyLabel,
   listKnowledgePoints,
   listWeakKnowledgePoints,
@@ -398,5 +399,50 @@ describe('learning path API', () => {
     expect(knowledgeDifficultyLabel(2)).toBe('中等')
     expect(knowledgeDifficultyLabel(3)).toBe('进阶')
     expect(knowledgeDifficultyLabel(0)).toBe('未知')
+  })
+
+  it('loads integrated student weak point diagnosis', async () => {
+
+    const diagnosis = [{
+      pointId: LARGE_ID,
+      title: 'Java 集合',
+
+      effectiveQuestionCount: 6,
+      questionSessionCount: 3,
+      questionInferredLevel: 0,
+
+      practiceQuestionCount: 10,
+      masteredQuestionCount: 4,
+      practiceMasteryRate: 40,
+
+      selfAssessmentLevel: 2,
+      practiceLevel: 0,
+
+      diagnosisLevel: 0,
+      diagnosisLabel: '重点巩固',
+
+      diagnosisReason:
+        '练习掌握率为40%，共统计10道题；最近30天有效提问6次，涉及3个会话',
+
+      suggestion:
+        '优先复习对应课程资料，完成基础练习，并针对错题进行重练。',
+
+      lastPracticedAt: '2026-11-27T15:30:00',
+    }]
+
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(diagnosis))
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(
+      getStudentWeakPointDiagnosis(LARGE_ID),
+    ).resolves.toEqual(diagnosis)
+
+    expect(
+      fetchMock.mock.calls[0][0],
+    ).toBe(
+      `/api/v1/learning-paths/courses/${LARGE_ID}/weak-point-diagnosis`,
+    )
   })
 })
