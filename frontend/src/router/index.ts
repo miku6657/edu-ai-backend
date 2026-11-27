@@ -18,6 +18,9 @@ import StudentExerciseDetailView from '@/views/StudentExerciseDetailView.vue'
 import StudentExerciseResultView from '@/views/StudentExerciseResultView.vue'
 import StudentExercisesView from '@/views/StudentExercisesView.vue'
 import StudentMistakesView from '@/views/StudentMistakesView.vue'
+import StudentRetryListsView from '@/views/StudentRetryListsView.vue'
+import StudentRetryDetailView from '@/views/StudentRetryDetailView.vue'
+import StudentRetryResultView from '@/views/StudentRetryResultView.vue'
 import TeacherQuestionsView from '@/views/TeacherQuestionsView.vue'
 
 /**
@@ -123,6 +126,33 @@ const routes: RouteRecordRaw[] = [
         component: StudentMistakesView,
         meta: {
           title: '错题回顾',
+          requiresAuth: true,
+        },
+      },
+      {
+        path: 'my-retry-lists',
+        name: 'my-retry-lists',
+        component: StudentRetryListsView,
+        meta: {
+          title: '错题重练',
+          requiresAuth: true,
+        },
+      },
+      {
+        path: 'my-retry-lists/:listId',
+        name: 'student-retry-detail',
+        component: StudentRetryDetailView,
+        meta: {
+          title: '重练答题',
+          requiresAuth: true,
+        },
+      },
+      {
+        path: 'my-retry-attempts/:attemptId/result',
+        name: 'student-retry-result',
+        component: StudentRetryResultView,
+        meta: {
+          title: '重练结果',
           requiresAuth: true,
         },
       },

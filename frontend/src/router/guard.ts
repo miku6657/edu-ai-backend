@@ -27,6 +27,9 @@ export function installAuthGuard(target: Router): void {
       'student-exercise-detail',
       'student-exercise-result',
       'my-mistakes',
+      'my-retry-lists',
+      'student-retry-detail',
+      'student-retry-result',
     ]
 
     if (studentRoutes.includes(String(to.name)) && !auth.isStudent) {

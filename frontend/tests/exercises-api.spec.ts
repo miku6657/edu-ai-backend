@@ -13,13 +13,19 @@ import {
   gradeExerciseAttempt,
   getStudentMistake,
   getStudentMistakes,
+  getStudentRetryDetail,
+  getStudentRetryResult,
   listExerciseKnowledgePoints,
   listManagedExercises,
   listPendingExerciseReviews,
   listStudentExercises,
+  listStudentRetryLists,
   publishExercise,
+  selfReviewStudentRetry,
   startStudentExercise,
+  startStudentRetry,
   submitStudentExercise,
+  submitStudentRetry,
   updateExercise,
 } from '@/api/exercises'
 import type {
@@ -105,6 +111,23 @@ describe('exercises api', () => {
       ['701', '702'],
       'Java 基础错题重练',
     )
+    await listStudentRetryLists()
+    await getStudentRetryDetail('1001')
+    await startStudentRetry('1001')
+
+    const retryAnswers = [
+      { retryItemId: '2001', answer: 'A' },
+      { retryItemId: '2002', answer: 'B,C' },
+    ]
+
+    await submitStudentRetry('3001', retryAnswers)
+    await getStudentRetryResult('3001')
+
+    const reviewAnswers = [
+      { retryItemId: '2003', understood: true },
+    ]
+
+    await selfReviewStudentRetry('3001', reviewAnswers)
 
     expect(fetchMock.mock.calls.map(([url, init]) => [requestUrl(url), init?.method]))
       .toEqual([
@@ -130,6 +153,12 @@ describe('exercises api', () => {
         ['/api/v1/student/exercises/mistakes?courseId=2001', 'GET'],
         ['/api/v1/student/exercises/mistakes/701', 'GET'],
         ['/api/v1/student/exercises/mistakes/retry-lists', 'POST'],
+        ['/api/v1/student/exercises/retry-lists', 'GET'],
+        ['/api/v1/student/exercises/retry-lists/1001', 'GET'],
+        ['/api/v1/student/exercises/retry-lists/1001/attempts', 'POST'],
+        ['/api/v1/student/exercises/retry-lists/attempts/3001/submit', 'POST'],
+        ['/api/v1/student/exercises/retry-lists/attempts/3001', 'GET'],
+        ['/api/v1/student/exercises/retry-lists/attempts/3001/self-review', 'POST'],
       ])
     const body = fetchMock.mock.calls[5]?.[1]?.body
     if (typeof body !== 'string') {
@@ -154,5 +183,15 @@ describe('exercises api', () => {
       answerIds: ['701', '702'],
       title: 'Java 基础错题重练',
     })
+    const retrySubmitBody = fetchMock.mock.calls[25]?.[1]?.body
+    if (typeof retrySubmitBody !== 'string') {
+      throw new Error('重练提交请求体不是 JSON 字符串')
+    }
+    expect(JSON.parse(retrySubmitBody)).toEqual({ answers: retryAnswers })
+    const selfReviewBody = fetchMock.mock.calls[27]?.[1]?.body
+    if (typeof selfReviewBody !== 'string') {
+      throw new Error('自我核对请求体不是 JSON 字符串')
+    }
+    expect(JSON.parse(selfReviewBody)).toEqual({ answers: reviewAnswers })
   })
 })

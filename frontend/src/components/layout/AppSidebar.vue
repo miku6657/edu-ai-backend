@@ -12,6 +12,7 @@ import {
   Library,
   LogIn,
   MessagesSquare,
+  RotateCcw,
   Settings,
   Sparkles,
 } from '@lucide/vue'
@@ -101,6 +102,12 @@ const primaryNav = computed<NavEntry[]>(() => {
       icon: ClipboardList,
       routeName: 'my-mistakes',
     })
+    entries.push({
+      key: 'my-retry-lists',
+      label: '错题重练',
+      icon: RotateCcw,
+      routeName: 'my-retry-lists',
+    })
   }
   return entries
 })
@@ -113,6 +120,14 @@ function isActive(entry: NavEntry): boolean {
       'my-exercises',
       'student-exercise-detail',
       'student-exercise-result',
+    ].includes(String(route.name))
+  }
+
+  if (entry.routeName === 'my-retry-lists') {
+    return [
+      'my-retry-lists',
+      'student-retry-detail',
+      'student-retry-result',
     ].includes(String(route.name))
   }
 

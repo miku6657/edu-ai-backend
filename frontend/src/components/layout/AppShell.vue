@@ -37,6 +37,18 @@ const PAGE_META: Record<string, { title: string; subtitle?: string }> = {
     title: '错题回顾',
     subtitle: '按照课程知识点归集错题，巩固薄弱知识',
   },
+  'my-retry-lists': {
+    title: '错题重练',
+    subtitle: '管理重练清单，巩固薄弱知识',
+  },
+  'student-retry-detail': {
+    title: '重练答题',
+    subtitle: '重新完成错题，检验知识点掌握情况',
+  },
+  'student-retry-result': {
+    title: '重练结果',
+    subtitle: '查看重练成绩、答案解析和自我核对结果',
+  },
   'student-exercise-detail': {
     title: '练习详情',
     subtitle: '完成课程练习，检验知识点掌握程度',

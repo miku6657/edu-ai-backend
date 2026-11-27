@@ -407,3 +407,154 @@ export function createStudentMistakeRetryList(
     },
   )
 }
+
+/* ==========================================
+ * F5-03 学生错题重练
+ * ========================================== */
+
+export interface StudentRetryList {
+  id: BigIntId
+  title: string
+  itemCount: number
+  status: 'PENDING' | 'COMPLETED'
+  attemptCount: number
+  latestAttemptStatus: string | null
+  createdAt: string
+}
+
+export interface StudentRetryOption {
+  label: string
+  content: string
+}
+
+export interface StudentRetryItem {
+  id: BigIntId
+  sourceAnswerId: BigIntId
+  questionId: BigIntId
+  courseName: string
+  exerciseTitle: string
+  knowledgePointTitle: string | null
+  questionType: ExerciseQuestionType
+  stem: string
+  options: StudentRetryOption[]
+  score: number
+  sortOrder: number
+}
+
+export interface StudentRetryDetail {
+  id: BigIntId
+  title: string
+  itemCount: number
+  items: StudentRetryItem[]
+}
+
+export interface StudentRetryAttempt {
+  id: BigIntId
+  retryListId: BigIntId
+  attemptNo: number
+  status: 'IN_PROGRESS' | 'PENDING_SELF_REVIEW' | 'GRADED'
+  totalScore: number
+  earnedScore: number
+  startedAt: string
+  submittedAt: string | null
+}
+
+export interface StudentRetryAnswerRequest {
+  retryItemId: BigIntId
+  answer: string
+}
+
+export interface StudentRetryAnswerResult {
+  retryItemId: BigIntId
+  questionId: BigIntId
+  questionType: ExerciseQuestionType
+  stem: string
+  studentAnswer: string
+  correct: boolean | null
+  correctAnswer: string | null
+  explanation: string | null
+  score: number
+  earnedScore: number
+  selfReviewUnderstood: boolean | null
+  pendingSelfReview: boolean
+}
+
+export interface StudentRetryResult {
+  attemptId: BigIntId
+  retryListId: BigIntId
+  attemptNo: number
+  status: 'IN_PROGRESS' | 'PENDING_SELF_REVIEW' | 'GRADED'
+  totalScore: number
+  earnedScore: number
+  pendingSelfReviewCount: number
+  submittedAt: string | null
+  answers: StudentRetryAnswerResult[]
+}
+
+export interface StudentRetrySelfReviewItem {
+  retryItemId: BigIntId
+  understood: boolean
+}
+
+/** 查询学生重练清单 */
+export function listStudentRetryLists(): Promise<StudentRetryList[]> {
+  return apiRequest<StudentRetryList[]>(
+    '/v1/student/exercises/retry-lists',
+  )
+}
+
+/** 查询清单详情 */
+export function getStudentRetryDetail(
+  listId: BigIntId,
+): Promise<StudentRetryDetail> {
+  return apiRequest<StudentRetryDetail>(
+    `/v1/student/exercises/retry-lists/${encodeURIComponent(listId)}`,
+  )
+}
+
+/** 开始或恢复重练 */
+export function startStudentRetry(
+  listId: BigIntId,
+): Promise<StudentRetryAttempt> {
+  return apiRequest<StudentRetryAttempt>(
+    `/v1/student/exercises/retry-lists/${encodeURIComponent(listId)}/attempts`,
+    { method: 'POST' },
+  )
+}
+
+/** 提交重练答案 */
+export function submitStudentRetry(
+  attemptId: BigIntId,
+  answers: StudentRetryAnswerRequest[],
+): Promise<StudentRetryResult> {
+  return apiRequest<StudentRetryResult>(
+    `/v1/student/exercises/retry-lists/attempts/${encodeURIComponent(attemptId)}/submit`,
+    {
+      method: 'POST',
+      body: { answers },
+    },
+  )
+}
+
+/** 查询重练结果 */
+export function getStudentRetryResult(
+  attemptId: BigIntId,
+): Promise<StudentRetryResult> {
+  return apiRequest<StudentRetryResult>(
+    `/v1/student/exercises/retry-lists/attempts/${encodeURIComponent(attemptId)}`,
+  )
+}
+
+/** 简答题自我核对 */
+export function selfReviewStudentRetry(
+  attemptId: BigIntId,
+  answers: StudentRetrySelfReviewItem[],
+): Promise<StudentRetryResult> {
+  return apiRequest<StudentRetryResult>(
+    `/v1/student/exercises/retry-lists/attempts/${encodeURIComponent(attemptId)}/self-review`,
+    {
+      method: 'POST',
+      body: { answers },
+    },
+  )
+}

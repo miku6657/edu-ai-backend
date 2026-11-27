@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 
 import type { Course } from '@/api/course'
 import { listJoinedCourses } from '@/api/course'
@@ -21,6 +22,8 @@ import {
 } from '@/utils/notify'
 
 defineOptions({ name: 'StudentMistakesView' })
+
+const router = useRouter()
 
 const courses = ref<Course[]>([])
 const selectedCourseId = ref<BigIntId>('')
@@ -209,6 +212,14 @@ function closeRetryDialog(): void {
 
   retryDialogVisible.value = false
   createdRetryList.value = null
+}
+
+function goToRetryLists(): void {
+  retryDialogVisible.value = false
+
+  void router.push({
+    name: 'my-retry-lists',
+  })
 }
 </script>
 
@@ -450,6 +461,13 @@ function closeRetryDialog(): void {
       <template #footer>
         <el-button @click="closeRetryDialog">
           {{ createdRetryList ? '完成' : '取消' }}
+        </el-button>
+        <el-button
+          v-if="createdRetryList"
+          type="primary"
+          @click="goToRetryLists"
+        >
+          前往错题重练
         </el-button>
         <el-button
           v-if="!createdRetryList"
