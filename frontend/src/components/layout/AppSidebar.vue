@@ -96,6 +96,12 @@ const primaryNav = computed<NavEntry[]>(() => {
       icon: FileText,
       routeName: 'teacher-learning-reports',
     })
+    entries.push({
+      key: 'teacher-learning-analysis',
+      label: '课程学习分析',
+      icon: ChartLine,
+      routeName: 'teacher-learning-analysis',
+    })
   }
   if (auth.isStudent) {
     entries.push({

@@ -45,6 +45,10 @@ const PAGE_META: Record<string, { title: string; subtitle?: string }> = {
     title: '课程学习报告',
     subtitle: '分析学生阶段学习表现并提供针对性指导',
   },
+  'teacher-learning-analysis': {
+    title: '课程学习分析',
+    subtitle: '查看班级进度、课程资料使用和低完成率章节',
+  },
   'my-mistakes': {
     title: '错题回顾',
     subtitle: '按照课程知识点归集错题，巩固薄弱知识',

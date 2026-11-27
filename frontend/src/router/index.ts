@@ -24,6 +24,7 @@ import StudentRetryListsView from '@/views/StudentRetryListsView.vue'
 import StudentRetryDetailView from '@/views/StudentRetryDetailView.vue'
 import StudentRetryResultView from '@/views/StudentRetryResultView.vue'
 import StudentRetryProgressView from '@/views/StudentRetryProgressView.vue'
+import TeacherCourseLearningAnalysisView from '@/views/TeacherCourseLearningAnalysisView.vue'
 import TeacherLearningReportsView from '@/views/TeacherLearningReportsView.vue'
 import TeacherQuestionsView from '@/views/TeacherQuestionsView.vue'
 
@@ -100,6 +101,15 @@ const routes: RouteRecordRaw[] = [
         component: TeacherLearningReportsView,
         meta: {
           title: '课程学习报告',
+          requiresAuth: true,
+        },
+      },
+      {
+        path: 'teacher-learning-analysis',
+        name: 'teacher-learning-analysis',
+        component: TeacherCourseLearningAnalysisView,
+        meta: {
+          title: '课程学习分析',
           requiresAuth: true,
         },
       },
