@@ -1,11 +1,20 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import {
+  computed,
+  onBeforeUnmount,
+  onMounted,
+  reactive,
+  ref,
+  watch,
+} from 'vue'
 import { ElMessageBox } from 'element-plus'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
-import { ChevronLeft } from '@lucide/vue'
+import { ChevronLeft, Loader } from '@lucide/vue'
 
 import {
   getStudentRetryDetail,
+  getStudentRetryDraft,
+  saveStudentRetryDraft,
   startStudentRetry,
   submitStudentRetry,
 } from '@/api/exercises'
@@ -37,6 +46,21 @@ const attempt = ref<StudentRetryAttempt | null>(null)
 const submitted = ref(false)
 const answers = reactive<Record<string, string | string[]>>({})
 
+// 草稿自动保存状态
+const savingDraft = ref(false)
+const draftDirty = ref(false)
+const draftSavedAt = ref('')
+
+const restoringDraft = ref(false)
+
+let draftTimer: ReturnType<typeof setTimeout> | null = null
+
+let editVersion = 0
+let activeSaveCount = 0
+
+// 串行保存，避免较早的请求覆盖较新的答案
+let saveQueue: Promise<void> = Promise.resolve()
+
 const listId = computed(
   () => String(route.params.listId ?? ''),
 )
@@ -64,6 +88,123 @@ const progress = computed(() => {
     ? 0
     : Math.round(answeredCount.value / total * 100)
 })
+
+watch(
+  answers,
+  () => {
+    if (
+      !answering.value
+      || restoringDraft.value
+      || submitted.value
+    ) {
+      return
+    }
+
+    editVersion++
+    draftDirty.value = true
+
+    if (draftTimer) {
+      clearTimeout(draftTimer)
+    }
+
+    draftTimer = setTimeout(() => {
+      void flushDraft()
+    }, 400)
+  },
+  {
+    deep: true,
+    flush: 'sync',
+  },
+)
+
+async function flushDraft(): Promise<boolean> {
+  if (draftTimer) {
+    clearTimeout(draftTimer)
+    draftTimer = null
+  }
+
+  if (
+    !attempt.value
+    || !detail.value
+    || !answering.value
+    || submitted.value
+    || !draftDirty.value
+  ) {
+    return true
+  }
+
+  const currentVersion = editVersion
+  const payload = buildDraftAnswers()
+  const attemptId = attempt.value.id
+
+  activeSaveCount++
+  savingDraft.value = true
+
+  const currentRequest = saveQueue.then(async () => {
+    await saveStudentRetryDraft(attemptId, payload)
+  })
+
+  saveQueue = currentRequest.then(
+    () => undefined,
+    () => undefined,
+  )
+
+  try {
+    await currentRequest
+
+    if (currentVersion === editVersion) {
+      draftDirty.value = false
+      draftSavedAt.value = new Date().toLocaleTimeString(
+        'zh-CN',
+        {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+        },
+      )
+    }
+
+    return true
+  } catch (error) {
+    notifyError(error)
+    return false
+  } finally {
+    activeSaveCount--
+    savingDraft.value = activeSaveCount > 0
+  }
+}
+
+async function restoreDraft(attemptId: BigIntId): Promise<void> {
+  const draft = await getStudentRetryDraft(attemptId)
+
+  const savedAnswers = new Map(
+    draft.answers.map(item => [
+      String(item.retryItemId),
+      item.answer,
+    ]),
+  )
+
+  restoringDraft.value = true
+
+  try {
+    for (const item of detail.value?.items ?? []) {
+      const key = String(item.id)
+      const value = savedAnswers.get(key) ?? ''
+
+      if (item.questionType === 'MULTIPLE_CHOICE') {
+        answers[key] = value
+          ? value.split(',').filter(Boolean)
+          : []
+      } else {
+        answers[key] = value
+      }
+    }
+
+    draftDirty.value = false
+  } finally {
+    restoringDraft.value = false
+  }
+}
 
 onMounted(() => {
   void loadDetail()
@@ -130,25 +271,47 @@ async function startAnswering(): Promise<void> {
   starting.value = true
 
   try {
-    attempt.value = await startStudentRetry(detail.value.id)
+    const started = await startStudentRetry(detail.value.id)
 
-    if (attempt.value.status !== 'IN_PROGRESS') {
+    if (started.status !== 'IN_PROGRESS') {
       notifyWarning('该清单已经提交，请查看重练结果')
+
       await router.replace({
         name: 'student-retry-result',
         params: {
-          attemptId: attempt.value.id,
+          attemptId: started.id,
         },
       })
+
       return
     }
 
-    notifySuccess('已进入重练答题')
+    // 先恢复服务器答案，再进入答题状态
+    await restoreDraft(started.id)
+
+    attempt.value = started
+
+    notifySuccess('已进入重练，答案将自动保存')
   } catch (error) {
     notifyError(error)
   } finally {
     starting.value = false
   }
+}
+
+function buildDraftAnswers() {
+  if (!detail.value) return []
+
+  return detail.value.items.map((item) => {
+    const value = answers[String(item.id)]
+
+    return {
+      retryItemId: item.id,
+      answer: Array.isArray(value)
+        ? [...value].sort().join(',')
+        : value ?? '',
+    }
+  })
 }
 
 function buildSubmitAnswers(): StudentRetryAnswerRequest[] {
@@ -193,6 +356,17 @@ async function submitAnswers(): Promise<void> {
     return
   }
 
+  // 提交前先保存最后一次修改
+  const saved = await flushDraft()
+
+  if (!saved) {
+    notifyWarning('答案自动保存失败，请检查网络后重试')
+    return
+  }
+
+  // 等待之前排队的保存请求全部结束
+  await saveQueue
+
   submitting.value = true
 
   try {
@@ -222,27 +396,38 @@ async function backToList(): Promise<void> {
 }
 
 onBeforeRouteLeave(async () => {
-  if (!answering.value || submitted.value || answeredCount.value === 0) {
+  if (!answering.value || submitted.value) {
+    return true
+  }
+
+  const saved = await flushDraft()
+
+  if (saved) {
+    await saveQueue
     return true
   }
 
   try {
     await ElMessageBox.confirm(
-      '当前答案尚未提交，离开页面会丢失尚未提交的作答内容。',
-      '离开答题页面',
+      '答案自动保存失败，离开页面可能丢失最近一次修改。确定离开吗？',
+      '保存失败',
       {
-        confirmButtonText: '确认离开',
-        cancelButtonText: '继续作答',
+        confirmButtonText: '仍然离开',
+        cancelButtonText: '继续答题',
         type: 'warning',
       },
     )
 
     return true
-  } catch (error) {
-    if (error !== 'cancel' && error !== 'close') {
-      notifyError(error)
-    }
+  } catch {
     return false
+  }
+})
+
+onBeforeUnmount(() => {
+  if (draftTimer) {
+    clearTimeout(draftTimer)
+    draftTimer = null
   }
 })
 </script>
@@ -301,6 +486,30 @@ onBeforeRouteLeave(async () => {
             <span>{{ answeredCount }}/{{ detail.items.length }}</span>
           </div>
           <el-progress :percentage="progress" :stroke-width="8" />
+          <div class="draft-save-status">
+            <template v-if="savingDraft">
+              <el-icon class="is-loading">
+                <Loader />
+              </el-icon>
+              正在保存答案...
+            </template>
+
+            <template v-else-if="draftDirty">
+              <span class="draft-save-warning">
+                有尚未保存的修改
+              </span>
+            </template>
+
+            <template v-else-if="draftSavedAt">
+              <span class="draft-save-success">
+                已保存 {{ draftSavedAt }}
+              </span>
+            </template>
+
+            <template v-else>
+              答案自动保存已开启
+            </template>
+          </div>
         </div>
       </BaseCard>
 
@@ -633,5 +842,22 @@ onBeforeRouteLeave(async () => {
   .retry-actions .el-button {
     width: 100%;
   }
+}
+
+.draft-save-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  color: var(--sc-text-placeholder);
+  font-size: 11px;
+}
+
+.draft-save-success {
+  color: var(--sc-success, #16a34a);
+}
+
+.draft-save-warning {
+  color: var(--sc-warning, #d97706);
 }
 </style>

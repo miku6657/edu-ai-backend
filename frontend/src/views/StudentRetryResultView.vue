@@ -22,7 +22,7 @@ const router = useRouter()
 const loading = ref(false)
 const submitting = ref(false)
 const result = ref<StudentRetryResult | null>(null)
-const review = reactive<Record<string, boolean>>({})
+const review = reactive<Record<string, boolean | undefined>>({})
 
 const attemptId = computed(
   () => String(route.params.attemptId ?? ''),
@@ -91,13 +91,22 @@ async function loadResult(): Promise<void> {
 async function submitSelfReview(): Promise<void> {
   if (!result.value || submitting.value) return
 
-  const attempt = result.value.attemptId
-  const items: StudentRetrySelfReviewItem[] = pendingItems.value.map(
-    answer => ({
-      retryItemId: answer.retryItemId,
-      understood: review[String(answer.retryItemId)] ?? false,
-    }),
+  const unanswered = pendingItems.value.filter(
+    answer => review[String(answer.retryItemId)] === undefined,
   )
+
+  if (unanswered.length > 0) {
+    notifyError(`还有 ${unanswered.length} 道题没有完成核对`)
+    return
+  }
+
+  const attempt = result.value.attemptId
+
+  const items: StudentRetrySelfReviewItem[] =
+    pendingItems.value.map(answer => ({
+      retryItemId: answer.retryItemId,
+      understood: review[String(answer.retryItemId)] as boolean,
+    }))
 
   submitting.value = true
 
@@ -249,12 +258,17 @@ async function backToList(): Promise<void> {
               <p>{{ answer.explanation }}</p>
             </div>
 
-            <el-checkbox
+            <el-radio-group
               v-model="review[String(answer.retryItemId)]"
-              class="review-item__check"
+              class="review-choice"
             >
-              我已经掌握该知识点
-            </el-checkbox>
+              <el-radio :value="true">
+                已经掌握
+              </el-radio>
+              <el-radio :value="false">
+                仍需巩固
+              </el-radio>
+            </el-radio-group>
           </article>
         </div>
 

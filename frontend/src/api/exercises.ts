@@ -558,3 +558,36 @@ export function selfReviewStudentRetry(
     },
   )
 }
+
+export interface StudentRetryDraftAnswer {
+  retryItemId: BigIntId
+  answer: string
+}
+
+export interface StudentRetryDraft {
+  attemptId: BigIntId
+  answers: StudentRetryDraftAnswer[]
+}
+
+/** 获取重练草稿 */
+export function getStudentRetryDraft(
+  attemptId: BigIntId,
+): Promise<StudentRetryDraft> {
+  return apiRequest<StudentRetryDraft>(
+    `/v1/student/exercises/retry-lists/attempts/${encodeURIComponent(attemptId)}/draft`,
+  )
+}
+
+/** 保存重练草稿 */
+export function saveStudentRetryDraft(
+  attemptId: BigIntId,
+  answers: StudentRetryDraftAnswer[],
+): Promise<StudentRetryDraft> {
+  return apiRequest<StudentRetryDraft>(
+    `/v1/student/exercises/retry-lists/attempts/${encodeURIComponent(attemptId)}/draft`,
+    {
+      method: 'PUT',
+      body: { answers },
+    },
+  )
+}
