@@ -660,3 +660,29 @@ export function getStudentRetryMastery(
     `/v1/student/exercises/retry-lists/mastery${query}`,
   )
 }
+
+/* ==========================================
+ * F5-04 学生错题 AI 讲解
+ * ========================================== */
+
+export interface StudentExerciseExplainSession {
+  sessionId: BigIntId
+  courseId: BigIntId
+  questionId: BigIntId
+}
+
+/**
+ * 获取或创建当前学生针对某道题的专属讲解会话。
+ */
+export function getStudentExerciseExplainSession(
+  courseId: BigIntId,
+  questionId: BigIntId,
+): Promise<StudentExerciseExplainSession> {
+
+  return apiRequest<StudentExerciseExplainSession>(
+    `/v1/student/exercises/questions/${encodeURIComponent(questionId)}/explain-session?courseId=${encodeURIComponent(courseId)}`,
+    {
+      method: 'POST',
+    },
+  )
+}

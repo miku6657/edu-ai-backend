@@ -131,8 +131,8 @@ export interface RagStreamHandlers {
 
 export interface RagStreamRequest {
   courseId: BigIntId
-  query: string
   sessionId?: BigIntId
+  query: string
   clientMsgId?: string
 }
 
@@ -426,7 +426,6 @@ export async function streamRagQa(
   signal?: AbortSignal,
 ): Promise<void> {
   const courseId = normalizeId(request.courseId)
-
   const useExplicitSession = request.sessionId !== undefined
 
   const sessionId = useExplicitSession

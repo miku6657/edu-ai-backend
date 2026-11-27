@@ -7,7 +7,6 @@ import {
   selfReviewStudentRetry,
 } from '@/api/exercises'
 import type {
-  StudentRetryAnswerResult,
   StudentRetryResult,
   StudentRetrySelfReviewItem,
 } from '@/api/exercises'
@@ -71,10 +70,10 @@ const accuracy = computed(() => {
 })
 
 /**
- * 只对错误题目或仍需巩固的简答题提供 AI 讲解。
+ * 只有答错或未掌握的题目才需要 AI 讲解。
  */
 function canExplain(
-  answer: StudentRetryAnswerResult,
+  answer: StudentRetryResult['answers'][number],
 ): boolean {
 
   if (answer.questionType === 'SHORT_ANSWER') {
@@ -344,10 +343,19 @@ async function backToList(): Promise<void> {
 
           <div class="result-question__meta">
             <span>{{ answer.courseName }}</span>
-
             <span>
               {{ answer.knowledgePointTitle || '未关联知识点' }}
             </span>
+          </div>
+
+          <div
+            v-if="canExplain(answer)"
+            class="result-question__ai"
+          >
+            <StudentMistakeExplain
+              :mistake="answer"
+              button-label="AI 知识点讲解"
+            />
           </div>
 
           <div class="result-detail-row">
@@ -411,17 +419,6 @@ async function backToList(): Promise<void> {
               <p>{{ answer.explanation }}</p>
             </div>
           </template>
-
-          <!-- 错题 AI 知识点讲解 -->
-          <div
-            v-if="canExplain(answer)"
-            class="result-question__ai"
-          >
-            <StudentMistakeExplain
-              :mistake="answer"
-              button-label="AI 知识点讲解"
-            />
-          </div>
 
           <div class="result-question__score">
             本题得分：
@@ -699,7 +696,7 @@ async function backToList(): Promise<void> {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin: 9px 0;
+  margin-top: 9px;
   color: var(--sc-text-secondary);
   font-size: 11px;
 }
@@ -713,6 +710,6 @@ async function backToList(): Promise<void> {
 .result-question__ai {
   display: flex;
   align-items: center;
-  margin-top: 12px;
+  margin: 12px 0;
 }
 </style>

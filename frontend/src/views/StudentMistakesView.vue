@@ -390,6 +390,7 @@ function goToRetryLists(): void {
                 <div class="mistake-ai-action">
                   <StudentMistakeExplain
                     :mistake="item"
+                    button-label="AI 知识点讲解"
                   />
                 </div>
 
@@ -806,6 +807,6 @@ function goToRetryLists(): void {
 .mistake-ai-action {
   display: flex;
   align-items: center;
-  margin-top: 10px;
+  margin-top: 12px;
 }
 </style>
