@@ -4,7 +4,11 @@ import com.edu.ai.common.BusinessException;
 import com.edu.ai.course.service.CoursePermissionService;
 import com.edu.ai.exercise.dto.StudentRetryAttemptVO;
 import com.edu.ai.exercise.dto.StudentRetryDetailVO;
+import com.edu.ai.exercise.dto.StudentRetryDraftSaveRequest;
+import com.edu.ai.exercise.dto.StudentRetryDraftVO;
+import com.edu.ai.exercise.dto.StudentRetryHistoryVO;
 import com.edu.ai.exercise.dto.StudentRetryListVO;
+import com.edu.ai.exercise.dto.StudentRetryMasteryVO;
 import com.edu.ai.exercise.dto.StudentRetryResultVO;
 import com.edu.ai.exercise.dto.StudentRetrySelfReviewRequest;
 import com.edu.ai.exercise.dto.StudentRetrySubmitRequest;
@@ -87,6 +91,350 @@ public class StudentMistakeRetryService {
                         toLocalDateTime(rs.getTimestamp("created_at"))
                 ),
                 studentId
+        );
+    }
+
+    /**
+     * 查询学生全部重练历史。
+     *
+     * 包含进行中、待自我核对和已完成的重练记录。
+     * 只返回当前登录学生自己的数据。
+     */
+    public List<StudentRetryHistoryVO> listHistory(Long studentId) {
+
+        return jdbc.query(
+                """
+                SELECT
+                    CAST(a.id AS CHAR) AS attempt_id,
+                    CAST(a.retry_list_id AS CHAR) AS retry_list_id,
+                    rl.title AS retry_list_title,
+                    rl.item_count,
+
+                    a.attempt_no,
+                    a.status,
+                    a.total_score,
+                    a.earned_score,
+
+                    COUNT(aa.id) AS answered_count,
+
+                    COUNT(
+                        CASE
+                            WHEN q.question_type <> 'SHORT_ANSWER'
+                            THEN 1
+                        END
+                    ) AS objective_count,
+
+                    COALESCE(
+                        SUM(
+                            CASE
+                                WHEN q.question_type <> 'SHORT_ANSWER'
+                                 AND aa.is_correct = 1
+                                THEN 1
+                                ELSE 0
+                            END
+                        ),
+                        0
+                    ) AS correct_count,
+
+                    CASE
+                        WHEN COUNT(
+                            CASE
+                                WHEN q.question_type <> 'SHORT_ANSWER'
+                                THEN 1
+                            END
+                        ) = 0
+                        THEN 0
+
+                        ELSE ROUND(
+                            100.0 *
+                            SUM(
+                                CASE
+                                    WHEN q.question_type <> 'SHORT_ANSWER'
+                                     AND aa.is_correct = 1
+                                    THEN 1
+                                    ELSE 0
+                                END
+                            )
+                            /
+                            COUNT(
+                                CASE
+                                    WHEN q.question_type <> 'SHORT_ANSWER'
+                                    THEN 1
+                                END
+                            )
+                        )
+                    END AS accuracy_rate,
+
+                    COUNT(
+                        CASE
+                            WHEN q.question_type = 'SHORT_ANSWER'
+                            THEN 1
+                        END
+                    ) AS short_answer_count,
+
+                    COALESCE(
+                        SUM(
+                            CASE
+                                WHEN q.question_type = 'SHORT_ANSWER'
+                                 AND aa.self_review_understood = 1
+                                THEN 1
+                                ELSE 0
+                            END
+                        ),
+                        0
+                    ) AS self_reviewed_mastered_count,
+
+                    a.started_at,
+                    a.submitted_at,
+                    a.graded_at
+
+                FROM course_exercise_retry_attempt a
+
+                JOIN course_exercise_retry_list rl
+                  ON rl.id = a.retry_list_id
+                 AND rl.student_id = a.student_id
+
+                LEFT JOIN course_exercise_retry_attempt_answer aa
+                  ON aa.attempt_id = a.id
+
+                LEFT JOIN course_exercise_question q
+                  ON q.id = aa.question_id
+
+                WHERE a.student_id = ?
+
+                GROUP BY
+                    a.id,
+                    a.retry_list_id,
+                    rl.title,
+                    rl.item_count,
+                    a.attempt_no,
+                    a.status,
+                    a.total_score,
+                    a.earned_score,
+                    a.started_at,
+                    a.submitted_at,
+                    a.graded_at
+
+                ORDER BY
+                    a.started_at DESC,
+                    a.id DESC
+                """,
+
+                (rs, rowNum) -> new StudentRetryHistoryVO(
+                        rs.getString("attempt_id"),
+                        rs.getString("retry_list_id"),
+                        rs.getString("retry_list_title"),
+                        rs.getInt("item_count"),
+                        rs.getInt("attempt_no"),
+                        rs.getString("status"),
+                        rs.getBigDecimal("total_score"),
+                        rs.getBigDecimal("earned_score"),
+                        rs.getInt("answered_count"),
+                        rs.getInt("objective_count"),
+                        rs.getInt("correct_count"),
+                        rs.getInt("accuracy_rate"),
+                        rs.getInt("short_answer_count"),
+                        rs.getInt("self_reviewed_mastered_count"),
+                        toLocalDateTime(rs.getTimestamp("started_at")),
+                        toLocalDateTime(rs.getTimestamp("submitted_at")),
+                        toLocalDateTime(rs.getTimestamp("graded_at"))
+                ),
+
+                studentId
+        );
+    }
+
+    /**
+     * 查询学生的重练知识点掌握情况。
+     *
+     * 统计规则：
+     * 1. 只统计已经完成判分的重练记录。
+     * 2. 同一道题只取最近一次已完成的重练结果。
+     * 3. 客观题根据 is_correct 判断。
+     * 4. 简答题根据 self_review_understood 判断。
+     * 5. 一个知识点下的题目全部通过，才标记为 MASTERED。
+     */
+    public StudentRetryMasteryVO getMastery(
+            Long studentId,
+            Long courseId) {
+
+        if (courseId != null) {
+            permissions.requireActiveRead(courseId, studentId);
+        }
+
+        StringBuilder sql = new StringBuilder(
+                """
+                WITH ranked_answers AS (
+
+                    SELECT
+                        c.id AS course_id,
+                        c.name AS course_name,
+
+                        kp.id AS knowledge_point_id,
+
+                        COALESCE(
+                            kp.title,
+                            '未关联知识点'
+                        ) AS knowledge_point_title,
+
+                        q.id AS question_id,
+                        q.question_type,
+
+                        CASE
+                            WHEN q.question_type = 'SHORT_ANSWER'
+                             AND aa.self_review_understood = 1
+                            THEN 1
+
+                            WHEN q.question_type <> 'SHORT_ANSWER'
+                             AND aa.is_correct = 1
+                            THEN 1
+
+                            ELSE 0
+                        END AS mastered_flag,
+
+                        COALESCE(
+                            a.graded_at,
+                            a.submitted_at,
+                            a.started_at
+                        ) AS practiced_at,
+
+                        ROW_NUMBER() OVER (
+                            PARTITION BY q.id
+                            ORDER BY
+                                COALESCE(
+                                    a.graded_at,
+                                    a.submitted_at,
+                                    a.started_at
+                                ) DESC,
+                                a.id DESC,
+                                aa.id DESC
+                        ) AS rn
+
+                    FROM course_exercise_retry_attempt_answer aa
+
+                    JOIN course_exercise_retry_attempt a
+                      ON a.id = aa.attempt_id
+
+                    JOIN course_exercise_retry_list rl
+                      ON rl.id = a.retry_list_id
+                     AND rl.student_id = a.student_id
+
+                    JOIN course_exercise_question q
+                      ON q.id = aa.question_id
+
+                    JOIN course_exercise e
+                      ON e.id = q.exercise_id
+
+                    JOIN course c
+                      ON c.id = e.course_id
+
+                    JOIN course_student cs
+                      ON cs.course_id = c.id
+                     AND cs.student_id = a.student_id
+
+                    LEFT JOIN course_knowledge_point kp
+                      ON kp.id = q.knowledge_point_id
+                     AND kp.course_id = c.id
+
+                    WHERE a.student_id = ?
+                      AND a.status = 'GRADED'
+                      AND c.status = 1
+                """);
+
+        List<Object> args = new ArrayList<>();
+        args.add(studentId);
+
+        if (courseId != null) {
+            sql.append(" AND c.id = ? ");
+            args.add(courseId);
+        }
+
+        sql.append(
+                """
+                )
+
+                SELECT
+                    CAST(course_id AS CHAR) AS course_id,
+                    course_name,
+
+                    CAST(knowledge_point_id AS CHAR)
+                        AS knowledge_point_id,
+
+                    knowledge_point_title,
+
+                    COUNT(*) AS question_count,
+
+                    SUM(mastered_flag) AS mastered_count,
+
+                    COUNT(*) - SUM(mastered_flag)
+                        AS needs_practice_count,
+
+                    ROUND(
+                        SUM(mastered_flag) * 100.0 / COUNT(*)
+                    ) AS mastery_rate,
+
+                    CASE
+                        WHEN SUM(mastered_flag) = COUNT(*)
+                        THEN 'MASTERED'
+                        ELSE 'NEEDS_PRACTICE'
+                    END AS mastery_status,
+
+                    MAX(practiced_at) AS last_practiced_at
+
+                FROM ranked_answers
+
+                WHERE rn = 1
+
+                GROUP BY
+                    course_id,
+                    course_name,
+                    knowledge_point_id,
+                    knowledge_point_title
+
+                ORDER BY
+                    course_name ASC,
+                    knowledge_point_id ASC
+                """
+        );
+
+        List<StudentRetryMasteryVO.KnowledgePoint> points =
+                jdbc.query(
+                        sql.toString(),
+
+                        (rs, rowNum) ->
+                                new StudentRetryMasteryVO.KnowledgePoint(
+                                        rs.getString("course_id"),
+                                        rs.getString("course_name"),
+                                        rs.getString("knowledge_point_id"),
+                                        rs.getString("knowledge_point_title"),
+                                        rs.getInt("question_count"),
+                                        rs.getInt("mastered_count"),
+                                        rs.getInt("needs_practice_count"),
+                                        rs.getInt("mastery_rate"),
+                                        rs.getString("mastery_status"),
+                                        toLocalDateTime(
+                                                rs.getTimestamp(
+                                                        "last_practiced_at"
+                                                )
+                                        )
+                                ),
+
+                        args.toArray()
+                );
+
+        int masteredCount = (int) points.stream()
+                .filter(point ->
+                        "MASTERED".equals(point.status())
+                )
+                .count();
+
+        int needsPracticeCount = points.size() - masteredCount;
+
+        return new StudentRetryMasteryVO(
+                points.size(),
+                masteredCount,
+                needsPracticeCount,
+                points
         );
     }
 
@@ -197,6 +545,9 @@ public class StudentMistakeRetryService {
         );
 
         BigDecimal totalScore = items.stream()
+                .filter(item ->
+                        !"SHORT_ANSWER".equals(item.questionType())
+                )
                 .map(RetryItemData::score)
                 .filter(Objects::nonNull)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -230,10 +581,167 @@ public class StudentMistakeRetryService {
             throw new IllegalStateException("创建重练记录失败");
         }
 
+        jdbc.update(
+                """
+                UPDATE course_exercise_retry_list
+                SET status = 'PENDING',
+                    updated_at = NOW()
+                WHERE id = ?
+                  AND student_id = ?
+                """,
+                retryListId,
+                studentId
+        );
+
         return getAttempt(
                 generatedId.longValue(),
                 studentId
         );
+    }
+
+    /**
+     * 查询重练草稿。
+     * 只能读取当前学生尚未提交的重练记录。
+     */
+    public StudentRetryDraftVO getDraft(
+            Long attemptId,
+            Long studentId) {
+
+        AttemptHeader attempt = requireAttempt(
+                attemptId,
+                studentId
+        );
+
+        if (!"IN_PROGRESS".equals(attempt.status())) {
+            throw new BusinessException(
+                    409,
+                    "当前重练已经提交，不能再读取答题草稿"
+            );
+        }
+
+        List<StudentRetryDraftVO.Answer> answers = jdbc.query(
+                """
+                SELECT retry_item_id, student_answer
+                FROM course_exercise_retry_attempt_answer
+                WHERE attempt_id = ?
+                ORDER BY retry_item_id
+                """,
+                (rs, rowNum) -> new StudentRetryDraftVO.Answer(
+                        rs.getString("retry_item_id"),
+                        rs.getString("student_answer") == null
+                                ? ""
+                                : rs.getString("student_answer")
+                ),
+                attemptId
+        );
+
+        return new StudentRetryDraftVO(
+                attemptId.toString(),
+                answers
+        );
+    }
+
+    /**
+     * 保存重练草稿。
+     *
+     * 1. 只能保存自己的答题记录。
+     * 2. 只能修改 IN_PROGRESS 状态的记录。
+     * 3. 题目必须属于当前重练清单。
+     * 4. 使用唯一索引实现新增或更新。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public StudentRetryDraftVO saveDraft(
+            Long attemptId,
+            Long studentId,
+            StudentRetryDraftSaveRequest request) {
+
+        AttemptHeader attempt = requireAttemptForUpdate(
+                attemptId,
+                studentId
+        );
+
+        if (!"IN_PROGRESS".equals(attempt.status())) {
+            throw new BusinessException(
+                    409,
+                    "当前重练已经提交，不能修改答案"
+            );
+        }
+
+        if (request == null
+                || request.answers() == null
+                || request.answers().isEmpty()) {
+            throw new BusinessException(400, "答案列表不能为空");
+        }
+
+        List<RetryItemData> items = loadRetryItems(
+                attempt.retryListId(),
+                studentId
+        );
+
+        validateItemCount(
+                requireOwnedList(
+                        attempt.retryListId(),
+                        studentId,
+                        false
+                ),
+                items
+        );
+
+        Map<Long, RetryItemData> allowedItems = new HashMap<>();
+
+        for (RetryItemData item : items) {
+            allowedItems.put(item.retryItemId(), item);
+        }
+
+        Set<Long> savedIds = new HashSet<>();
+
+        for (StudentRetryDraftSaveRequest.AnswerRequest answer
+                : request.answers()) {
+
+            if (answer == null || answer.retryItemId() == null) {
+                throw new BusinessException(400, "题目ID不能为空");
+            }
+
+            Long retryItemId = answer.retryItemId();
+
+            if (!savedIds.add(retryItemId)) {
+                throw new BusinessException(400, "不能重复保存同一道题");
+            }
+
+            RetryItemData item = allowedItems.get(retryItemId);
+
+            if (item == null) {
+                throw new BusinessException(
+                        400,
+                        "保存的题目不属于当前重练清单"
+                );
+            }
+
+            String studentAnswer = answer.answer() == null
+                    ? ""
+                    : answer.answer().trim();
+
+            jdbc.update(
+                    """
+                    INSERT INTO course_exercise_retry_attempt_answer
+                        (attempt_id, retry_item_id, question_id,
+                         student_answer, is_correct, score_earned,
+                         pending_self_review, self_review_understood,
+                         created_at, updated_at)
+                    VALUES (?, ?, ?, ?, NULL, 0, 0, NULL, NOW(), NOW())
+                    ON DUPLICATE KEY UPDATE
+                        student_answer = ?,
+                        updated_at = NOW()
+                    """,
+                    attemptId,
+                    retryItemId,
+                    item.questionId(),
+                    studentAnswer,
+                    studentAnswer
+            );
+        }
+
+        return getDraft(attemptId, studentId);
     }
 
     /**
@@ -262,6 +770,15 @@ public class StudentMistakeRetryService {
         List<RetryItemData> items = loadRetryItems(
                 attempt.retryListId(),
                 studentId
+        );
+
+        validateItemCount(
+                requireOwnedList(
+                        attempt.retryListId(),
+                        studentId,
+                        false
+                ),
+                items
         );
 
         Map<Long, RetryItemData> itemMap = new LinkedHashMap<>();
@@ -338,11 +855,27 @@ public class StudentMistakeRetryService {
                     INSERT INTO course_exercise_retry_attempt_answer
                         (attempt_id, retry_item_id, question_id,
                          student_answer, is_correct, score_earned,
-                         pending_self_review, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+                         pending_self_review, self_review_understood,
+                         self_reviewed_at, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, NOW(), NOW())
+                    ON DUPLICATE KEY UPDATE
+                        question_id = ?,
+                        student_answer = ?,
+                        is_correct = ?,
+                        score_earned = ?,
+                        pending_self_review = ?,
+                        self_review_understood = NULL,
+                        self_reviewed_at = NULL,
+                        updated_at = NOW()
                     """,
                     attemptId,
                     item.retryItemId(),
+                    item.questionId(),
+                    studentAnswer,
+                    correct,
+                    earned,
+                    pending,
+
                     item.questionId(),
                     studentAnswer,
                     correct,
@@ -395,6 +928,13 @@ public class StudentMistakeRetryService {
                 attemptId,
                 studentId
         );
+
+        if ("IN_PROGRESS".equals(attempt.status())) {
+            throw new BusinessException(
+                    409,
+                    "重练尚未提交，暂时不能查看答案和解析"
+            );
+        }
 
         List<RetryItemData> items = loadRetryItems(
                 attempt.retryListId(),
@@ -492,10 +1032,11 @@ public class StudentMistakeRetryService {
     /**
      * 学生完成简答题自我核对。
      *
-     * 已掌握：本题计满分。
-     * 仍需巩固：本题计0分。
+     * 已掌握：记录 self_review_understood = 1。
+     * 仍需巩固：记录 self_review_understood = 0。
      *
-     * 全部核对后，重练状态变为 GRADED。
+     * 自我核对只记录学生掌握情况，不影响客观题成绩。
+     * 全部核对完成后，状态变为 GRADED。
      */
     @Transactional(rollbackFor = Exception.class)
     public StudentRetryResultVO selfReview(

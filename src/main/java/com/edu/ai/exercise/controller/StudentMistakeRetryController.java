@@ -5,7 +5,11 @@ import com.edu.ai.common.Result;
 
 import com.edu.ai.exercise.dto.StudentRetryAttemptVO;
 import com.edu.ai.exercise.dto.StudentRetryDetailVO;
+import com.edu.ai.exercise.dto.StudentRetryDraftSaveRequest;
+import com.edu.ai.exercise.dto.StudentRetryDraftVO;
+import com.edu.ai.exercise.dto.StudentRetryHistoryVO;
 import com.edu.ai.exercise.dto.StudentRetryListVO;
+import com.edu.ai.exercise.dto.StudentRetryMasteryVO;
 import com.edu.ai.exercise.dto.StudentRetryResultVO;
 import com.edu.ai.exercise.dto.StudentRetrySelfReviewRequest;
 import com.edu.ai.exercise.dto.StudentRetrySubmitRequest;
@@ -41,6 +45,38 @@ public class StudentMistakeRetryController {
 
         return Result.success(
                 service.listLists(userId(authentication))
+        );
+    }
+
+    /**
+     * 查询学生全部重练历史。
+     */
+    @GetMapping("/history")
+    public Result<List<StudentRetryHistoryVO>> history(
+            Authentication authentication) {
+
+        return Result.success(
+                service.listHistory(userId(authentication))
+        );
+    }
+
+    /**
+     * 查询学生知识点掌握情况。
+     *
+     * courseId 可选：
+     * 不传时查询所有已加入课程；
+     * 传入时只查询指定课程。
+     */
+    @GetMapping("/mastery")
+    public Result<StudentRetryMasteryVO> mastery(
+            @RequestParam(required = false) Long courseId,
+            Authentication authentication) {
+
+        return Result.success(
+                service.getMastery(
+                        userId(authentication),
+                        courseId
+                )
         );
     }
 
@@ -90,6 +126,43 @@ public class StudentMistakeRetryController {
 
         return Result.success(
                 service.submit(
+                        attemptId,
+                        userId(authentication),
+                        request
+                )
+        );
+    }
+
+    /**
+     * 查询重练草稿。
+     */
+    @GetMapping("/attempts/{attemptId}/draft")
+    public Result<StudentRetryDraftVO> draft(
+            @PathVariable Long attemptId,
+            Authentication authentication) {
+
+        return Result.success(
+                service.getDraft(
+                        attemptId,
+                        userId(authentication)
+                )
+        );
+    }
+
+    /**
+     * 保存重练草稿。
+     */
+    @PutMapping("/attempts/{attemptId}/draft")
+    public Result<StudentRetryDraftVO> saveDraft(
+            @PathVariable Long attemptId,
+
+            @Valid
+            @RequestBody StudentRetryDraftSaveRequest request,
+
+            Authentication authentication) {
+
+        return Result.success(
+                service.saveDraft(
                         attemptId,
                         userId(authentication),
                         request
