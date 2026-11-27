@@ -22,6 +22,11 @@ public record StudentMistakeSummaryVO(
             String exerciseTitle,
             String courseId,
             String courseName,
+
+            // 知识点信息
+            String knowledgePointId,
+            String knowledgePointTitle,
+
             String questionId,
             String questionType,
             String stem,

@@ -145,6 +145,11 @@ public class StudentMistakeService {
                                         rs.getString("exercise_title"),
                                         rs.getString("course_id"),
                                         rs.getString("course_name"),
+
+                                        // 知识点信息
+                                        rs.getString("knowledge_point_id"),
+                                        rs.getString("knowledge_point_title"),
+
                                         rs.getString("question_id"),
                                         rs.getString("question_type"),
                                         rs.getString("stem"),
