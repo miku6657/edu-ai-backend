@@ -135,6 +135,60 @@ describe('Java chat API', () => {
     expect(closed).toBe(true)
   })
 
+  it('收到 done 事件后立即结束，不等待 HTTP 流自然关闭', async () => {
+    const encoder = new TextEncoder()
+    let cancelled = false
+
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode(
+            'event: done\n'
+            + 'data: {"sessionId":"301"}\n\n',
+          ),
+        )
+      },
+      cancel() {
+        cancelled = true
+      },
+    })
+
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(
+        new Response(stream, {
+          status: 200,
+          headers: {
+            'Content-Type': 'text/event-stream',
+          },
+        }),
+      )
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    let doneReceived = false
+    let closed = false
+
+    await streamRagQa(
+      {
+        courseId: '2001',
+        query: '什么是Java',
+      },
+      {
+        onDone: () => {
+          doneReceived = true
+        },
+        onClosed: () => {
+          closed = true
+        },
+      },
+    )
+
+    expect(doneReceived).toBe(true)
+    expect(closed).toBe(true)
+    expect(cancelled).toBe(true)
+  })
+
   it('校验并解析拒答 SSE 事件', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse([]))

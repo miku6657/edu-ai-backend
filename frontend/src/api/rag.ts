@@ -545,13 +545,33 @@ export async function streamRagQa(
   try {
     for (;;) {
       const { done, value } = await reader.read()
+
       if (done) {
         break
       }
+
       parser.push(decoder.decode(value, { stream: true }))
+
+      // done 和 error 都是终止事件。
+      // 收到终止事件后，不再等待 HTTP 响应流自然关闭。
+      if (completed || upstreamError) {
+        try {
+          await reader.cancel()
+        } catch {
+          // 响应流可能已经自然关闭，忽略取消异常
+        }
+
+        break
+      }
     }
-    parser.push(decoder.decode())
-    parser.flush()
+
+    // 只有自然结束且尚未收到终止事件时，
+    // 才需要处理解码器剩余数据。
+    if (!completed && !upstreamError) {
+      parser.push(decoder.decode())
+      parser.flush()
+    }
+
     if (!completed && !upstreamError && !signal?.aborted) {
       handlers.onErrorEvent?.({
         code: 'STREAM_INTERRUPTED',
@@ -559,6 +579,7 @@ export async function streamRagQa(
         trace_id: '',
       })
     }
+
     handlers.onClosed?.()
   } finally {
     reader.releaseLock()
