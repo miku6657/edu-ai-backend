@@ -639,7 +639,7 @@ public class StudentExerciseRecommendationService {
 
         int total = 0;
 
-        for (PointState point : candidate.points) {
+        for (PointState point : candidate.points.values()) {
 
             int weakness = point.hasPracticeRecord()
                     ? 100 - point.masteryRate()
@@ -664,7 +664,13 @@ public class StudentExerciseRecommendationService {
     private Recommendation toRecommendation(
             ExerciseCandidate candidate) {
 
-        candidate.points.sort(
+        // 获取 Map 中的知识点，并转换为 List
+        // 这样可以进行排序，同时不改变原 Map 的结构
+        List<PointState> points =
+                new ArrayList<>(candidate.points.values());
+
+        // 按薄弱程度降序排列
+        points.sort(
                 Comparator.comparingInt(
                         (PointState point) ->
                                 point.hasPracticeRecord()
@@ -673,8 +679,9 @@ public class StudentExerciseRecommendationService {
                 ).reversed()
         );
 
+        // 转换为知识点匹配结果
         List<KnowledgePointMatch> matches =
-                candidate.points.stream()
+                points.stream()
                         .map(point -> new KnowledgePointMatch(
                                 String.valueOf(point.knowledgePointId()),
                                 point.title(),
@@ -685,13 +692,14 @@ public class StudentExerciseRecommendationService {
                         ))
                         .toList();
 
-        String reason = candidate.points.stream()
+        // 取最薄弱的两个知识点生成推荐理由
+        String reason = points.stream()
                 .limit(2)
                 .map(PointState::recommendationReason)
                 .reduce((a, b) -> a + "；" + b)
                 .orElse("该练习覆盖当前课程的学习知识点。");
 
-        if (candidate.points.size() > 1) {
+        if (points.size() > 1) {
             reason += " 本练习同时覆盖多个相关知识点。";
         }
 
