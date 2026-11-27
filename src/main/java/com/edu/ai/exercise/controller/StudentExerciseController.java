@@ -5,7 +5,9 @@ import com.edu.ai.common.Result;
 import com.edu.ai.exercise.dto.ExerciseAttemptVO;
 import com.edu.ai.exercise.dto.ExerciseSubmitRequest;
 import com.edu.ai.exercise.dto.ExerciseSubmitResultVO;
+import com.edu.ai.exercise.dto.StudentExerciseRecommendationVO;
 import com.edu.ai.exercise.dto.StudentExerciseVO;
+import com.edu.ai.exercise.service.StudentExerciseRecommendationService;
 import com.edu.ai.exercise.service.StudentExerciseService;
 
 import jakarta.validation.Valid;
@@ -23,9 +25,13 @@ public class StudentExerciseController {
 
     private final StudentExerciseService service;
 
+    private final StudentExerciseRecommendationService recommendationService;
+
     public StudentExerciseController(
-            StudentExerciseService service) {
+            StudentExerciseService service,
+            StudentExerciseRecommendationService recommendationService) {
         this.service = service;
+        this.recommendationService = recommendationService;
     }
 
     /**
@@ -41,6 +47,25 @@ public class StudentExerciseController {
 
         return Result.success(
                 service.listAvailable(
+                        userId(authentication),
+                        courseId
+                )
+        );
+    }
+
+    /**
+     * 获取学生个性化练习推荐。
+     *
+     * GET /api/v1/student/exercises/recommendations
+     * GET /api/v1/student/exercises/recommendations?courseId=1
+     */
+    @GetMapping("/recommendations")
+    public Result<StudentExerciseRecommendationVO> recommendations(
+            @RequestParam(required = false) Long courseId,
+            Authentication authentication) {
+
+        return Result.success(
+                recommendationService.recommend(
                         userId(authentication),
                         courseId
                 )
