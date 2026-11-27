@@ -26,6 +26,7 @@ export function installAuthGuard(target: Router): void {
       'my-exercises',
       'student-exercise-detail',
       'student-exercise-result',
+      'student-learning-analysis',
       'my-mistakes',
       'my-retry-lists',
       'my-retry-progress',

@@ -98,6 +98,12 @@ const primaryNav = computed<NavEntry[]>(() => {
       routeName: 'my-exercises',
     })
     entries.push({
+      key: 'student-learning-analysis',
+      label: '学习分析',
+      icon: ChartLine,
+      routeName: 'student-learning-analysis',
+    })
+    entries.push({
       key: 'my-mistakes',
       label: '错题回顾',
       icon: ClipboardList,
