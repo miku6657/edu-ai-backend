@@ -29,6 +29,18 @@ const PAGE_META: Record<string, { title: string; subtitle?: string }> = {
   courses: { title: '我的课程', subtitle: '管理课程空间与 Embedding 绑定' },
   ddl: { title: 'DDL 任务', subtitle: '通知提取、待确认收件箱与任务闭环' },
   exercises: { title: '练习管理', subtitle: '教师手动组织课程练习与题目' },
+  'my-exercises': {
+    title: '我的练习',
+    subtitle: '查看课程练习与个人参与情况',
+  },
+  'student-exercise-detail': {
+    title: '练习详情',
+    subtitle: '完成课程练习，检验知识点掌握程度',
+  },
+  'student-exercise-result': {
+    title: '练习结果',
+    subtitle: '查看答题成绩、错题和答案解析',
+  },
   settings: { title: '设置', subtitle: '模型配置、偏好与账号安全' },
   guide: { title: '使用指南', subtitle: '功能说明、模型配置与常见问题' },
   login: { title: '登录', subtitle: '登录后开始使用 ScholarClaw' },

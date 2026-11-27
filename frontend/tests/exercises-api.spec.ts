@@ -6,12 +6,20 @@ import {
   createExercise,
   deleteExerciseDraft,
   getExercise,
+  getStudentExercise,
+  getStudentExerciseResult,
   listExerciseKnowledgePoints,
   listManagedExercises,
+  listStudentExercises,
   publishExercise,
+  startStudentExercise,
+  submitStudentExercise,
   updateExercise,
 } from '@/api/exercises'
-import type { ExerciseSaveRequest } from '@/api/exercises'
+import type {
+  ExerciseAnswerRequest,
+  ExerciseSaveRequest,
+} from '@/api/exercises'
 
 function jsonResponse(data: unknown): Response {
   return new Response(JSON.stringify({
@@ -64,28 +72,48 @@ describe('exercises api', () => {
 
     await listManagedExercises('2001')
     await listExerciseKnowledgePoints('2001')
+    await listStudentExercises()
+    await listStudentExercises('2001')
     await getExercise('501')
     await createExercise('2001', request)
     await updateExercise('501', request)
     await publishExercise('501')
     await closeExercise('501')
     await deleteExerciseDraft('501')
+    await getStudentExercise('501')
+    await startStudentExercise('501')
+    const answers: ExerciseAnswerRequest[] = [
+      { questionId: '601', answer: 'A' },
+    ]
+    await submitStudentExercise('901', answers)
+    await getStudentExerciseResult('901')
 
     expect(fetchMock.mock.calls.map(([url, init]) => [requestUrl(url), init?.method]))
       .toEqual([
         ['/api/v1/exercises/manage?courseId=2001', 'GET'],
         ['/api/v1/exercises/courses/2001/knowledge-points', 'GET'],
+        ['/api/v1/student/exercises', 'GET'],
+        ['/api/v1/student/exercises?courseId=2001', 'GET'],
         ['/api/v1/exercises/501', 'GET'],
         ['/api/v1/exercises/courses/2001', 'POST'],
         ['/api/v1/exercises/501', 'PUT'],
         ['/api/v1/exercises/501/publish', 'POST'],
         ['/api/v1/exercises/501/close', 'POST'],
         ['/api/v1/exercises/501', 'DELETE'],
+        ['/api/v1/student/exercises/501', 'GET'],
+        ['/api/v1/student/exercises/501/attempts', 'POST'],
+        ['/api/v1/student/exercises/attempts/901/submit', 'POST'],
+        ['/api/v1/student/exercises/attempts/901', 'GET'],
       ])
-    const body = fetchMock.mock.calls[3]?.[1]?.body
+    const body = fetchMock.mock.calls[5]?.[1]?.body
     if (typeof body !== 'string') {
       throw new Error('请求体不是 JSON 字符串')
     }
     expect(JSON.parse(body)).toEqual(request)
+    const submitBody = fetchMock.mock.calls[12]?.[1]?.body
+    if (typeof submitBody !== 'string') {
+      throw new Error('提交请求体不是 JSON 字符串')
+    }
+    expect(JSON.parse(submitBody)).toEqual({ answers })
   })
 })

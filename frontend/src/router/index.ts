@@ -13,6 +13,9 @@ import NotFoundView from '@/views/NotFoundView.vue'
 import QaTicketsView from '@/views/QaTicketsView.vue'
 import RagView from '@/views/RagView.vue'
 import SettingsView from '@/views/SettingsView.vue'
+import StudentExerciseDetailView from '@/views/StudentExerciseDetailView.vue'
+import StudentExerciseResultView from '@/views/StudentExerciseResultView.vue'
+import StudentExercisesView from '@/views/StudentExercisesView.vue'
 import TeacherQuestionsView from '@/views/TeacherQuestionsView.vue'
 
 /**
@@ -93,6 +96,33 @@ const routes: RouteRecordRaw[] = [
         name: 'exercises',
         component: ExercisesView,
         meta: { title: '练习管理', requiresAuth: true },
+      },
+      {
+        path: 'my-exercises',
+        name: 'my-exercises',
+        component: StudentExercisesView,
+        meta: {
+          title: '我的练习',
+          requiresAuth: true,
+        },
+      },
+      {
+        path: 'my-exercises/attempts/:attemptId/result',
+        name: 'student-exercise-result',
+        component: StudentExerciseResultView,
+        meta: {
+          title: '练习结果',
+          requiresAuth: true,
+        },
+      },
+      {
+        path: 'my-exercises/:exerciseId',
+        name: 'student-exercise-detail',
+        component: StudentExerciseDetailView,
+        meta: {
+          title: '练习详情',
+          requiresAuth: true,
+        },
       },
       {
         path: 'settings',

@@ -22,6 +22,9 @@ function buildRouter(): Router {
     { path: '/', name: 'home', component: StubComponent },
     { path: '/login', name: LOGIN_ROUTE_NAME, component: StubComponent, meta: { guestOnly: true } },
     { path: '/settings', name: 'settings', component: StubComponent, meta: { requiresAuth: true } },
+    { path: '/my-exercises', name: 'my-exercises', component: StubComponent, meta: { requiresAuth: true } },
+    { path: '/exercise-detail', name: 'student-exercise-detail', component: StubComponent, meta: { requiresAuth: true } },
+    { path: '/exercise-result', name: 'student-exercise-result', component: StubComponent, meta: { requiresAuth: true } },
     { path: '/workspace', name: 'workspace', component: StubComponent, meta: { requiresAuth: true } },
   ]
   const router = createRouter({ history: createMemoryHistory(), routes })
@@ -93,6 +96,51 @@ describe('installAuthGuard', () => {
     const router = buildRouter()
 
     await router.push('/settings')
+
+    expect(router.currentRoute.value.name).toBe('home')
+  })
+
+  it.each([
+    ['/my-exercises', 'my-exercises'],
+    ['/exercise-detail', 'student-exercise-detail'],
+    ['/exercise-result', 'student-exercise-result'],
+  ] as const)('学生可以访问 %s', async (path, routeName) => {
+    useAuthStore().setSession({
+      token: 'jwt-token-value',
+      user: {
+        user_id: '10001',
+        username: 'student',
+        nickname: '学生',
+        role: 'STUDENT',
+      },
+    })
+    const router = buildRouter()
+
+    await router.push(path)
+
+    expect(router.currentRoute.value.name).toBe(routeName)
+  })
+
+  it.each([
+    ['TEACHER', '/my-exercises'],
+    ['TEACHER', '/exercise-detail'],
+    ['TEACHER', '/exercise-result'],
+    ['ADMIN', '/my-exercises'],
+    ['ADMIN', '/exercise-detail'],
+    ['ADMIN', '/exercise-result'],
+  ] as const)('%s 不能访问 %s', async (role, path) => {
+    useAuthStore().setSession({
+      token: 'jwt-token-value',
+      user: {
+        user_id: '10001',
+        username: role.toLowerCase(),
+        nickname: role,
+        role,
+      },
+    })
+    const router = buildRouter()
+
+    await router.push(path)
 
     expect(router.currentRoute.value.name).toBe('home')
   })

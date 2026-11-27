@@ -82,12 +82,28 @@ const primaryNav = computed<NavEntry[]>(() => {
       routeName: 'teacher-questions',
     })
   }
+  if (auth.isStudent) {
+    entries.push({
+      key: 'my-exercises',
+      label: '我的练习',
+      icon: ClipboardList,
+      routeName: 'my-exercises',
+    })
+  }
   return entries
 })
 
 const ddlBadge = computed(() => unreadBadge(props.ddlPendingCount))
 const notificationBadge = computed(() => unreadBadge(props.unreadCount))
 function isActive(entry: NavEntry): boolean {
+  if (entry.routeName === 'my-exercises') {
+    return [
+      'my-exercises',
+      'student-exercise-detail',
+      'student-exercise-result',
+    ].includes(String(route.name))
+  }
+
   return route.name === entry.routeName
 }
 

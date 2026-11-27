@@ -125,3 +125,119 @@ export function deleteExerciseDraft(exerciseId: BigIntId): Promise<void> {
     method: 'DELETE',
   })
 }
+
+export interface StudentExercise {
+  id: BigIntId
+  courseId: BigIntId
+  courseName: string
+  title: string
+  description: string | null
+  difficulty: number
+  estimatedMinutes: number
+  questionCount: number
+  attemptCount: number
+  latestStatus: string | null
+  questions: StudentExerciseQuestion[]
+}
+
+export interface StudentExerciseQuestion {
+  id: BigIntId
+  knowledgePointId: BigIntId
+  knowledgePointTitle: string
+  questionType: ExerciseQuestionType
+  stem: string
+  options: ExerciseOption[]
+  score: number
+  sortOrder: number
+}
+
+export function listStudentExercises(
+  courseId?: BigIntId,
+): Promise<StudentExercise[]> {
+  const query = courseId
+    ? `?courseId=${encodeURIComponent(courseId)}`
+    : ''
+
+  return apiRequest<StudentExercise[]>(
+    `/v1/student/exercises${query}`,
+  )
+}
+
+export interface ExerciseAttempt {
+  id: BigIntId
+  exerciseId: BigIntId
+  attemptNo: number
+  status: 'IN_PROGRESS' | 'PENDING_REVIEW' | 'GRADED'
+  totalScore: number
+  earnedScore: number
+  startedAt: string
+  submittedAt: string | null
+}
+
+export interface ExerciseAnswerRequest {
+  questionId: BigIntId
+  answer: string
+}
+
+export interface ExerciseSubmitResult {
+  attemptId: BigIntId
+  exerciseId: BigIntId
+  attemptNo: number
+  status: 'PENDING_REVIEW' | 'GRADED'
+  totalScore: number
+  earnedScore: number
+  pendingReviewCount: number
+  submittedAt: string
+  answers: ExerciseAnswerResult[]
+}
+
+export interface ExerciseAnswerResult {
+  questionId: BigIntId
+  questionType: ExerciseQuestionType
+  stem: string
+  studentAnswer: string
+  correct: boolean | null
+  correctAnswer: string | null
+  explanation: string | null
+  score: number
+  earnedScore: number
+  pendingReview: boolean
+}
+
+export function getStudentExercise(
+  exerciseId: BigIntId,
+): Promise<StudentExercise> {
+  return apiRequest<StudentExercise>(
+    `/v1/student/exercises/${encodeURIComponent(exerciseId)}`,
+  )
+}
+
+export function startStudentExercise(
+  exerciseId: BigIntId,
+): Promise<ExerciseAttempt> {
+  return apiRequest<ExerciseAttempt>(
+    `/v1/student/exercises/${encodeURIComponent(exerciseId)}/attempts`,
+    { method: 'POST' },
+  )
+}
+
+export function submitStudentExercise(
+  attemptId: BigIntId,
+  answers: ExerciseAnswerRequest[],
+): Promise<ExerciseSubmitResult> {
+  return apiRequest<ExerciseSubmitResult>(
+    `/v1/student/exercises/attempts/${encodeURIComponent(attemptId)}/submit`,
+    {
+      method: 'POST',
+      body: { answers },
+    },
+  )
+}
+
+export function getStudentExerciseResult(
+  attemptId: BigIntId,
+): Promise<ExerciseSubmitResult> {
+  return apiRequest<ExerciseSubmitResult>(
+    `/v1/student/exercises/attempts/${encodeURIComponent(attemptId)}`,
+  )
+}

@@ -22,6 +22,16 @@ export function installAuthGuard(target: Router): void {
       }
     }
 
+    const studentRoutes = [
+      'my-exercises',
+      'student-exercise-detail',
+      'student-exercise-result',
+    ]
+
+    if (studentRoutes.includes(String(to.name)) && !auth.isStudent) {
+      return { name: 'home' }
+    }
+
     if (to.name === 'settings' && !auth.isAdmin) {
       return { name: 'home' }
     }
