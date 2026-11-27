@@ -21,6 +21,7 @@ import StudentMistakesView from '@/views/StudentMistakesView.vue'
 import StudentRetryListsView from '@/views/StudentRetryListsView.vue'
 import StudentRetryDetailView from '@/views/StudentRetryDetailView.vue'
 import StudentRetryResultView from '@/views/StudentRetryResultView.vue'
+import StudentRetryProgressView from '@/views/StudentRetryProgressView.vue'
 import TeacherQuestionsView from '@/views/TeacherQuestionsView.vue'
 
 /**
@@ -135,6 +136,15 @@ const routes: RouteRecordRaw[] = [
         component: StudentRetryListsView,
         meta: {
           title: '错题重练',
+          requiresAuth: true,
+        },
+      },
+      {
+        path: 'my-retry-progress',
+        name: 'my-retry-progress',
+        component: StudentRetryProgressView,
+        meta: {
+          title: '学习进步',
           requiresAuth: true,
         },
       },

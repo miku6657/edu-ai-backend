@@ -591,3 +591,67 @@ export function saveStudentRetryDraft(
     },
   )
 }
+
+/* ==========================================
+ * F5-03 重练历史与知识点掌握情况
+ * ========================================== */
+
+export interface StudentRetryHistory {
+  attemptId: BigIntId
+  retryListId: BigIntId
+  retryListTitle: string
+  attemptNo: number
+  status: 'IN_PROGRESS' | 'PENDING_SELF_REVIEW' | 'GRADED'
+  totalScore: number
+  earnedScore: number
+  itemCount: number
+  answeredCount: number
+  objectiveCount: number
+  correctCount: number
+  accuracyRate: number
+  shortAnswerCount: number
+  selfReviewedMasteredCount: number
+  startedAt: string
+  submittedAt: string | null
+  gradedAt: string | null
+}
+
+export interface StudentRetryKnowledgePoint {
+  courseId: BigIntId
+  courseName: string
+  knowledgePointId: BigIntId | null
+  knowledgePointTitle: string
+  questionCount: number
+  masteredCount: number
+  needsPracticeCount: number
+  masteryRate: number
+  status: 'MASTERED' | 'NEEDS_PRACTICE'
+  lastPracticedAt: string | null
+}
+
+export interface StudentRetryMastery {
+  totalKnowledgePoints: number
+  masteredKnowledgePoints: number
+  needsPracticeKnowledgePoints: number
+  knowledgePoints: StudentRetryKnowledgePoint[]
+}
+
+/** 查询重练历史 */
+export function listStudentRetryHistory(): Promise<StudentRetryHistory[]> {
+  return apiRequest<StudentRetryHistory[]>(
+    '/v1/student/exercises/retry-lists/history',
+  )
+}
+
+/** 查询知识点掌握情况 */
+export function getStudentRetryMastery(
+  courseId?: BigIntId,
+): Promise<StudentRetryMastery> {
+  const query = courseId
+    ? `?courseId=${encodeURIComponent(courseId)}`
+    : ''
+
+  return apiRequest<StudentRetryMastery>(
+    `/v1/student/exercises/retry-lists/mastery${query}`,
+  )
+}

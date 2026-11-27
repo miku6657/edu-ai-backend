@@ -6,6 +6,7 @@ import {
   Bell,
   BookOpen,
   CalendarClock,
+  ChartLine,
   ClipboardList,
   CircleHelp,
   Home,
@@ -107,6 +108,12 @@ const primaryNav = computed<NavEntry[]>(() => {
       label: '错题重练',
       icon: RotateCcw,
       routeName: 'my-retry-lists',
+    })
+    entries.push({
+      key: 'my-retry-progress',
+      label: '学习进步',
+      icon: ChartLine,
+      routeName: 'my-retry-progress',
     })
   }
   return entries

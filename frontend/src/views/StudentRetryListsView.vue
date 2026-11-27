@@ -89,6 +89,12 @@ function openList(item: StudentRetryList): void {
     },
   })
 }
+
+function goToProgress(): void {
+  void router.push({
+    name: 'my-retry-progress',
+  })
+}
 </script>
 
 <template>
@@ -151,9 +157,20 @@ function openList(item: StudentRetryList): void {
             <h3>我的重练清单</h3>
             <p>选择清单进入重练，重新完成错题并巩固薄弱知识。</p>
           </div>
-          <el-button :loading="loading" @click="loadLists">
-            刷新
-          </el-button>
+          <div class="retry-list__actions">
+            <el-button
+              @click="goToProgress"
+            >
+              学习进步
+            </el-button>
+
+            <el-button
+              :loading="loading"
+              @click="loadLists"
+            >
+              刷新
+            </el-button>
+          </div>
         </div>
       </template>
 
@@ -307,6 +324,12 @@ function openList(item: StudentRetryList): void {
   margin: 0;
   color: var(--sc-text-secondary);
   font-size: 12px;
+}
+
+.retry-list__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .retry-list {
