@@ -236,6 +236,13 @@ public class TeacherQuestionAnalyticsService {
                 WHERE m.role = 'user'
                   AND u.role = 'STUDENT'
                   AND s.course_id = ?
+
+                  -- 排除错题 AI 专属讲解会话
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM course_exercise_explain_session ees
+                      WHERE ees.chat_session_id = s.id
+                  )
                 """
         );
 
@@ -568,6 +575,12 @@ public class TeacherQuestionAnalyticsService {
                  AND s.course_id = qk.course_id
 
                 WHERE qk.course_id = ?
+
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM course_exercise_explain_session ees
+                      WHERE ees.chat_session_id = s.id
+                  )
                 """
         );
 
