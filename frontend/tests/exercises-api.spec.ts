@@ -5,11 +5,14 @@ import {
   closeExercise,
   createExercise,
   deleteExerciseDraft,
+  getExerciseReview,
   getExercise,
   getStudentExercise,
   getStudentExerciseResult,
+  gradeExerciseAttempt,
   listExerciseKnowledgePoints,
   listManagedExercises,
+  listPendingExerciseReviews,
   listStudentExercises,
   publishExercise,
   startStudentExercise,
@@ -87,6 +90,11 @@ describe('exercises api', () => {
     ]
     await submitStudentExercise('901', answers)
     await getStudentExerciseResult('901')
+    await listPendingExerciseReviews()
+    await listPendingExerciseReviews('2001')
+    await getExerciseReview('901')
+    const grades = [{ answerId: '701', score: 4, feedback: '思路清晰' }]
+    await gradeExerciseAttempt('901', grades)
 
     expect(fetchMock.mock.calls.map(([url, init]) => [requestUrl(url), init?.method]))
       .toEqual([
@@ -104,6 +112,10 @@ describe('exercises api', () => {
         ['/api/v1/student/exercises/501/attempts', 'POST'],
         ['/api/v1/student/exercises/attempts/901/submit', 'POST'],
         ['/api/v1/student/exercises/attempts/901', 'GET'],
+        ['/api/v1/exercises/reviews/pending', 'GET'],
+        ['/api/v1/exercises/reviews/pending?courseId=2001', 'GET'],
+        ['/api/v1/exercises/reviews/901', 'GET'],
+        ['/api/v1/exercises/reviews/901/grade', 'POST'],
       ])
     const body = fetchMock.mock.calls[5]?.[1]?.body
     if (typeof body !== 'string') {
@@ -115,5 +127,10 @@ describe('exercises api', () => {
       throw new Error('提交请求体不是 JSON 字符串')
     }
     expect(JSON.parse(submitBody)).toEqual({ answers })
+    const gradeBody = fetchMock.mock.calls[17]?.[1]?.body
+    if (typeof gradeBody !== 'string') {
+      throw new Error('批改请求体不是 JSON 字符串')
+    }
+    expect(JSON.parse(gradeBody)).toEqual({ answers: grades })
   })
 })

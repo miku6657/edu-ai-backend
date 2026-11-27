@@ -41,6 +41,10 @@ const PAGE_META: Record<string, { title: string; subtitle?: string }> = {
     title: '练习结果',
     subtitle: '查看答题成绩、错题和答案解析',
   },
+  'exercise-reviews': {
+    title: '练习批改',
+    subtitle: '查看学生提交的简答题，完成评分与反馈',
+  },
   settings: { title: '设置', subtitle: '模型配置、偏好与账号安全' },
   guide: { title: '使用指南', subtitle: '功能说明、模型配置与常见问题' },
   login: { title: '登录', subtitle: '登录后开始使用 ScholarClaw' },

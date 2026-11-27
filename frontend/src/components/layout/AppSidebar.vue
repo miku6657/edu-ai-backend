@@ -81,6 +81,12 @@ const primaryNav = computed<NavEntry[]>(() => {
       icon: MessagesSquare,
       routeName: 'teacher-questions',
     })
+    entries.splice(7, 0, {
+      key: 'exercise-reviews',
+      label: '练习批改',
+      icon: ClipboardList,
+      routeName: 'exercise-reviews',
+    })
   }
   if (auth.isStudent) {
     entries.push({

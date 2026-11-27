@@ -202,6 +202,7 @@ export interface ExerciseAnswerResult {
   score: number
   earnedScore: number
   pendingReview: boolean
+  teacherFeedback: string | null
 }
 
 export function getStudentExercise(
@@ -239,5 +240,88 @@ export function getStudentExerciseResult(
 ): Promise<ExerciseSubmitResult> {
   return apiRequest<ExerciseSubmitResult>(
     `/v1/student/exercises/attempts/${encodeURIComponent(attemptId)}`,
+  )
+}
+
+export interface ExerciseReviewItem {
+  attemptId: BigIntId
+  exerciseId: BigIntId
+  exerciseTitle: string
+  courseId: BigIntId
+  courseName: string
+  studentId: BigIntId
+  studentName: string
+  attemptNo: number
+  pendingReviewCount: number
+  totalScore: number
+  earnedScore: number
+  submittedAt: string
+}
+
+export interface ExerciseReviewAnswer {
+  answerId: BigIntId
+  questionId: BigIntId
+  knowledgePointTitle: string | null
+  questionType: ExerciseQuestionType
+  stem: string
+  studentAnswer: string
+  correctAnswer: string
+  explanation: string
+  maxScore: number
+  earnedScore: number
+  teacherFeedback: string | null
+  pendingReview: boolean
+}
+
+export interface ExerciseReviewDetail {
+  attemptId: BigIntId
+  exerciseId: BigIntId
+  exerciseTitle: string
+  studentId: BigIntId
+  studentName: string
+  attemptNo: number
+  status: string
+  totalScore: number
+  earnedScore: number
+  submittedAt: string
+  answers: ExerciseReviewAnswer[]
+}
+
+export interface ExerciseGradeItem {
+  answerId: BigIntId
+  score: number
+  feedback?: string
+}
+
+export function listPendingExerciseReviews(
+  courseId?: BigIntId,
+): Promise<ExerciseReviewItem[]> {
+  const query = courseId
+    ? `?courseId=${encodeURIComponent(courseId)}`
+    : ''
+
+  return apiRequest<ExerciseReviewItem[]>(
+    `/v1/exercises/reviews/pending${query}`,
+  )
+}
+
+export function getExerciseReview(
+  attemptId: BigIntId,
+): Promise<ExerciseReviewDetail> {
+  return apiRequest<ExerciseReviewDetail>(
+    `/v1/exercises/reviews/${encodeURIComponent(attemptId)}`,
+  )
+}
+
+export function gradeExerciseAttempt(
+  attemptId: BigIntId,
+  answers: ExerciseGradeItem[],
+): Promise<ExerciseReviewDetail> {
+  return apiRequest<ExerciseReviewDetail>(
+    `/v1/exercises/reviews/${encodeURIComponent(attemptId)}/grade`,
+    {
+      method: 'POST',
+      body: { answers },
+    },
   )
 }

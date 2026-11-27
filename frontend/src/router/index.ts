@@ -4,6 +4,7 @@ import AppLayout from '@/layouts/AppLayout.vue'
 import { installAuthGuard } from '@/router/guard'
 import CoursesView from '@/views/CoursesView.vue'
 import DdlView from '@/views/DdlView.vue'
+import ExerciseReviewsView from '@/views/ExerciseReviewsView.vue'
 import ExercisesView from '@/views/ExercisesView.vue'
 import GuideView from '@/views/GuideView.vue'
 import HomeView from '@/views/HomeView.vue'
@@ -96,6 +97,15 @@ const routes: RouteRecordRaw[] = [
         name: 'exercises',
         component: ExercisesView,
         meta: { title: '练习管理', requiresAuth: true },
+      },
+      {
+        path: 'exercise-reviews',
+        name: 'exercise-reviews',
+        component: ExerciseReviewsView,
+        meta: {
+          title: '练习批改',
+          requiresAuth: true,
+        },
       },
       {
         path: 'my-exercises',

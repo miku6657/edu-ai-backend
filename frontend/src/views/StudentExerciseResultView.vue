@@ -213,6 +213,14 @@ async function retryExercise(): Promise<void> {
             本题已提交，等待任课教师批改。
           </div>
 
+          <div
+            v-if="answer.teacherFeedback && !answer.pendingReview"
+            class="teacher-feedback"
+          >
+            <strong>教师评语</strong>
+            <p>{{ answer.teacherFeedback }}</p>
+          </div>
+
           <div class="result-question__score">
             本题得分：
             <strong>{{ answer.earnedScore }}</strong>
@@ -387,6 +395,27 @@ async function retryExercise(): Promise<void> {
   background: var(--sc-bg);
   color: var(--sc-text-secondary);
   font-size: 12px;
+}
+
+.teacher-feedback {
+  padding: 13px;
+  margin-top: 12px;
+  border-left: 3px solid var(--sc-primary);
+  border-radius: 6px;
+  background: var(--sc-bg);
+}
+
+.teacher-feedback strong {
+  color: var(--sc-text);
+  font-size: 12px;
+}
+
+.teacher-feedback p {
+  margin: 8px 0 0;
+  color: var(--sc-text-secondary);
+  font-size: 12px;
+  line-height: 1.8;
+  white-space: pre-wrap;
 }
 
 .result-question__score {

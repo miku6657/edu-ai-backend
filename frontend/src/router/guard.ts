@@ -32,6 +32,14 @@ export function installAuthGuard(target: Router): void {
       return { name: 'home' }
     }
 
+    if (
+      to.name === 'exercise-reviews'
+      && !auth.isTeacher
+      && !auth.isAdmin
+    ) {
+      return { name: 'home' }
+    }
+
     if (to.name === 'settings' && !auth.isAdmin) {
       return { name: 'home' }
     }
