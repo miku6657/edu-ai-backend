@@ -13,6 +13,7 @@ import type {
   StudentMistakeRetryList,
   StudentMistakeSummary,
 } from '@/api/exercises'
+import StudentMistakeExplain from '@/components/exercise/StudentMistakeExplain.vue'
 import BaseCard from '@/components/ui/BaseCard.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import {
@@ -383,6 +384,13 @@ function goToRetryLists(): void {
                 >
                   <strong>教师评语</strong>
                   <p>{{ item.teacherFeedback }}</p>
+                </div>
+
+                <!-- F5-04 AI知识点讲解 -->
+                <div class="mistake-ai-action">
+                  <StudentMistakeExplain
+                    :mistake="item"
+                  />
                 </div>
 
                 <div class="mistake-item__footer">
@@ -793,5 +801,11 @@ function goToRetryLists(): void {
   .mistake-footer .el-button {
     width: 100%;
   }
+}
+
+.mistake-ai-action {
+  display: flex;
+  align-items: center;
+  margin-top: 10px;
 }
 </style>
