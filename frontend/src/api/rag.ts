@@ -132,6 +132,7 @@ export interface RagStreamHandlers {
 export interface RagStreamRequest {
   courseId: BigIntId
   query: string
+  sessionId?: BigIntId
   clientMsgId?: string
 }
 
@@ -425,7 +426,12 @@ export async function streamRagQa(
   signal?: AbortSignal,
 ): Promise<void> {
   const courseId = normalizeId(request.courseId)
-  const sessionId = await resolveSessionId(courseId)
+
+  const useExplicitSession = request.sessionId !== undefined
+
+  const sessionId = useExplicitSession
+    ? normalizeId(request.sessionId!)
+    : await resolveSessionId(courseId)
 
   if (signal?.aborted) {
     throw new DOMException('请求已取消', 'AbortError')
@@ -469,9 +475,17 @@ export async function streamRagQa(
     }
 
     if (frame.event === 'session') {
-      const sessionId = requireSessionId(payload.sessionId)
-      sessionCache.set(courseId, sessionId)
-      handlers.onSession?.({ sessionId })
+      const returnedSessionId = requireSessionId(payload.sessionId)
+
+      // 普通课程问答才更新课程默认会话缓存。
+      // 错题专属会话不能覆盖普通问答的最近会话。
+      if (!useExplicitSession) {
+        sessionCache.set(courseId, returnedSessionId)
+      }
+
+      handlers.onSession?.({
+        sessionId: returnedSessionId,
+      })
     } else if (frame.event === 'sources') {
       const sources = Array.isArray(payload.sources)
         ? payload.sources.filter(isJavaSource).map(sourceToCitation)
@@ -536,10 +550,17 @@ export async function streamRagQa(
         trace_id: '',
       })
     } else if (frame.event === 'done') {
-      const sessionId = requireSessionId(payload.sessionId)
-      sessionCache.set(courseId, sessionId)
+      const returnedSessionId = requireSessionId(payload.sessionId)
+
+      if (!useExplicitSession) {
+        sessionCache.set(courseId, returnedSessionId)
+      }
+
       completed = true
-      handlers.onDone?.({ sessionId })
+
+      handlers.onDone?.({
+        sessionId: returnedSessionId,
+      })
     }
   })
   try {
@@ -584,6 +605,27 @@ export async function streamRagQa(
   } finally {
     reader.releaseLock()
   }
+}
+
+/**
+ * 根据明确的会话 ID 查询聊天历史。
+ *
+ * 用于错题专属 AI 讲解记录。
+ * 不使用课程最近会话缓存。
+ */
+export async function listSessionMessages(
+  sessionId: BigIntId,
+): Promise<ChatHistoryMessage[]> {
+
+  if (!/^[1-9]\d*$/.test(sessionId)) {
+    throw new Error('聊天会话 ID 不合法')
+  }
+
+  const messages = await apiRequest<ChatMessage[]>(
+    `/chat/sessions/${encodeURIComponent(sessionId)}/messages`,
+  )
+
+  return messages.map(toChatHistoryMessage)
 }
 
 export async function listMessages(
