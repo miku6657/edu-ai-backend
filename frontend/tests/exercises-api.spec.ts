@@ -4,12 +4,15 @@ import { configureApiClient, resetApiClient } from '@/api/client'
 import {
   closeExercise,
   createExercise,
+  createStudentMistakeRetryList,
   deleteExerciseDraft,
   getExerciseReview,
   getExercise,
   getStudentExercise,
   getStudentExerciseResult,
   gradeExerciseAttempt,
+  getStudentMistake,
+  getStudentMistakes,
   listExerciseKnowledgePoints,
   listManagedExercises,
   listPendingExerciseReviews,
@@ -95,6 +98,13 @@ describe('exercises api', () => {
     await getExerciseReview('901')
     const grades = [{ answerId: '701', score: 4, feedback: '思路清晰' }]
     await gradeExerciseAttempt('901', grades)
+    await getStudentMistakes()
+    await getStudentMistakes('2001')
+    await getStudentMistake('701')
+    await createStudentMistakeRetryList(
+      ['701', '702'],
+      'Java 基础错题重练',
+    )
 
     expect(fetchMock.mock.calls.map(([url, init]) => [requestUrl(url), init?.method]))
       .toEqual([
@@ -116,6 +126,10 @@ describe('exercises api', () => {
         ['/api/v1/exercises/reviews/pending?courseId=2001', 'GET'],
         ['/api/v1/exercises/reviews/901', 'GET'],
         ['/api/v1/exercises/reviews/901/grade', 'POST'],
+        ['/api/v1/student/exercises/mistakes', 'GET'],
+        ['/api/v1/student/exercises/mistakes?courseId=2001', 'GET'],
+        ['/api/v1/student/exercises/mistakes/701', 'GET'],
+        ['/api/v1/student/exercises/mistakes/retry-lists', 'POST'],
       ])
     const body = fetchMock.mock.calls[5]?.[1]?.body
     if (typeof body !== 'string') {
@@ -132,5 +146,13 @@ describe('exercises api', () => {
       throw new Error('批改请求体不是 JSON 字符串')
     }
     expect(JSON.parse(gradeBody)).toEqual({ answers: grades })
+    const retryBody = fetchMock.mock.calls[21]?.[1]?.body
+    if (typeof retryBody !== 'string') {
+      throw new Error('重练清单请求体不是 JSON 字符串')
+    }
+    expect(JSON.parse(retryBody)).toEqual({
+      answerIds: ['701', '702'],
+      title: 'Java 基础错题重练',
+    })
   })
 })

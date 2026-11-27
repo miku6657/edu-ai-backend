@@ -26,6 +26,7 @@ function buildRouter(): Router {
     { path: '/exercise-detail', name: 'student-exercise-detail', component: StubComponent, meta: { requiresAuth: true } },
     { path: '/exercise-result', name: 'student-exercise-result', component: StubComponent, meta: { requiresAuth: true } },
     { path: '/exercise-reviews', name: 'exercise-reviews', component: StubComponent, meta: { requiresAuth: true } },
+    { path: '/my-mistakes', name: 'my-mistakes', component: StubComponent, meta: { requiresAuth: true } },
     { path: '/workspace', name: 'workspace', component: StubComponent, meta: { requiresAuth: true } },
   ]
   const router = createRouter({ history: createMemoryHistory(), routes })
@@ -105,6 +106,7 @@ describe('installAuthGuard', () => {
     ['/my-exercises', 'my-exercises'],
     ['/exercise-detail', 'student-exercise-detail'],
     ['/exercise-result', 'student-exercise-result'],
+    ['/my-mistakes', 'my-mistakes'],
   ] as const)('学生可以访问 %s', async (path, routeName) => {
     useAuthStore().setSession({
       token: 'jwt-token-value',
@@ -126,9 +128,11 @@ describe('installAuthGuard', () => {
     ['TEACHER', '/my-exercises'],
     ['TEACHER', '/exercise-detail'],
     ['TEACHER', '/exercise-result'],
+    ['TEACHER', '/my-mistakes'],
     ['ADMIN', '/my-exercises'],
     ['ADMIN', '/exercise-detail'],
     ['ADMIN', '/exercise-result'],
+    ['ADMIN', '/my-mistakes'],
   ] as const)('%s 不能访问 %s', async (role, path) => {
     useAuthStore().setSession({
       token: 'jwt-token-value',

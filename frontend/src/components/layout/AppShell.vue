@@ -33,6 +33,10 @@ const PAGE_META: Record<string, { title: string; subtitle?: string }> = {
     title: '我的练习',
     subtitle: '查看课程练习与个人参与情况',
   },
+  'my-mistakes': {
+    title: '错题回顾',
+    subtitle: '按照课程知识点归集错题，巩固薄弱知识',
+  },
   'student-exercise-detail': {
     title: '练习详情',
     subtitle: '完成课程练习，检验知识点掌握程度',

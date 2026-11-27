@@ -17,6 +17,7 @@ import SettingsView from '@/views/SettingsView.vue'
 import StudentExerciseDetailView from '@/views/StudentExerciseDetailView.vue'
 import StudentExerciseResultView from '@/views/StudentExerciseResultView.vue'
 import StudentExercisesView from '@/views/StudentExercisesView.vue'
+import StudentMistakesView from '@/views/StudentMistakesView.vue'
 import TeacherQuestionsView from '@/views/TeacherQuestionsView.vue'
 
 /**
@@ -113,6 +114,15 @@ const routes: RouteRecordRaw[] = [
         component: StudentExercisesView,
         meta: {
           title: '我的练习',
+          requiresAuth: true,
+        },
+      },
+      {
+        path: 'my-mistakes',
+        name: 'my-mistakes',
+        component: StudentMistakesView,
+        meta: {
+          title: '错题回顾',
           requiresAuth: true,
         },
       },

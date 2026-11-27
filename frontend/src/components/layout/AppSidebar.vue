@@ -95,6 +95,12 @@ const primaryNav = computed<NavEntry[]>(() => {
       icon: ClipboardList,
       routeName: 'my-exercises',
     })
+    entries.push({
+      key: 'my-mistakes',
+      label: '错题回顾',
+      icon: ClipboardList,
+      routeName: 'my-mistakes',
+    })
   }
   return entries
 })

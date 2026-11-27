@@ -325,3 +325,85 @@ export function gradeExerciseAttempt(
     },
   )
 }
+
+export interface StudentMistakeItem {
+  answerId: BigIntId
+  attemptId: BigIntId
+  exerciseId: BigIntId
+  exerciseTitle: string
+  courseId: BigIntId
+  courseName: string
+  knowledgePointTitle: string | null
+  questionId: BigIntId
+  questionType: ExerciseQuestionType
+  stem: string
+  studentAnswer: string
+  correctAnswer: string
+  explanation: string
+  mistakeType: 'UNANSWERED' | 'OBJECTIVE_WRONG' | 'SHORT_ANSWER_INCOMPLETE'
+  teacherFeedback: string | null
+  maxScore: number
+  earnedScore: number
+  answeredAt: string
+}
+
+export interface StudentMistakeGroup {
+  knowledgePointId: BigIntId | null
+  knowledgePointTitle: string
+  mistakeCount: number
+  mistakes: StudentMistakeItem[]
+}
+
+export interface StudentMistakeSummary {
+  totalMistakes: number
+  knowledgePointCount: number
+  knowledgePoints: StudentMistakeGroup[]
+}
+
+export interface StudentMistakeDetail extends StudentMistakeItem {
+  knowledgePointId: BigIntId | null
+  knowledgePointTitle: string | null
+}
+
+export interface StudentMistakeRetryList {
+  id: BigIntId
+  title: string
+  itemCount: number
+  createdAt: string
+}
+
+export function getStudentMistakes(
+  courseId?: BigIntId,
+): Promise<StudentMistakeSummary> {
+  const query = courseId
+    ? `?courseId=${encodeURIComponent(courseId)}`
+    : ''
+
+  return apiRequest<StudentMistakeSummary>(
+    `/v1/student/exercises/mistakes${query}`,
+  )
+}
+
+export function getStudentMistake(
+  answerId: BigIntId,
+): Promise<StudentMistakeDetail> {
+  return apiRequest<StudentMistakeDetail>(
+    `/v1/student/exercises/mistakes/${encodeURIComponent(answerId)}`,
+  )
+}
+
+export function createStudentMistakeRetryList(
+  answerIds: BigIntId[],
+  title?: string,
+): Promise<StudentMistakeRetryList> {
+  return apiRequest<StudentMistakeRetryList>(
+    '/v1/student/exercises/mistakes/retry-lists',
+    {
+      method: 'POST',
+      body: {
+        answerIds,
+        title,
+      },
+    },
+  )
+}
