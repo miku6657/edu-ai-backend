@@ -7,6 +7,7 @@ import com.edu.ai.document.dto.DocumentVO;
 import com.edu.ai.document.entity.CourseDocument;
 import com.edu.ai.document.mapper.CourseDocumentMapper;
 import com.edu.ai.document.service.CourseIndexLease;
+import com.edu.ai.document.service.DocumentAccessTrackingService;
 import com.edu.ai.document.service.DocumentService;
 import com.edu.ai.document.service.DocumentIndexTask;
 import com.edu.ai.document.service.DocumentLifecycleService;
@@ -36,6 +37,7 @@ public class DocumentController {
     private final CourseIndexLease courseIndexLease;
     private final CourseDocumentMapper documentMapper;
     private final CoursePermissionService permissions;
+    private final DocumentAccessTrackingService accessTrackingService;
 
     @Value("${ai.document.version-upload-enabled:false}")
     private boolean versionUploadEnabled;
@@ -46,7 +48,8 @@ public class DocumentController {
             DocumentLifecycleService lifecycleService,
             CourseIndexLease courseIndexLease,
             CourseDocumentMapper documentMapper,
-            CoursePermissionService permissions) {
+            CoursePermissionService permissions,
+            DocumentAccessTrackingService accessTrackingService) {
 
         this.documentService = documentService;
         this.indexTask = indexTask;
@@ -54,6 +57,7 @@ public class DocumentController {
         this.courseIndexLease = courseIndexLease;
         this.documentMapper = documentMapper;
         this.permissions = permissions;
+        this.accessTrackingService = accessTrackingService;
     }
 
     // 上传课件
@@ -243,11 +247,19 @@ public class DocumentController {
             @PathVariable Long documentId,
             Authentication authentication) {
 
+        Long userId = getUserId(authentication);
+
         DocumentService.DownloadFile file =
                 documentService.download(
                         documentId,
-                        getUserId(authentication)
+                        userId
                 );
+
+        accessTrackingService.recordStudentAccess(
+                documentId,
+                userId,
+                "DOWNLOAD"
+        );
 
         ContentDisposition disposition =
                 ContentDisposition.attachment()
@@ -272,11 +284,19 @@ public class DocumentController {
             @PathVariable Long documentId,
             Authentication authentication) {
 
+        Long userId = getUserId(authentication);
+
         DocumentService.DownloadFile file =
                 documentService.download(
                         documentId,
-                        getUserId(authentication)
+                        userId
                 );
+
+        accessTrackingService.recordStudentAccess(
+                documentId,
+                userId,
+                "PREVIEW"
+        );
 
         ContentDisposition disposition =
                 ContentDisposition.inline()
