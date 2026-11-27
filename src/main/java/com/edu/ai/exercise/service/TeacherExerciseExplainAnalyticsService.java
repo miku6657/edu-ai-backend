@@ -166,7 +166,7 @@ public class TeacherExerciseExplainAnalyticsService {
 
                 ORDER BY
                     session_count DESC,
-                    question_count DESC,
+                    request_count DESC,
                     latest_activity_at DESC
 
                 """,
@@ -246,7 +246,7 @@ public class TeacherExerciseExplainAnalyticsService {
 
                 ORDER BY
                     session_count DESC,
-                    question_count DESC,
+                    request_count DESC,
                     latest_activity_at DESC
 
                 LIMIT ?
