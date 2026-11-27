@@ -91,6 +91,9 @@ const previewPage = ref<number | null>(null)
 
 let controller: AbortController | null = null
 
+// 防止窗口关闭后，初始化流程继续发起 AI 请求
+let openSequence = 0
+
 const canSend = computed(() =>
   followupInput.value.trim().length > 0
   && followupInput.value.trim().length <= 2000
@@ -170,7 +173,10 @@ function mapHistory(
     }))
 }
 
-async function loadSession(): Promise<void> {
+async function loadSession(
+  sequence: number,
+): Promise<void> {
+
   if (initializing.value) return
 
   initializing.value = true
@@ -181,15 +187,22 @@ async function loadSession(): Promise<void> {
       props.mistake.questionId,
     )
 
+    if (!visible.value || sequence !== openSequence) {
+      return
+    }
+
     sessionId.value = session.sessionId
 
     const history = await listSessionMessages(
       session.sessionId,
     )
 
+    if (!visible.value || sequence !== openSequence) {
+      return
+    }
+
     messages.value = mapHistory(history)
 
-    // 第一次进入该题的讲解页面，自动生成初始讲解。
     if (messages.value.length === 0) {
       await sendQuestion(
         buildInitialPrompt(),
@@ -198,9 +211,13 @@ async function loadSession(): Promise<void> {
     }
 
   } catch (error) {
-    notifyError(error)
+    if (visible.value && sequence === openSequence) {
+      notifyError(error)
+    }
   } finally {
-    initializing.value = false
+    if (sequence === openSequence) {
+      initializing.value = false
+    }
   }
 }
 
@@ -209,7 +226,9 @@ async function openExplain(): Promise<void> {
 
   visible.value = true
 
-  await loadSession()
+  const sequence = ++openSequence
+
+  await loadSession(sequence)
 }
 
 async function sendFollowup(): Promise<void> {
@@ -375,6 +394,8 @@ function openCitationByIndex(
 
 watch(visible, (value) => {
   if (!value) {
+    openSequence++
+    initializing.value = false
     stopExplain()
   }
 })

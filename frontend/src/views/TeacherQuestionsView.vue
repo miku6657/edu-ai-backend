@@ -14,6 +14,12 @@ import type {
   QuestionAnalyticsSummary,
   TeacherQuestionRecord,
 } from '@/api/teacher-questions'
+import {
+  getTeacherExerciseExplainAnalytics,
+} from '@/api/teacher-exercise-explanations'
+import type {
+  TeacherExerciseExplainAnalytics,
+} from '@/api/teacher-exercise-explanations'
 import { listAccessibleCourses } from '@/api/course-access'
 import type { Course } from '@/api/course'
 import { listKnowledgePoints } from '@/api/learning-path'
@@ -41,6 +47,9 @@ const keyword = ref('')
 const studentKeyword = ref('')
 const dateRange = ref<[string, string] | null>(null)
 const summary = ref<QuestionAnalyticsSummary | null>(null)
+// F5-04 AI 错题讲解统计
+const explainAnalytics =
+  ref<TeacherExerciseExplainAnalytics | null>(null)
 const hotQuestions = ref<HotQuestion[]>([])
 const pointStats = ref<KnowledgePointQuestionStat[]>([])
 const records = ref<TeacherQuestionRecord[]>([])
@@ -129,6 +138,7 @@ async function loadAnalytics(): Promise<void> {
     pointStats.value = []
     records.value = []
     total.value = 0
+    explainAnalytics.value = null
     return
   }
 
@@ -164,6 +174,25 @@ async function loadAnalytics(): Promise<void> {
     pointStats.value = pointResult
     records.value = recordResult.items
     total.value = recordResult.total
+
+    // F5-04：单独加载 AI 错题讲解统计。
+    // 即使统计接口失败，也不影响原有问答分析。
+    try {
+      const explainResult =
+        await getTeacherExerciseExplainAnalytics(
+          courseId,
+          dates,
+        )
+
+      if (courseId === selectedCourseId.value) {
+        explainAnalytics.value = explainResult
+      }
+    } catch (error) {
+      if (courseId === selectedCourseId.value) {
+        explainAnalytics.value = null
+        notifyError(error)
+      }
+    }
   } catch (error) {
     if (courseId === selectedCourseId.value) {
       notifyError(error)
@@ -272,6 +301,7 @@ watch(selectedCourseId, () => {
   pointStats.value = []
   records.value = []
   total.value = 0
+  explainAnalytics.value = null
   selectedRecord.value = null
   detailVisible.value = false
 })
@@ -434,6 +464,152 @@ onMounted(async () => {
             </el-card>
           </el-col>
         </el-row>
+
+        <!-- F5-04 AI 错题讲解分析 -->
+        <BaseCard
+          title="AI 错题讲解分析"
+          subtitle="了解学生在哪些知识点上需要更多 AI 辅助学习"
+        >
+          <template v-if="explainAnalytics">
+
+            <el-row
+              :gutter="12"
+              class="question-stat-cards"
+            >
+              <el-col :xs="12" :sm="6">
+                <el-card shadow="never">
+                  <el-statistic
+                    title="讲解会话数"
+                    :value="explainAnalytics.sessionCount"
+                  />
+                </el-card>
+              </el-col>
+
+              <el-col :xs="12" :sm="6">
+                <el-card shadow="never">
+                  <el-statistic
+                    title="参与学生"
+                    :value="explainAnalytics.studentCount"
+                  />
+                </el-card>
+              </el-col>
+
+              <el-col :xs="12" :sm="6">
+                <el-card shadow="never">
+                  <el-statistic
+                    title="涉及题目"
+                    :value="explainAnalytics.questionCount"
+                  />
+                </el-card>
+              </el-col>
+
+              <el-col :xs="12" :sm="6">
+                <el-card shadow="never">
+                  <el-statistic
+                    title="提问轮次"
+                    :value="explainAnalytics.requestCount"
+                  />
+                </el-card>
+              </el-col>
+
+              <el-col :xs="12" :sm="6">
+                <el-card shadow="never">
+                  <el-statistic
+                    title="学生追问次数"
+                    :value="explainAnalytics.followUpCount"
+                  />
+                </el-card>
+              </el-col>
+            </el-row>
+
+            <el-row :gutter="16">
+              <el-col :xs="24" :lg="12">
+                <div class="explain-analytics-table">
+                  <h4>学生 AI 讲解需求较高的知识点</h4>
+
+                  <el-table
+                    :data="explainAnalytics.knowledgePoints"
+                    size="small"
+                    empty-text="暂无知识点讲解记录"
+                  >
+                    <el-table-column
+                      prop="title"
+                      label="知识点"
+                      min-width="150"
+                    />
+                    <el-table-column
+                      prop="sessionCount"
+                      label="会话数"
+                      width="80"
+                    />
+                    <el-table-column
+                      prop="studentCount"
+                      label="学生数"
+                      width="80"
+                    />
+                    <el-table-column
+                      prop="requestCount"
+                      label="提问次数"
+                      width="90"
+                    />
+                  </el-table>
+                </div>
+              </el-col>
+
+              <el-col :xs="24" :lg="12">
+                <div class="explain-analytics-table">
+                  <h4>学生请求讲解较多的题目</h4>
+
+                  <el-table
+                    :data="explainAnalytics.hotQuestions"
+                    size="small"
+                    empty-text="暂无错题讲解记录"
+                  >
+                    <el-table-column
+                      prop="stem"
+                      label="题目"
+                      min-width="200"
+                      show-overflow-tooltip
+                    />
+                    <el-table-column
+                      prop="knowledgePointTitle"
+                      label="知识点"
+                      min-width="110"
+                    />
+                    <el-table-column
+                      prop="sessionCount"
+                      label="会话数"
+                      width="80"
+                    />
+                    <el-table-column
+                      prop="studentCount"
+                      label="学生数"
+                      width="80"
+                    />
+                    <el-table-column
+                      prop="requestCount"
+                      label="提问次数"
+                      width="90"
+                    />
+                  </el-table>
+                </div>
+              </el-col>
+            </el-row>
+
+            <p
+              v-if="explainAnalytics.latestActivityAt"
+              class="explain-analytics-time"
+            >
+              最近讲解时间：{{ explainAnalytics.latestActivityAt }}
+            </p>
+
+          </template>
+
+          <el-empty
+            v-else
+            description="暂无 AI 错题讲解统计数据"
+          />
+        </BaseCard>
 
         <el-row :gutter="16">
           <el-col :xs="24" :lg="12">
@@ -706,6 +882,24 @@ onMounted(async () => {
 
 .question-stat-cards {
   row-gap: 12px;
+}
+
+.explain-analytics-table {
+  margin-top: 18px;
+  min-width: 0;
+}
+
+.explain-analytics-table h4 {
+  margin: 0 0 12px;
+  color: var(--sc-text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.explain-analytics-time {
+  margin: 14px 0 0;
+  color: var(--sc-text-secondary);
+  font-size: 12px;
 }
 
 .question-pagination {
