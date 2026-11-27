@@ -18,11 +18,13 @@ import StudentExerciseDetailView from '@/views/StudentExerciseDetailView.vue'
 import StudentExerciseResultView from '@/views/StudentExerciseResultView.vue'
 import StudentExercisesView from '@/views/StudentExercisesView.vue'
 import StudentLearningAnalysisView from '@/views/StudentLearningAnalysisView.vue'
+import StudentLearningReportsView from '@/views/StudentLearningReportsView.vue'
 import StudentMistakesView from '@/views/StudentMistakesView.vue'
 import StudentRetryListsView from '@/views/StudentRetryListsView.vue'
 import StudentRetryDetailView from '@/views/StudentRetryDetailView.vue'
 import StudentRetryResultView from '@/views/StudentRetryResultView.vue'
 import StudentRetryProgressView from '@/views/StudentRetryProgressView.vue'
+import TeacherLearningReportsView from '@/views/TeacherLearningReportsView.vue'
 import TeacherQuestionsView from '@/views/TeacherQuestionsView.vue'
 
 /**
@@ -93,6 +95,15 @@ const routes: RouteRecordRaw[] = [
         },
       },
       {
+        path: 'teacher-learning-reports',
+        name: 'teacher-learning-reports',
+        component: TeacherLearningReportsView,
+        meta: {
+          title: '课程学习报告',
+          requiresAuth: true,
+        },
+      },
+      {
         path: 'ddl',
         name: 'ddl',
         component: DdlView,
@@ -128,6 +139,15 @@ const routes: RouteRecordRaw[] = [
         component: StudentLearningAnalysisView,
         meta: {
           title: '学习分析',
+          requiresAuth: true,
+        },
+      },
+      {
+        path: 'my-learning-reports',
+        name: 'student-learning-reports',
+        component: StudentLearningReportsView,
+        meta: {
+          title: '阶段学习报告',
           requiresAuth: true,
         },
       },

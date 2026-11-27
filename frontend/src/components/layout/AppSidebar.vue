@@ -9,6 +9,7 @@ import {
   ChartLine,
   ClipboardList,
   CircleHelp,
+  FileText,
   Home,
   Library,
   LogIn,
@@ -89,6 +90,12 @@ const primaryNav = computed<NavEntry[]>(() => {
       icon: ClipboardList,
       routeName: 'exercise-reviews',
     })
+    entries.push({
+      key: 'teacher-learning-reports',
+      label: '课程学习报告',
+      icon: FileText,
+      routeName: 'teacher-learning-reports',
+    })
   }
   if (auth.isStudent) {
     entries.push({
@@ -102,6 +109,12 @@ const primaryNav = computed<NavEntry[]>(() => {
       label: '学习分析',
       icon: ChartLine,
       routeName: 'student-learning-analysis',
+    })
+    entries.push({
+      key: 'student-learning-reports',
+      label: '阶段学习报告',
+      icon: FileText,
+      routeName: 'student-learning-reports',
     })
     entries.push({
       key: 'my-mistakes',

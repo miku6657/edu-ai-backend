@@ -27,6 +27,7 @@ export function installAuthGuard(target: Router): void {
       'student-exercise-detail',
       'student-exercise-result',
       'student-learning-analysis',
+      'student-learning-reports',
       'my-mistakes',
       'my-retry-lists',
       'my-retry-progress',
@@ -40,6 +41,14 @@ export function installAuthGuard(target: Router): void {
 
     if (
       to.name === 'exercise-reviews'
+      && !auth.isTeacher
+      && !auth.isAdmin
+    ) {
+      return { name: 'home' }
+    }
+
+    if (
+      to.name === 'teacher-learning-reports'
       && !auth.isTeacher
       && !auth.isAdmin
     ) {

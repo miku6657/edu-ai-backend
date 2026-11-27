@@ -37,6 +37,14 @@ const PAGE_META: Record<string, { title: string; subtitle?: string }> = {
     title: '学习分析',
     subtitle: '汇总练习、提问和课程任务完成情况',
   },
+  'student-learning-reports': {
+    title: '阶段学习报告',
+    subtitle: '查看学习总结、薄弱知识点和教师指导意见',
+  },
+  'teacher-learning-reports': {
+    title: '课程学习报告',
+    subtitle: '分析学生阶段学习表现并提供针对性指导',
+  },
   'my-mistakes': {
     title: '错题回顾',
     subtitle: '按照课程知识点归集错题，巩固薄弱知识',
