@@ -32,6 +32,12 @@ public record StudentRetryResultVO(
 
             String questionId,
 
+            String courseId,
+
+            String courseName,
+
+            String knowledgePointTitle,
+
             String questionType,
 
             String stem,

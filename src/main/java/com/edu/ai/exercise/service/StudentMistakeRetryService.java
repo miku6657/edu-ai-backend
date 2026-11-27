@@ -956,13 +956,22 @@ public class StudentMistakeRetryService {
                         SELECT
                             aa.retry_item_id,
                             aa.question_id,
+
+                            c.id AS course_id,
+                            c.name AS course_name,
+
+                            kp.title AS knowledge_point_title,
+
                             q.question_type,
                             q.stem,
+
                             aa.student_answer,
                             aa.is_correct,
+
                             q.correct_answer,
                             q.explanation,
                             q.score,
+
                             aa.score_earned,
                             aa.self_review_understood,
                             aa.pending_self_review
@@ -971,6 +980,16 @@ public class StudentMistakeRetryService {
 
                         JOIN course_exercise_question q
                           ON q.id = aa.question_id
+
+                        JOIN course_exercise e
+                          ON e.id = q.exercise_id
+
+                        JOIN course c
+                          ON c.id = e.course_id
+
+                        LEFT JOIN course_knowledge_point kp
+                          ON kp.id = q.knowledge_point_id
+                         AND kp.course_id = c.id
 
                         WHERE aa.attempt_id = ?
 
@@ -997,6 +1016,11 @@ public class StudentMistakeRetryService {
                             return new StudentRetryResultVO.AnswerResult(
                                     rs.getString("retry_item_id"),
                                     rs.getString("question_id"),
+
+                                    rs.getString("course_id"),
+                                    rs.getString("course_name"),
+                                    rs.getString("knowledge_point_title"),
+
                                     rs.getString("question_type"),
                                     rs.getString("stem"),
                                     rs.getString("student_answer"),
