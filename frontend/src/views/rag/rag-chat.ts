@@ -72,7 +72,7 @@ export function historyToUiMessages(items: ChatHistoryMessage[]): UiMessage[] {
         role: item.role === 'USER' ? 'USER' : 'ASSISTANT',
         content: rejected ? '' : parts.main,
         supplement: parts.supplement,
-        citations: item.citations,
+        citations: rejected ? null : item.citations,
         isRejected: rejected,
         noticeText: rejected && parts.main !== '' ? parts.main : null,
         interrupted: false,
