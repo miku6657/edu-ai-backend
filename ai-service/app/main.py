@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from .chat_service import create_chat_client
 from .config import AI_INTERNAL_KEY, PDF_STORAGE_DIR
+from .document_summary_service import generate_document_summary
 from .embedding_migration import migrate_course
 from .embedding_service import create_embedding_client, embed_texts
 from .pdf_merger import merge_pdf_files
@@ -110,6 +111,47 @@ class IndexRequest(BaseModel):
     )
 
 
+class SummaryChunk(BaseModel):
+    page: int = Field(
+        ge=1,
+        le=10000,
+    )
+    chunk_index: int = Field(
+        ge=0,
+    )
+    section_title: str | None = Field(
+        default=None,
+        max_length=500,
+    )
+    text: str = Field(
+        min_length=1,
+        max_length=6000,
+    )
+
+
+class DocumentSummaryRequest(BaseModel):
+    document_title: str = Field(
+        min_length=1,
+        max_length=255,
+    )
+    model: str = Field(
+        min_length=1,
+        max_length=100,
+    )
+    api_key: str = Field(
+        default="",
+        max_length=1000,
+    )
+    base_url: str = Field(
+        min_length=1,
+        max_length=500,
+    )
+    chunks: list[SummaryChunk] = Field(
+        min_length=1,
+        max_length=2000,
+    )
+
+
 class MergePdfRequest(BaseModel):
     storage_names: list[str] = Field(
         min_length=2,
@@ -174,6 +216,57 @@ class ChatRequest(BaseModel):
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.post(
+    "/internal/documents/summary/generate",
+    dependencies=[Depends(require_internal)],
+)
+def internal_generate_document_summary(
+    request: DocumentSummaryRequest,
+):
+    total_chars = sum(
+        len(item.text)
+        for item in request.chunks
+    )
+    if total_chars > 60000:
+        raise HTTPException(
+            status_code=413,
+            detail="资料正文超过60000字符，请按章节拆分",
+        )
+    chunks = [
+        {
+            "page": item.page,
+            "chunk_index": item.chunk_index,
+            "section_title": item.section_title,
+            "text": item.text,
+        }
+        for item in request.chunks
+    ]
+    try:
+        result = generate_document_summary(
+            document_title=request.document_title,
+            chunks=chunks,
+            model=request.model,
+            api_key=request.api_key,
+            base_url=request.base_url,
+        )
+        return result
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc),
+        )
+    except Exception as exc:
+        logger.error(
+            "文档摘要生成失败，model=%s，error_type=%s",
+            request.model,
+            type(exc).__name__,
+        )
+        raise HTTPException(
+            status_code=502,
+            detail="AI摘要生成失败，请检查模型配置或稍后重试",
+        )
 
 
 class ModelProbeRequest(BaseModel):
