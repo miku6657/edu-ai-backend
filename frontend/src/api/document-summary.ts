@@ -71,6 +71,28 @@ export function generateDocumentSummary(
 }
 
 /**
+ * 保存人工编辑后的待确认摘要。
+ */
+export function updateDocumentSummary(
+  courseId: BigIntId,
+  documentId: BigIntId,
+  summaryId: BigIntId,
+  data: {
+    summary: string
+    outline: DocumentSummaryOutlineItem[]
+  },
+): Promise<DocumentSummary> {
+
+  return apiRequest<DocumentSummary>(
+    `${summaryUrl(courseId, documentId)}/${encodeURIComponent(summaryId)}`,
+    {
+      method: 'PUT',
+      body: data,
+    },
+  )
+}
+
+/**
  * 确认并发布资料摘要。
  */
 export function confirmDocumentSummary(
