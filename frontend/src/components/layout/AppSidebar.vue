@@ -110,6 +110,14 @@ const primaryNav = computed<NavEntry[]>(() => {
     })
   }
   if (auth.isAdmin) {
+
+    entries.push({
+      key: 'admin-content-operation-overview',
+      label: '内容运营统计',
+      icon: ChartLine,
+      routeName: 'admin-content-operation-overview',
+    })
+
     entries.push({
       key: 'admin-content-operation-logs',
       label: '内容运营日志',

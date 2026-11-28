@@ -3,6 +3,7 @@ import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import AppLayout from '@/layouts/AppLayout.vue'
 import { installAuthGuard } from '@/router/guard'
 import AdminContentOperationLogsView from '@/views/AdminContentOperationLogsView.vue'
+import AdminContentOperationOverviewView from '@/views/AdminContentOperationOverviewView.vue'
 import CoursesView from '@/views/CoursesView.vue'
 import CourseHotQuestionsView from '@/views/CourseHotQuestionsView.vue'
 import DdlView from '@/views/DdlView.vue'
@@ -247,6 +248,15 @@ const routes: RouteRecordRaw[] = [
         component: AdminContentOperationLogsView,
         meta: {
           title: '内容运营日志',
+          requiresAuth: true,
+        },
+      },
+      {
+        path: 'admin/content-operation-overview',
+        name: 'admin-content-operation-overview',
+        component: AdminContentOperationOverviewView,
+        meta: {
+          title: '内容运营统计',
           requiresAuth: true,
         },
       },

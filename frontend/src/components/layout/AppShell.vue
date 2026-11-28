@@ -81,6 +81,18 @@ const PAGE_META: Record<string, { title: string; subtitle?: string }> = {
     title: '练习批改',
     subtitle: '查看学生提交的简答题，完成评分与反馈',
   },
+  'admin-content-operation-overview': {
+    title: '内容运营统计',
+    subtitle: '统一查看资料质量、使用趋势和运营情况',
+  },
+  'admin-content-operation-logs': {
+    title: '内容运营日志',
+    subtitle: '查询课程内容运营关键操作及变更记录',
+  },
+  'course-hot-questions': {
+    title: '课程热门问题',
+    subtitle: '整理、审核和查看课程标准问答',
+  },
   settings: { title: '设置', subtitle: '模型配置、偏好与账号安全' },
   guide: { title: '使用指南', subtitle: '功能说明、模型配置与常见问题' },
   login: { title: '登录', subtitle: '登录后开始使用 ScholarClaw' },

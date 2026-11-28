@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 
+import { useRoute } from 'vue-router'
+
 import {
   listContentOperationLogs,
 } from '@/api/content-operation-logs'
@@ -19,6 +21,8 @@ import { useAuthStore } from '@/stores/auth'
 import { notifyError } from '@/utils/notify'
 
 const auth = useAuthStore()
+
+const route = useRoute()
 
 const loading = ref(false)
 
@@ -232,6 +236,16 @@ function handleSizeChange(value: number): void {
 }
 
 onMounted(() => {
+
+  const requestedCourseId =
+    typeof route.query.courseId === 'string'
+      ? route.query.courseId
+      : ''
+
+  if (/^[1-9]\d*$/.test(requestedCourseId)) {
+
+    filters.courseId = requestedCourseId
+  }
 
   void loadLogs()
 

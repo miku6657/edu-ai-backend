@@ -68,7 +68,10 @@ export function installAuthGuard(target: Router): void {
     }
 
     if (
-      to.name === 'admin-content-operation-logs'
+      [
+        'admin-content-operation-logs',
+        'admin-content-operation-overview',
+      ].includes(String(to.name))
       && !auth.isAdmin
     ) {
       return { name: 'home' }
