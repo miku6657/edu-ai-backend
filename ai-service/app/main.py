@@ -237,10 +237,13 @@ def internal_generate_document_summary(
         len(item.text)
         for item in request.chunks
     )
-    if total_chars > 60000:
+    if total_chars > 1_000_000:
         raise HTTPException(
             status_code=413,
-            detail="资料正文超过60000字符，请按章节拆分",
+            detail=(
+                "资料正文超过1000000字符的单次处理上限，"
+                "请拆分资料或分册上传"
+            ),
         )
     chunks = [
         {

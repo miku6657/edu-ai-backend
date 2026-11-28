@@ -1377,6 +1377,26 @@ public class DocumentQualityService {
             throw conflict("当前资料已有进行中的质量检查任务");
         }
 
+        // 同一资料版本只允许建立一次自动质量检查任务。
+        long sameVersionTasks = count(
+                """
+                SELECT COUNT(*)
+                FROM course_document_quality_task
+                WHERE course_id = ?
+                  AND document_id = ?
+                  AND version_no = ?
+                """,
+                courseId,
+                documentId,
+                document.getVersionNo()
+        );
+
+        if (sameVersionTasks > 0) {
+            throw conflict(
+                    "当前资料版本已经执行过质量检查，无需重复创建任务"
+            );
+        }
+
         List<Map<String, Object>> chunks =
                 jdbc.queryForList(
                         """

@@ -181,6 +181,204 @@ public class DocumentSummaryPersistenceService {
         return findById(summaryId);
     }
 
+    @Transactional(rollbackFor = Exception.class)
+    public DocumentSummaryVO updateDraft(
+            Long courseId,
+            Long documentId,
+            Long summaryId,
+            Long userId,
+            String summary,
+            JsonNode outline) {
+
+        lockDocument(courseId, documentId);
+
+        CourseDocument document =
+                requireCurrentDocument(courseId, documentId);
+
+        SummaryRow row = findRow(
+                courseId,
+                documentId,
+                summaryId
+        );
+
+        if (row == null) {
+            throw new BusinessException(
+                    404,
+                    "摘要记录不存在"
+            );
+        }
+
+        if (!"DRAFT".equals(row.status())) {
+            throw new BusinessException(
+                    409,
+                    "只有待确认摘要允许人工编辑"
+            );
+        }
+
+        List<DocumentSummarySourceReader.SourceChunk> chunks =
+                sourceReader.read(courseId, documentId);
+
+        String currentFingerprint =
+                sourceReader.fingerprint(chunks);
+
+        if (!currentFingerprint.equals(row.fingerprint())) {
+            throw new BusinessException(
+                    409,
+                    "资料内容已经发生变化，请重新生成摘要后再编辑"
+            );
+        }
+
+        String normalizedSummary =
+                summary == null ? "" : summary.trim();
+
+        if (normalizedSummary.isBlank()
+                || normalizedSummary.length() > 10000) {
+            throw new BusinessException(
+                    400,
+                    "摘要内容不能为空且不能超过10000个字符"
+            );
+        }
+
+        validateOutline(outline);
+
+        int updated = jdbc.update(
+                """
+                UPDATE course_document_summary
+
+                SET summary = ?,
+                    outline_json = ?,
+                    update_time = NOW()
+
+                WHERE id = ?
+                  AND course_id = ?
+                  AND document_id = ?
+                  AND status = 'DRAFT'
+                """,
+                normalizedSummary,
+                outline.toString(),
+                summaryId,
+                courseId,
+                documentId
+        );
+
+        if (updated != 1) {
+            throw new BusinessException(
+                    409,
+                    "摘要状态已经变化，请刷新后重试"
+            );
+        }
+
+        operationLogService.write(
+                courseId,
+                documentId,
+                userId,
+                "DOCUMENT_SUMMARY_EDIT",
+                "人工编辑课程资料摘要",
+                "人工修改资料《"
+                        + document.getOriginalName()
+                        + "》的待确认摘要",
+                "status=DRAFT",
+                "status=DRAFT, edited=true"
+        );
+
+        return findById(summaryId);
+    }
+
+    private void validateOutline(JsonNode outline) {
+
+        if (outline == null
+                || !outline.isArray()
+                || outline.isEmpty()
+                || outline.size() > 30) {
+
+            throw new BusinessException(
+                    400,
+                    "章节大纲必须包含1至30项"
+            );
+        }
+
+        for (JsonNode item : outline) {
+
+            if (!item.isObject()) {
+                throw new BusinessException(
+                        400,
+                        "章节大纲格式不正确"
+                );
+            }
+
+            JsonNode title = item.get("title");
+
+            if (title == null
+                    || !title.isTextual()
+                    || title.asString().isBlank()
+                    || title.asString().length() > 200) {
+
+                throw new BusinessException(
+                        400,
+                        "章节大纲中的标题不能为空且不能超过200个字符"
+                );
+            }
+
+            JsonNode page = item.get("page");
+
+            if (page != null
+                    && !page.isNull()
+                    && (!page.isIntegralNumber()
+                    || !page.canConvertToInt()
+                    || page.asInt() <= 0
+                    || page.asInt() > 10000)) {
+
+                throw new BusinessException(
+                        400,
+                        "章节页码必须为正整数或null"
+                );
+            }
+
+            JsonNode description = item.get("description");
+
+            if (description != null
+                    && (!description.isTextual()
+                    || description.asString().length() > 1000)) {
+
+                throw new BusinessException(
+                        400,
+                        "章节描述不能超过1000个字符"
+                );
+            }
+
+            JsonNode keyPoints = item.get("keyPoints");
+
+            if (keyPoints != null && !keyPoints.isArray()) {
+                throw new BusinessException(
+                        400,
+                        "章节知识点必须为数组"
+                );
+            }
+
+            if (keyPoints != null && keyPoints.size() > 5) {
+                throw new BusinessException(
+                        400,
+                        "每个章节最多填写5个核心知识点"
+                );
+            }
+
+            if (keyPoints != null) {
+
+                for (JsonNode point : keyPoints) {
+
+                    if (!point.isTextual()
+                            || point.asString().length() > 300) {
+
+                        throw new BusinessException(
+                                400,
+                                "核心知识点必须为不超过300个字符的文本"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     /**
      * 确认AI生成的摘要。
      */

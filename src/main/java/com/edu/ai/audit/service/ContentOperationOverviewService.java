@@ -180,12 +180,21 @@ public class ContentOperationOverviewService {
         String sql = """
                 SELECT
 
-                    COUNT(*) AS published_count,
+                    COUNT(
+                        CASE
+                            WHEN d.quality_status = 'NORMAL'
+                             AND (
+                                 d.valid_until IS NULL
+                                 OR d.valid_until >= ?
+                             )
+                            THEN 1
+                        END
+                    ) AS published_count,
 
                     COUNT(
                         CASE
-                            WHEN d.valid_until >= ?
-
+                            WHEN d.quality_status = 'NORMAL'
+                             AND d.valid_until >= ?
                              AND DATEDIFF(
                                  d.valid_until,
                                  ?
@@ -193,7 +202,6 @@ public class ContentOperationOverviewService {
                                  d.expiry_remind_days,
                                  7
                              )
-
                             THEN 1
                         END
                     ) AS expiring_count,
@@ -214,16 +222,18 @@ public class ContentOperationOverviewService {
 
                     COUNT(
                         CASE
-                            WHEN EXISTS (
-                                SELECT 1
-                                FROM course_document_summary s
-
-                                WHERE s.document_id = d.id
-
-                                  AND s.course_id = d.course_id
-
-                                  AND s.status = 'CONFIRMED'
-                            )
+                            WHEN d.quality_status = 'NORMAL'
+                             AND (
+                                 d.valid_until IS NULL
+                                 OR d.valid_until >= ?
+                             )
+                             AND EXISTS (
+                                 SELECT 1
+                                 FROM course_document_summary s
+                                 WHERE s.document_id = d.id
+                                   AND s.course_id = d.course_id
+                                   AND s.status = 'CONFIRMED'
+                             )
                             THEN 1
                         END
                     ) AS confirmed_summary_count
@@ -231,14 +241,14 @@ public class ContentOperationOverviewService {
                 FROM course_document d
 
                 WHERE d.status = 'READY'
-
                   AND d.version_status = 'CURRENT'
-
                   AND d.review_status = 'APPROVED'
                 """;
 
         List<Object> args = new ArrayList<>();
 
+        args.add(today);
+        args.add(today);
         args.add(today);
         args.add(today);
         args.add(today);
@@ -516,9 +526,14 @@ public class ContentOperationOverviewService {
         String sql = """
                 SELECT
 
-                    COUNT(*) AS exposure_count,
+                    COUNT(DISTINCT exposure.id) AS exposure_count,
 
-                    COUNT(click.id) AS click_count
+                    COUNT(
+                        DISTINCT CASE
+                            WHEN click.id IS NOT NULL
+                            THEN exposure.id
+                        END
+                    ) AS click_count
 
                 FROM course_exercise_recommendation_event exposure
 
@@ -776,9 +791,14 @@ public class ContentOperationOverviewService {
 
                     DATE(exposure.event_at) AS stat_date,
 
-                    COUNT(*) AS exposures,
+                    COUNT(DISTINCT exposure.id) AS exposures,
 
-                    COUNT(click.id) AS clicks
+                    COUNT(
+                        DISTINCT CASE
+                            WHEN click.id IS NOT NULL
+                            THEN exposure.id
+                        END
+                    ) AS clicks
 
                 FROM course_exercise_recommendation_event exposure
 

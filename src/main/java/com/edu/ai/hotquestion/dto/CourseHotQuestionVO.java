@@ -36,6 +36,8 @@ public record CourseHotQuestionVO(
 
         LocalDateTime createdAt,
 
+        LocalDateTime updatedAt,
+
         LocalDateTime submittedAt,
 
         LocalDateTime reviewedAt,

@@ -10,6 +10,8 @@ import com.edu.ai.system.service.UserModelResolver.UserModelConfig;
 
 import org.springframework.stereotype.Service;
 
+import tools.jackson.databind.JsonNode;
+
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.List;
@@ -20,7 +22,9 @@ public class DocumentSummaryService {
     private static final ZoneId APP_ZONE =
             ZoneId.of("Asia/Shanghai");
 
-    private static final int MAX_SOURCE_CHARS = 60000;
+    private static final int MAX_SOURCE_CHARS = 1_000_000;
+
+    private static final int MAX_SOURCE_CHUNKS = 2000;
 
     private final CoursePermissionService permissions;
 
@@ -76,10 +80,16 @@ public class DocumentSummaryService {
                 );
 
         if (chunks.isEmpty()) {
-
             throw new BusinessException(
                     409,
                     "当前资料没有知识切片，请先完成PDF解析"
+            );
+        }
+
+        if (chunks.size() > MAX_SOURCE_CHUNKS) {
+            throw new BusinessException(
+                    413,
+                    "资料切片数量超过2000条，请拆分资料或分册上传"
             );
         }
 
@@ -87,17 +97,15 @@ public class DocumentSummaryService {
                 sourceReader.totalCharacters(chunks);
 
         if (totalChars > MAX_SOURCE_CHARS) {
-
             throw new BusinessException(
                     413,
-                    "资料正文超过60000字符，暂不支持一次性生成摘要"
+                    "资料正文超过1000000字符的单次处理上限，请拆分资料或分册上传"
             );
         }
 
         String fingerprint =
                 sourceReader.fingerprint(chunks);
 
-        // 仅获取Chat模型，不需要Embedding配置。
         UserModelConfig model =
                 modelResolver.resolveChatModel(userId);
 
@@ -165,6 +173,32 @@ public class DocumentSummaryService {
                 courseId,
                 documentId,
                 canManage
+        );
+    }
+
+    /**
+     * 人工编辑待确认摘要。
+     */
+    public DocumentSummaryVO updateDraft(
+            Long courseId,
+            Long documentId,
+            Long summaryId,
+            Long userId,
+            String summary,
+            JsonNode outline) {
+
+        permissions.requireManage(
+                courseId,
+                userId
+        );
+
+        return persistence.updateDraft(
+                courseId,
+                documentId,
+                summaryId,
+                userId,
+                summary,
+                outline
         );
     }
 

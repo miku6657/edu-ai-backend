@@ -9,6 +9,8 @@ import com.edu.ai.hotquestion.dto.CourseHotQuestionReviewRequest;
 import com.edu.ai.hotquestion.dto.CourseHotQuestionUpdateRequest;
 import com.edu.ai.hotquestion.dto.CourseHotQuestionVO;
 
+import com.edu.ai.notification.service.NotificationService;
+
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -34,6 +36,8 @@ public class CourseHotQuestionService {
 
     private final ContentOperationLogService operationLog;
 
+    private final NotificationService notifications;
+
     private static final Set<String> STATUSES = Set.of(
             "DRAFT",
             "PENDING_REVIEW",
@@ -50,17 +54,22 @@ public class CourseHotQuestionService {
     private record BasicRow(
             Long id,
             Long courseId,
-            String status
+            String status,
+            Long createdBy,
+            String questionText,
+            String sourceHash
     ) {}
 
     public CourseHotQuestionService(
             JdbcTemplate jdbc,
             CoursePermissionService permissions,
-            ContentOperationLogService operationLog) {
+            ContentOperationLogService operationLog,
+            NotificationService notifications) {
 
         this.jdbc = jdbc;
         this.permissions = permissions;
         this.operationLog = operationLog;
+        this.notifications = notifications;
     }
 
     // =====================================================
@@ -112,6 +121,7 @@ public class CourseHotQuestionService {
                     h.reviewed_by,
                     h.review_comment,
                     h.created_at,
+                    h.updated_at,
                     h.submitted_at,
                     h.reviewed_at,
                     h.published_at,
@@ -283,6 +293,8 @@ public class CourseHotQuestionService {
 
         permissions.requireManage(courseId, userId);
 
+        lockCourseForWrite(courseId);
+
         String sourceQuestion =
                 requiredText(
                         request.sourceQuestionText(),
@@ -443,6 +455,8 @@ public class CourseHotQuestionService {
                 userId
         );
 
+        lockCourseForWrite(basic.courseId());
+
         BasicRow row = lockBasic(id);
 
         if (!Set.of(
@@ -478,6 +492,30 @@ public class CourseHotQuestionService {
                 row.courseId(),
                 request.knowledgePointId()
         );
+
+        Long activeDuplicateCount = jdbc.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM course_hot_question
+                WHERE course_id = ?
+                  AND source_question_hash = ?
+                  AND status <> 'OFFLINE'
+                  AND id <> ?
+                """,
+                Long.class,
+                row.courseId(),
+                row.sourceHash(),
+                id
+        );
+
+        if (activeDuplicateCount != null
+                && activeDuplicateCount > 0) {
+
+            throw new BusinessException(
+                    409,
+                    "该来源问题已经存在其他有效标准问答，不能重新启用"
+            );
+        }
 
         jdbc.update(
                 """
@@ -602,6 +640,38 @@ public class CourseHotQuestionService {
                 "status=PENDING_REVIEW"
         );
 
+        Long courseOwnerId = jdbc.queryForObject(
+                "SELECT user_id FROM course WHERE id = ?",
+                Long.class,
+                row.courseId()
+        );
+
+        if (courseOwnerId != null
+                && !courseOwnerId.equals(userId)) {
+
+            String submittedAtKey = jdbc.queryForObject(
+                    """
+                    SELECT DATE_FORMAT(
+                        submitted_at,
+                        '%Y%m%d%H%i%s%f'
+                    )
+                    FROM course_hot_question
+                    WHERE id = ?
+                    """,
+                    String.class,
+                    id
+            );
+
+            notifications.createIfAbsentWithKey(
+                    courseOwnerId,
+                    "HOT_QUESTION_REVIEW_REQUIRED",
+                    id + ":" + submittedAtKey,
+                    "有新的课程热门问答待审核",
+                    "标准问答《" + row.questionText()
+                            + "》已提交审核，请进入课程热门问题页面处理。"
+            );
+        }
+
         return findById(id);
     }
 
@@ -712,6 +782,46 @@ public class CourseHotQuestionService {
                 "status=" + newStatus
         );
 
+        if (row.createdBy() != null
+                && !row.createdBy().equals(userId)) {
+
+            String reviewedAtKey = jdbc.queryForObject(
+                    """
+                    SELECT DATE_FORMAT(
+                        reviewed_at,
+                        '%Y%m%d%H%i%s%f'
+                    )
+                    FROM course_hot_question
+                    WHERE id = ?
+                    """,
+                    String.class,
+                    id
+            );
+
+            notifications.createIfAbsentWithKey(
+                    row.createdBy(),
+
+                    request.approved()
+                            ? "HOT_QUESTION_REVIEW_APPROVED"
+                            : "HOT_QUESTION_REVIEW_REJECTED",
+
+                    id + ":" + reviewedAtKey,
+
+                    request.approved()
+                            ? "课程热门问答审核已通过"
+                            : "课程热门问答审核未通过",
+
+                    "标准问答《" + row.questionText()
+                            + "》的审核结果："
+                            + (request.approved()
+                                ? "已通过并发布。"
+                                : "已驳回。")
+                            + (comment == null || comment.isBlank()
+                                ? ""
+                                : "审核意见：" + comment)
+            );
+        }
+
         return findById(id);
     }
 
@@ -741,7 +851,7 @@ public class CourseHotQuestionService {
             );
         }
 
-        jdbc.update(
+        int updated = jdbc.update(
                 """
                 UPDATE course_hot_question
 
@@ -760,6 +870,13 @@ public class CourseHotQuestionService {
                 userId,
                 id
         );
+
+        if (updated != 1) {
+            throw new BusinessException(
+                    409,
+                    "下架失败，请刷新后重试"
+            );
+        }
 
         operationLog.write(
                 row.courseId(),
@@ -900,6 +1017,28 @@ public class CourseHotQuestionService {
         }
     }
 
+    private void lockCourseForWrite(Long courseId) {
+
+        List<Long> ids = jdbc.queryForList(
+                """
+                SELECT id
+                FROM course
+                WHERE id = ?
+                  AND status = 1
+                FOR UPDATE
+                """,
+                Long.class,
+                courseId
+        );
+
+        if (ids.isEmpty()) {
+            throw new BusinessException(
+                    409,
+                    "课程当前不可用"
+            );
+        }
+    }
+
     // =====================================================
     // 10. 知识点验证
     // =====================================================
@@ -943,7 +1082,13 @@ public class CourseHotQuestionService {
 
         List<BasicRow> rows = jdbc.query(
                 """
-                SELECT id, course_id, status
+                SELECT
+                    id,
+                    course_id,
+                    status,
+                    created_by,
+                    question_text,
+                    source_question_hash
 
                 FROM course_hot_question
 
@@ -952,7 +1097,10 @@ public class CourseHotQuestionService {
                 (rs, rowNum) -> new BasicRow(
                         rs.getLong("id"),
                         rs.getLong("course_id"),
-                        rs.getString("status")
+                        rs.getString("status"),
+                        rs.getObject("created_by", Long.class),
+                        rs.getString("question_text"),
+                        rs.getString("source_question_hash")
                 ),
                 id
         );
@@ -971,7 +1119,13 @@ public class CourseHotQuestionService {
 
         List<BasicRow> rows = jdbc.query(
                 """
-                SELECT id, course_id, status
+                SELECT
+                    id,
+                    course_id,
+                    status,
+                    created_by,
+                    question_text,
+                    source_question_hash
 
                 FROM course_hot_question
 
@@ -982,7 +1136,10 @@ public class CourseHotQuestionService {
                 (rs, rowNum) -> new BasicRow(
                         rs.getLong("id"),
                         rs.getLong("course_id"),
-                        rs.getString("status")
+                        rs.getString("status"),
+                        rs.getObject("created_by", Long.class),
+                        rs.getString("question_text"),
+                        rs.getString("source_question_hash")
                 ),
                 id
         );
@@ -1018,6 +1175,7 @@ public class CourseHotQuestionService {
                     h.reviewed_by,
                     h.review_comment,
                     h.created_at,
+                    h.updated_at,
                     h.submitted_at,
                     h.reviewed_at,
                     h.published_at,
@@ -1070,6 +1228,7 @@ public class CourseHotQuestionService {
                 stringValue(rs, "reviewed_by"),
                 rs.getString("review_comment"),
                 time(rs, "created_at"),
+                time(rs, "updated_at"),
                 time(rs, "submitted_at"),
                 time(rs, "reviewed_at"),
                 time(rs, "published_at"),

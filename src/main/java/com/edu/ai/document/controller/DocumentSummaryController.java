@@ -3,6 +3,7 @@ package com.edu.ai.document.controller;
 import com.edu.ai.common.BusinessException;
 import com.edu.ai.common.Result;
 import com.edu.ai.document.dto.DocumentSummaryVO;
+import com.edu.ai.document.dto.DocumentSummaryUpdateRequest;
 import com.edu.ai.document.service.DocumentSummaryService;
 
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -20,15 +21,11 @@ public class DocumentSummaryController {
 
     public DocumentSummaryController(
             DocumentSummaryService service) {
-
         this.service = service;
     }
 
     /**
      * 查询资料摘要。
-     *
-     * 教师可以看到DRAFT；
-     * 学生只能看到CONFIRMED。
      */
     @GetMapping
     public Result<DocumentSummaryVO> get(
@@ -65,6 +62,31 @@ public class DocumentSummaryController {
     }
 
     /**
+     * 人工编辑待确认摘要。
+     */
+    @PutMapping("/{summaryId}")
+    @PreAuthorize("hasAnyRole('TEACHER','ADMIN')")
+    public Result<DocumentSummaryVO> updateDraft(
+            @PathVariable Long courseId,
+            @PathVariable Long documentId,
+            @PathVariable Long summaryId,
+            @jakarta.validation.Valid
+            @RequestBody DocumentSummaryUpdateRequest request,
+            Authentication authentication) {
+
+        return Result.success(
+                service.updateDraft(
+                        courseId,
+                        documentId,
+                        summaryId,
+                        currentUserId(authentication),
+                        request.summary(),
+                        request.outline()
+                )
+        );
+    }
+
+    /**
      * 课程负责人确认摘要。
      */
     @PostMapping("/{summaryId}/confirm")
@@ -90,7 +112,7 @@ public class DocumentSummaryController {
 
         if (authentication == null
                 || !(authentication.getPrincipal()
-                        instanceof Long userId)) {
+                instanceof Long userId)) {
 
             throw new BusinessException(
                     401,
