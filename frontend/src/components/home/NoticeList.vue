@@ -57,6 +57,7 @@ const TONE_BY_TYPE: Record<NotificationBizType, Tone> = {
   QA_TICKET_ANSWERED: 'success',
   DOC_EXPIRING: 'warning',
   DOC_EXPIRED: 'danger',
+  DOC_VERSION_UPDATED: 'warning',
 }
 
 function toneFor(type: NotificationBizType): Tone {

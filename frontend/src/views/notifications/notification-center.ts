@@ -29,6 +29,7 @@ export const BIZ_TYPE_LABELS: Record<NotificationBizType, string> = {
   QA_TICKET_ANSWERED: '教师已答复',
   DOC_EXPIRING: '资料即将到期',
   DOC_EXPIRED: '资料已过期',
+  DOC_VERSION_UPDATED: '课程资料版本更新',
 }
 
 export type NotificationTagType = 'primary' | 'success' | 'warning' | 'danger' | 'info'
@@ -49,6 +50,7 @@ export const BIZ_TYPE_TAG_TYPES: Record<NotificationBizType, NotificationTagType
   QA_TICKET_ANSWERED: 'success',
   DOC_EXPIRING: 'warning',
   DOC_EXPIRED: 'danger',
+  DOC_VERSION_UPDATED: 'warning',
 }
 
 export const OUTBOUND_STATUS_LABELS: Record<NotificationOutboundStatus, string> = {

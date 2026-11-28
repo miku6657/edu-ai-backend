@@ -24,6 +24,7 @@ export type NotificationBizType =
   | 'QA_TICKET_ANSWERED'
   | 'DOC_EXPIRING'
   | 'DOC_EXPIRED'
+  | 'DOC_VERSION_UPDATED'
 
 export type NotificationReadStatus = 'UNREAD' | 'READ'
 
