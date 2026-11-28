@@ -72,6 +72,14 @@ const selectedReport = ref<LearningReportDetail | null>(null)
 const commentContent = ref('')
 const commentSubmitting = ref(false)
 
+// 防止过期异步请求覆盖当前页面数据
+let analysisRequestVersion = 0
+let studentDetailRequestVersion = 0
+let reportDetailRequestVersion = 0
+
+const studentDiagnosisFailed = ref(false)
+const studentReportsFailed = ref(false)
+
 const studentKeyword = ref('')
 
 const studentStatusFilter = ref<
@@ -159,32 +167,80 @@ async function loadCourses(): Promise<void> {
   }
 }
 
+function closeReportDetail(): void {
+  reportDetailRequestVersion++
+
+  reportDetailVisible.value = false
+  reportDetailLoading.value = false
+
+  selectedReport.value = null
+  commentContent.value = ''
+}
+
+function closeStudentDetail(): void {
+  studentDetailRequestVersion++
+
+  closeReportDetail()
+
+  studentDetailVisible.value = false
+  studentDetailLoading.value = false
+
+  selectedStudent.value = null
+  studentWeakPoints.value = []
+  studentReports.value = []
+
+  studentDiagnosisFailed.value = false
+  studentReportsFailed.value = false
+}
+
 async function handleCourseChange(): Promise<void> {
+  closeStudentDetail()
+
+  analysis.value = null
+
+  studentKeyword.value = ''
+  studentStatusFilter.value = 'ALL'
+
   courseStore.select(selectedCourseId.value)
+
   await loadAnalysis()
 }
 
 async function loadAnalysis(): Promise<void> {
   const courseId = selectedCourseId.value
+  const version = ++analysisRequestVersion
 
   if (!courseId) {
     analysis.value = null
+    loading.value = false
     return
   }
 
   loading.value = true
 
   try {
-    const result = await getTeacherCourseLearningAnalysis(courseId)
+    const result =
+      await getTeacherCourseLearningAnalysis(courseId)
 
-    if (courseId === selectedCourseId.value) {
-      analysis.value = result
+    if (
+      version !== analysisRequestVersion
+      || courseId !== selectedCourseId.value
+    ) {
+      return
     }
+
+    analysis.value = result
+
   } catch (error) {
-    analysis.value = null
-    notifyError(error)
+    if (version === analysisRequestVersion) {
+      analysis.value = null
+      notifyError(error)
+    }
+
   } finally {
-    loading.value = false
+    if (version === analysisRequestVersion) {
+      loading.value = false
+    }
   }
 }
 
@@ -307,7 +363,16 @@ async function openStudentDetail(
 
   const courseId = selectedCourseId.value
 
-  if (!courseId) return
+  if (
+    !courseId
+    || analysis.value?.courseId !== courseId
+  ) {
+    return
+  }
+
+  closeReportDetail()
+
+  const version = ++studentDetailRequestVersion
 
   selectedStudent.value = student
 
@@ -317,63 +382,58 @@ async function openStudentDetail(
   studentWeakPoints.value = []
   studentReports.value = []
 
+  studentDiagnosisFailed.value = false
+  studentReportsFailed.value = false
+
   try {
-    try {
-      const diagnosis =
-        await getTeacherStudentWeakPointDiagnosis(
+    const [diagnosisResult, reportsResult] =
+      await Promise.allSettled([
+        getTeacherStudentWeakPointDiagnosis(
           courseId,
           student.studentId,
-        )
+        ),
 
-      if (
-        String(selectedStudent.value?.studentId)
-        !== String(student.studentId)
-      ) {
-        return
-      }
+        listTeacherLearningReports(courseId),
+      ])
 
-      studentWeakPoints.value = diagnosis
-
-    } catch (error) {
-      notifyError(error)
-    }
-
+    // 已切换学生、课程或关闭弹窗时，忽略旧请求。
     if (
-      String(selectedStudent.value?.studentId)
-      !== String(student.studentId)
+      version !== studentDetailRequestVersion
+      || courseId !== selectedCourseId.value
+      || selectedStudent.value?.studentId !== student.studentId
+      || !studentDetailVisible.value
     ) {
       return
     }
 
-    try {
-      const reports =
-        await listTeacherLearningReports(courseId)
+    // 独立处理诊断结果
+    if (diagnosisResult.status === 'fulfilled') {
+      studentWeakPoints.value = diagnosisResult.value
 
-      if (
-        String(selectedStudent.value?.studentId)
-        !== String(student.studentId)
-      ) {
-        return
-      }
+    } else {
+      studentDiagnosisFailed.value = true
+      notifyError(diagnosisResult.reason)
+    }
 
-      studentReports.value = reports
-        .filter(
-          item => String(item.studentId)
-            === String(student.studentId),
+    // 独立处理阶段报告
+    if (reportsResult.status === 'fulfilled') {
+      studentReports.value = reportsResult.value
+        .filter(report =>
+          report.studentId === student.studentId
+          && report.courseId === courseId,
         )
         .sort(
-          (a, b) => b.createdAt.localeCompare(a.createdAt),
+          (a, b) =>
+            b.createdAt.localeCompare(a.createdAt),
         )
 
-    } catch (error) {
-      notifyError(error)
+    } else {
+      studentReportsFailed.value = true
+      notifyError(reportsResult.reason)
     }
 
   } finally {
-    if (
-      String(selectedStudent.value?.studentId)
-      === String(student.studentId)
-    ) {
+    if (version === studentDetailRequestVersion) {
       studentDetailLoading.value = false
     }
   }
@@ -388,7 +448,15 @@ async function openStudentReport(
 
   const courseId = selectedCourseId.value
 
-  if (!courseId) return
+  if (
+    !courseId
+    || report.courseId !== courseId
+    || report.studentId !== selectedStudent.value?.studentId
+  ) {
+    return
+  }
+
+  const version = ++reportDetailRequestVersion
 
   reportDetailVisible.value = true
   reportDetailLoading.value = true
@@ -397,17 +465,31 @@ async function openStudentReport(
   commentContent.value = ''
 
   try {
-    selectedReport.value = await getTeacherLearningReport(
+    const detail = await getTeacherLearningReport(
       courseId,
       report.id,
     )
 
+    if (
+      version !== reportDetailRequestVersion
+      || courseId !== selectedCourseId.value
+      || !reportDetailVisible.value
+    ) {
+      return
+    }
+
+    selectedReport.value = detail
+
   } catch (error) {
-    reportDetailVisible.value = false
-    notifyError(error)
+    if (version === reportDetailRequestVersion) {
+      notifyError(error)
+      closeReportDetail()
+    }
 
   } finally {
-    reportDetailLoading.value = false
+    if (version === reportDetailRequestVersion) {
+      reportDetailLoading.value = false
+    }
   }
 }
 
@@ -420,7 +502,17 @@ async function submitStudentReportComment(): Promise<void> {
   const report = selectedReport.value
   const content = commentContent.value.trim()
 
-  if (!courseId || !report) return
+  if (
+    !courseId
+    || !report
+    || commentSubmitting.value
+  ) {
+    return
+  }
+
+  if (report.courseId !== courseId) {
+    return
+  }
 
   if (!content) {
     notifyWarning('请输入批注内容')
@@ -432,22 +524,29 @@ async function submitStudentReportComment(): Promise<void> {
     return
   }
 
+  const version = reportDetailRequestVersion
+
   commentSubmitting.value = true
 
   try {
-    await addTeacherLearningReportComment(
-      courseId,
-      report.id,
-      { content },
-    )
+    const comment =
+      await addTeacherLearningReportComment(
+        courseId,
+        report.id,
+        { content },
+      )
 
-    // 重新获取详情，刷新批注历史
-    selectedReport.value = await getTeacherLearningReport(
-      courseId,
-      report.id,
-    )
+    // 只有当前弹窗仍为原报告时才更新展示。
+    if (
+      version === reportDetailRequestVersion
+      && courseId === selectedCourseId.value
+      && selectedReport.value?.id === report.id
+      && reportDetailVisible.value
+    ) {
+      selectedReport.value.comments.push(comment)
 
-    commentContent.value = ''
+      commentContent.value = ''
+    }
 
     notifySuccess('教师批注已保存')
 
@@ -1385,6 +1484,7 @@ async function submitStudentReportComment(): Promise<void> {
     <!-- 学生个人学习详情 -->
     <el-dialog
       v-model="studentDetailVisible"
+      @close="closeStudentDetail"
       :title="selectedStudent
         ? `${selectedStudent.studentName} - 学习详情`
         : '学生学习详情'"
@@ -1535,8 +1635,15 @@ async function submitStudentReportComment(): Promise<void> {
 
           </el-table>
 
+          <el-alert
+            v-if="studentDiagnosisFailed"
+            title="薄弱点诊断加载失败，请关闭弹窗后重新查看"
+            type="error"
+            :closable="false"
+          />
+
           <el-empty
-            v-if="studentWeakPoints.length === 0"
+            v-if="!studentDiagnosisFailed && studentWeakPoints.length === 0"
             description="该学生当前没有可展示的知识点诊断记录"
             :image-size="70"
           />
@@ -1617,8 +1724,15 @@ async function submitStudentReportComment(): Promise<void> {
 
           </el-table>
 
+          <el-alert
+            v-if="studentReportsFailed"
+            title="阶段学习报告加载失败，请关闭弹窗后重新查看"
+            type="error"
+            :closable="false"
+          />
+
           <el-empty
-            v-if="studentReports.length === 0"
+            v-if="!studentReportsFailed && studentReports.length === 0"
             description="该学生尚未生成阶段学习报告，请学生在学生端生成后再查看"
             :image-size="70"
           />
@@ -1628,7 +1742,7 @@ async function submitStudentReportComment(): Promise<void> {
       </template>
 
       <template #footer>
-        <el-button @click="studentDetailVisible = false">
+        <el-button @click="closeStudentDetail">
           关闭
         </el-button>
       </template>
@@ -1637,6 +1751,7 @@ async function submitStudentReportComment(): Promise<void> {
     <!-- 阶段报告详情及教师批注 -->
     <el-dialog
       v-model="reportDetailVisible"
+      @close="closeReportDetail"
       title="阶段学习报告详情"
       width="850px"
       top="5vh"
@@ -1811,7 +1926,7 @@ async function submitStudentReportComment(): Promise<void> {
       </template>
 
       <template #footer>
-        <el-button @click="reportDetailVisible = false">
+        <el-button @click="closeReportDetail">
           关闭
         </el-button>
       </template>
