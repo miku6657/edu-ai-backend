@@ -1,5 +1,6 @@
 import hmac
 import logging
+import pymupdf
 import time
 from contextlib import asynccontextmanager
 from threading import Lock
@@ -108,6 +109,13 @@ class IndexRequest(BaseModel):
     expected_dimension: int = Field(
         gt=0,
         le=8192,
+    )
+
+
+class PdfQualityInspectRequest(BaseModel):
+    storage_name: str = Field(
+        min_length=1,
+        max_length=100,
     )
 
 
@@ -400,6 +408,67 @@ def internal_index(req: IndexRequest, _: None = Depends(require_internal)):
         "indexed_chunks": indexed,
         "chunks": chunks,
     }
+
+
+@app.post(
+    "/internal/documents/quality/inspect",
+    dependencies=[Depends(require_internal)],
+)
+def internal_pdf_quality_inspect(
+    request: PdfQualityInspectRequest,
+):
+    pdf_path = (PDF_STORAGE_DIR / request.storage_name).resolve()
+
+    if not pdf_path.is_relative_to(PDF_STORAGE_DIR.resolve()):
+        raise HTTPException(status_code=400, detail="非法文件名")
+
+    if not pdf_path.is_file():
+        raise HTTPException(status_code=404, detail="PDF 文件不存在")
+
+    try:
+        document = pymupdf.open(pdf_path)
+        page_count = document.page_count
+
+        pages_without_text = []
+        image_only_pages = []
+        parse_error_pages = []
+
+        for index, page in enumerate(document, start=1):
+            try:
+                page_text = (
+                    page.get_text("text") or ""
+                ).strip()
+                images = page.get_images(full=True)
+
+                if not page_text:
+                    pages_without_text.append(index)
+                    if images:
+                        image_only_pages.append(index)
+
+            except Exception:
+                parse_error_pages.append(index)
+
+        document.close()
+
+        return {
+            "page_count": page_count,
+            "pages_without_text": pages_without_text,
+            "image_only_pages": image_only_pages,
+            "parse_error_pages": parse_error_pages,
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as exc:
+        logger.exception(
+            "PDF质量检查失败，storage_name=%s",
+            request.storage_name,
+        )
+        raise HTTPException(
+            status_code=400,
+            detail="PDF无法正常读取，质量检查失败",
+        ) from exc
 
 
 @app.post(

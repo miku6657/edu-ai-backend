@@ -6,6 +6,7 @@ import com.edu.ai.common.Result;
 import com.edu.ai.document.dto.DocumentQualityRequest;
 import com.edu.ai.document.dto.DocumentQualityVO;
 
+import com.edu.ai.document.service.DocumentQualityScanService;
 import com.edu.ai.document.service.DocumentQualityService;
 
 import org.springframework.security.core.Authentication;
@@ -22,10 +23,14 @@ public class DocumentQualityController {
 
     private final DocumentQualityService service;
 
+    private final DocumentQualityScanService scanService;
+
     public DocumentQualityController(
-            DocumentQualityService service) {
+            DocumentQualityService service,
+            DocumentQualityScanService scanService) {
 
         this.service = service;
+        this.scanService = scanService;
     }
 
     private Long userId(
@@ -400,6 +405,29 @@ public class DocumentQualityController {
                         documentId,
                         userId(auth),
                         request
+                )
+        );
+    }
+
+    /**
+     * 对指定课程资料执行自动质量检查。
+     *
+     * 检查结果直接进入现有质量整改流程。
+     */
+    @PostMapping("/documents/{documentId}/scan")
+    public Result<DocumentQualityVO.Detail> scanDocument(
+
+            @PathVariable Long courseId,
+
+            @PathVariable Long documentId,
+
+            Authentication auth) {
+
+        return Result.success(
+                scanService.scan(
+                        courseId,
+                        documentId,
+                        userId(auth)
                 )
         );
     }

@@ -31,9 +31,13 @@ import java.sql.Statement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -74,8 +78,26 @@ public class DocumentQualityService {
                     "DUPLICATE_CONTENT",
                     "PARSE_ERROR",
                     "WRONG_KNOWLEDGE_POINT",
+                    "EXPIRED_DOCUMENT",
                     "OTHER"
             );
+
+    private static final ZoneId APP_ZONE =
+            ZoneId.of("Asia/Shanghai");
+
+    private record AutoFinding(
+            String issueType,
+            String description,
+            Long chunkId
+    ) {}
+
+    private record DuplicateCandidate(
+            Long documentId,
+            String documentName,
+            long matchedCount,
+            long totalCount,
+            Long matchedChunkId
+    ) {}
 
     private final JdbcTemplate jdbc;
 
@@ -787,6 +809,135 @@ public class DocumentQualityService {
         );
     }
 
+    /**
+     * 检查当前资料是否与同课程其他已发布资料
+     * 存在高度重复的知识切片。
+     *
+     * 检测规则：
+     * 1. 只比较当前生效且审核通过的其他资料。
+     * 2. 只比较SHA-256完全一致的切片。
+     * 3. 至少匹配2个不同切片。
+     * 4. 匹配比例达到80%才标记疑似重复。
+     * 5. 排除同一资源的历史版本。
+     */
+    private List<DuplicateCandidate> findDuplicateCandidates(
+            Long courseId,
+            Long documentId,
+            Long resourceId) {
+
+        return jdbc.query(
+                """
+                SELECT
+
+                    other.document_id AS duplicate_document_id,
+
+                    d.original_name AS duplicate_document_name,
+
+                    COUNT(
+                        DISTINCT target.content_hash
+                    ) AS matched_count,
+
+                    (
+                        SELECT COUNT(DISTINCT source.content_hash)
+
+                        FROM course_document_chunk source
+
+                        WHERE source.course_id = ?
+
+                          AND source.document_id = ?
+
+                          AND source.content_hash IS NOT NULL
+                    ) AS target_count,
+
+                    MIN(target.id) AS matched_chunk_id
+
+                FROM course_document_chunk target
+
+                JOIN course_document_chunk other
+
+                  ON other.course_id = target.course_id
+
+                 AND other.document_id <> target.document_id
+
+                 AND other.content_hash = target.content_hash
+
+                JOIN course_document d
+
+                  ON d.id = other.document_id
+
+                 AND d.course_id = other.course_id
+
+                WHERE target.course_id = ?
+
+                  AND target.document_id = ?
+
+                  AND target.content_hash IS NOT NULL
+
+                  AND d.status = 'READY'
+
+                  AND d.version_status = 'CURRENT'
+
+                  AND d.review_status = 'APPROVED'
+
+                  AND d.resource_id <> ?
+
+                GROUP BY
+
+                    other.document_id,
+
+                    d.original_name
+
+                HAVING COUNT(
+                    DISTINCT target.content_hash
+                ) >= 2
+
+                AND COUNT(
+                    DISTINCT target.content_hash
+                ) >= CEIL(
+
+                    (
+                        SELECT COUNT(DISTINCT source.content_hash)
+
+                        FROM course_document_chunk source
+
+                        WHERE source.course_id = ?
+
+                          AND source.document_id = ?
+
+                          AND source.content_hash IS NOT NULL
+
+                    ) * 0.8
+
+                )
+
+                ORDER BY matched_count DESC
+
+                LIMIT 5
+                """,
+
+                (rs, rowNum) -> new DuplicateCandidate(
+
+                        rs.getLong("duplicate_document_id"),
+
+                        rs.getString("duplicate_document_name"),
+
+                        rs.getLong("matched_count"),
+
+                        rs.getLong("target_count"),
+
+                        rs.getLong("matched_chunk_id")
+                ),
+
+                courseId,
+                documentId,
+                courseId,
+                documentId,
+                resourceId,
+                courseId,
+                documentId
+        );
+    }
+
     // =================================================
     // 2. 创建质量抽检任务
     // =================================================
@@ -1164,6 +1315,570 @@ public class DocumentQualityService {
 
                 taskId,
 
+                userId
+        );
+    }
+
+    /**
+     * 创建自动质量检查任务。
+     *
+     * 自动检查内容：
+     * 1. PDF页面无可提取文本。
+     * 2. PDF页面解析异常。
+     * 3. 与同课程其他资料高度重复。
+     * 4. 资料已经超过有效期。
+     *
+     * 自动检查结果直接进入现有质量整改流程。
+     */
+    @Transactional(
+            rollbackFor = Exception.class,
+            isolation = Isolation.READ_COMMITTED
+    )
+    public DocumentQualityVO.Detail createAutomaticScanTask(
+
+            Long courseId,
+
+            Long documentId,
+
+            Long userId,
+
+            PdfQualityInspectionClient.InspectionResult inspection) {
+
+        if (inspection == null || inspection.pageCount() <= 0) {
+            throw badRequest("PDF检查结果无效");
+        }
+
+        // 锁定课程和资料，避免与发布、删除操作并发。
+        CourseDocument document =
+                lockQualityDocument(
+                        courseId,
+                        documentId,
+                        userId
+                );
+
+        // 当前资料不能同时存在两个未完成抽检任务。
+        long activeTasks = count(
+                """
+                SELECT COUNT(*)
+
+                FROM course_document_quality_task
+
+                WHERE course_id = ?
+
+                  AND document_id = ?
+
+                  AND status = 'IN_PROGRESS'
+                """,
+                courseId,
+                documentId
+        );
+
+        if (activeTasks > 0) {
+            throw conflict("当前资料已有进行中的质量检查任务");
+        }
+
+        List<Map<String, Object>> chunks =
+                jdbc.queryForList(
+                        """
+                        SELECT
+                            id,
+                            page_no,
+                            chunk_index,
+                            content_hash
+
+                        FROM course_document_chunk
+
+                        WHERE course_id = ?
+
+                          AND document_id = ?
+
+                        ORDER BY page_no, chunk_index
+                        """,
+                        courseId,
+                        documentId
+                );
+
+        if (chunks.isEmpty()) {
+            throw conflict("当前资料没有知识切片，无法执行自动质量检查");
+        }
+
+        if (chunks.size() > Integer.MAX_VALUE) {
+            throw conflict("知识切片数量超出支持范围");
+        }
+
+        int totalChunks = chunks.size();
+
+        Long firstChunkId = ((Number) chunks.get(0).get("id"))
+                .longValue();
+
+        List<AutoFinding> findings = new ArrayList<>();
+
+        // ---------------------------------------------
+        // 1. 检查没有提取到文本的页面
+        // ---------------------------------------------
+
+        List<Integer> emptyPages =
+                inspection.pagesWithoutText();
+
+        if (emptyPages != null && !emptyPages.isEmpty()) {
+
+            String imagePages =
+                    inspection.imageOnlyPages() == null
+                            ? "无"
+                            : inspection.imageOnlyPages().toString();
+
+            findings.add(
+                    new AutoFinding(
+                            "MISSING_PAGE",
+                            "PDF共" + inspection.pageCount()
+                                    + "页，其中以下页面未提取到可检索文本："
+                                    + emptyPages
+                                    + "。其中图片页面：" + imagePages
+                                    + "。可能为空白页、扫描图片或文本解析失败，"
+                                    + "请人工核对PDF原文。",
+                            firstChunkId
+                    )
+            );
+        }
+
+        // ---------------------------------------------
+        // 2. 检查页面解析异常
+        // ---------------------------------------------
+
+        List<Integer> parseErrorPages =
+                inspection.parseErrorPages();
+
+        if (parseErrorPages != null
+                && !parseErrorPages.isEmpty()) {
+
+            findings.add(
+                    new AutoFinding(
+                            "PARSE_ERROR",
+                            "PDF以下页面发生文本解析异常："
+                                    + parseErrorPages
+                                    + "，请检查原始PDF文件。",
+                            firstChunkId
+                    )
+            );
+        }
+
+        // ---------------------------------------------
+        // 3. 检查同课程其他资料中的重复内容
+        // ---------------------------------------------
+
+        List<DuplicateCandidate> duplicates =
+                findDuplicateCandidates(
+                        courseId,
+                        documentId,
+                        document.getResourceId()
+                );
+
+        for (DuplicateCandidate duplicate : duplicates) {
+
+            double ratio =
+                    duplicate.totalCount() == 0
+                            ? 0
+                            : duplicate.matchedCount() * 100.0
+                                    / duplicate.totalCount();
+
+            findings.add(
+                    new AutoFinding(
+                            "DUPLICATE_CONTENT",
+                            "当前资料与《"
+                                    + duplicate.documentName()
+                                    + "》存在高度重复内容，"
+                                    + "匹配切片数："
+                                    + duplicate.matchedCount()
+                                    + "，当前资料有效切片数："
+                                    + duplicate.totalCount()
+                                    + "，匹配比例："
+                                    + String.format(
+                                            Locale.ROOT,
+                                            "%.1f%%",
+                                            ratio
+                                    )
+                                    + "。请人工确认是否属于重复资料。",
+                            duplicate.matchedChunkId()
+                    )
+            );
+        }
+
+        // ---------------------------------------------
+        // 4. 检查资料有效期
+        // ---------------------------------------------
+
+        LocalDate today =
+                LocalDate.now(APP_ZONE);
+
+        if (document.getValidUntil() != null
+                && document.getValidUntil().isBefore(today)) {
+
+            findings.add(
+                    new AutoFinding(
+                            "EXPIRED_DOCUMENT",
+                            "资料《"
+                                    + document.getOriginalName()
+                                    + "》已经超过有效期，截止日期："
+                                    + document.getValidUntil()
+                                    + "，请确认是否需要更新或重新发布。",
+                            firstChunkId
+                    )
+            );
+        }
+
+        // ---------------------------------------------
+        // 5. 确定整改责任人
+        // ---------------------------------------------
+
+        List<Long> ownerIds = jdbc.queryForList(
+                """
+                SELECT c.user_id
+
+                FROM course c
+
+                JOIN sys_user u
+                  ON u.id = c.user_id
+
+                WHERE c.id = ?
+
+                  AND u.status = 1
+
+                  AND u.role = 'TEACHER'
+
+                LIMIT 1
+                """,
+                Long.class,
+                courseId
+        );
+
+        Long assigneeId = ownerIds.isEmpty()
+                ? userId
+                : ownerIds.get(0);
+
+        // ---------------------------------------------
+        // 6. 创建自动质量任务
+        // ---------------------------------------------
+
+        String taskTitle =
+                "自动质量检查-" + LocalDateTime.now(APP_ZONE);
+
+        KeyHolder taskKeyHolder =
+                new GeneratedKeyHolder();
+
+        jdbc.update(
+                connection -> {
+
+                    PreparedStatement ps =
+                            connection.prepareStatement(
+                                    """
+                                    INSERT INTO course_document_quality_task (
+
+                                        course_id,
+                                        document_id,
+                                        resource_id,
+                                        version_no,
+                                        document_name,
+                                        title,
+                                        sample_rate,
+                                        total_chunks,
+                                        sample_count,
+                                        status,
+                                        creator_id
+
+                                    )
+                                    VALUES (
+                                        ?, ?, ?, ?, ?,
+                                        ?, 100, ?, ?,
+                                        'IN_PROGRESS',
+                                        ?
+                                    )
+                                    """,
+                                    Statement.RETURN_GENERATED_KEYS
+                            );
+
+                    ps.setLong(1, courseId);
+                    ps.setLong(2, documentId);
+                    ps.setLong(3, document.getResourceId());
+                    ps.setInt(4, document.getVersionNo());
+                    ps.setString(5, document.getOriginalName());
+                    ps.setString(6, taskTitle);
+                    ps.setInt(7, totalChunks);
+                    ps.setInt(8, totalChunks);
+                    ps.setLong(9, userId);
+
+                    return ps;
+                },
+                taskKeyHolder
+        );
+
+        Number taskKey = taskKeyHolder.getKey();
+
+        if (taskKey == null) {
+            throw new BusinessException(500, "自动质量检查任务创建失败");
+        }
+
+        Long taskId = taskKey.longValue();
+
+        // ---------------------------------------------
+        // 7. 将全部知识切片写入样本
+        // ---------------------------------------------
+
+        jdbc.update(
+                """
+                INSERT INTO course_document_quality_sample (
+
+                    task_id,
+                    chunk_id,
+                    page_no,
+                    chunk_index,
+                    section_title,
+                    content,
+                    content_hash,
+                    duplicate_count,
+                    status,
+                    check_comment,
+                    checker_id,
+                    checked_time
+
+                )
+
+                SELECT
+
+                    ?,
+                    c.id,
+                    c.page_no,
+                    c.chunk_index,
+                    c.section_title,
+                    c.content,
+                    c.content_hash,
+                    COALESCE(d.duplicate_count, 1),
+
+                    'PASS',
+
+                    '自动质量检查未发现该切片的异常',
+
+                    ?,
+
+                    NOW()
+
+                FROM course_document_chunk c
+
+                LEFT JOIN (
+
+                    SELECT
+                        content_hash,
+                        COUNT(*) AS duplicate_count
+
+                    FROM course_document_chunk
+
+                    WHERE course_id = ?
+
+                      AND document_id = ?
+
+                      AND content_hash IS NOT NULL
+
+                    GROUP BY content_hash
+
+                ) d
+
+                  ON d.content_hash = c.content_hash
+
+                WHERE c.course_id = ?
+
+                  AND c.document_id = ?
+                """,
+
+                taskId,
+                userId,
+                courseId,
+                documentId,
+                courseId,
+                documentId
+        );
+
+        // ---------------------------------------------
+        // 8. 获取样本ID与切片ID的对应关系
+        // ---------------------------------------------
+
+        List<Map<String, Object>> sampleRows =
+                jdbc.queryForList(
+                        """
+                        SELECT id, chunk_id
+
+                        FROM course_document_quality_sample
+
+                        WHERE task_id = ?
+                        """,
+                        taskId
+                );
+
+        Map<Long, Long> sampleByChunk =
+                new HashMap<>();
+
+        for (Map<String, Object> row : sampleRows) {
+
+            Long sampleId =
+                    ((Number) row.get("id")).longValue();
+
+            Long chunkId =
+                    ((Number) row.get("chunk_id")).longValue();
+
+            sampleByChunk.put(chunkId, sampleId);
+        }
+
+        if (sampleByChunk.size() != totalChunks) {
+            throw conflict("自动质量检查样本创建不完整");
+        }
+
+        // ---------------------------------------------
+        // 9. 创建质量问题
+        // ---------------------------------------------
+
+        Set<Long> failedChunkIds = new HashSet<>();
+
+        for (AutoFinding finding : findings) {
+
+            Long chunkId = finding.chunkId();
+
+            Long sampleId = sampleByChunk.get(chunkId);
+
+            if (sampleId == null) {
+                throw conflict("自动检查问题无法关联知识切片");
+            }
+
+            failedChunkIds.add(chunkId);
+
+            KeyHolder issueKeyHolder =
+                    new GeneratedKeyHolder();
+
+            jdbc.update(
+                    connection -> {
+
+                        PreparedStatement ps =
+                                connection.prepareStatement(
+                                        """
+                                        INSERT INTO course_document_quality_issue (
+
+                                            task_id,
+                                            sample_id,
+                                            issue_type,
+                                            description,
+                                            reporter_id,
+                                            assignee_id,
+                                            status
+
+                                        )
+                                        VALUES (?, ?, ?, ?, ?, ?, 'OPEN')
+                                        """,
+                                        Statement.RETURN_GENERATED_KEYS
+                                );
+
+                        ps.setLong(1, taskId);
+                        ps.setLong(2, sampleId);
+                        ps.setString(3, finding.issueType());
+                        ps.setString(4, finding.description());
+                        ps.setLong(5, userId);
+                        ps.setLong(6, assigneeId);
+
+                        return ps;
+                    },
+                    issueKeyHolder
+            );
+
+            Number issueKey = issueKeyHolder.getKey();
+
+            if (issueKey != null) {
+
+                notifyIssueAssigned(
+                        issueKey.longValue(),
+                        assigneeId,
+                        finding.description()
+                );
+            }
+        }
+
+        // ---------------------------------------------
+        // 10. 将异常切片标记为FAIL
+        // ---------------------------------------------
+
+        for (Long chunkId : failedChunkIds) {
+
+            jdbc.update(
+                    """
+                    UPDATE course_document_quality_sample
+
+                    SET status = 'FAIL',
+
+                        check_comment = '自动质量检查发现问题，请查看整改清单'
+
+                    WHERE task_id = ?
+
+                      AND chunk_id = ?
+                    """,
+                    taskId,
+                    chunkId
+            );
+        }
+
+        // ---------------------------------------------
+        // 11. 没有发现问题则自动完成任务
+        // ---------------------------------------------
+
+        if (findings.isEmpty()) {
+
+            jdbc.update(
+                    """
+                    UPDATE course_document_quality_task
+
+                    SET status = 'COMPLETED',
+
+                        completed_by = ?,
+
+                        completed_time = NOW(),
+
+                        update_time = NOW()
+
+                    WHERE id = ?
+
+                      AND course_id = ?
+
+                      AND status = 'IN_PROGRESS'
+                    """,
+                    userId,
+                    taskId,
+                    courseId
+            );
+        }
+
+        // ---------------------------------------------
+        // 12. 写入运营日志
+        // ---------------------------------------------
+
+        logTaskOperation(
+                courseId,
+                taskId,
+                userId,
+                "QUALITY_AUTO_SCAN",
+                "执行资料自动质量检查",
+                "资料《" + document.getOriginalName()
+                        + "》自动检查完成。PDF页数="
+                        + inspection.pageCount()
+                        + "，知识切片="
+                        + totalChunks
+                        + "，发现问题="
+                        + findings.size(),
+                null,
+                "taskId=" + taskId
+                        + "，issues=" + findings.size()
+                        + "，status="
+                        + (findings.isEmpty()
+                            ? COMPLETED
+                            : IN_PROGRESS)
+        );
+
+        return getDetail(
+                courseId,
+                taskId,
                 userId
         );
     }
