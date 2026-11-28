@@ -1,9 +1,10 @@
 package com.edu.ai.exercise.dto;
 
-import java.time.LocalDateTime;
 import java.util.List;
 
 public record StudentExerciseRecommendationVO(
+
+        String recommendationBatchId,
 
         Integer weakKnowledgePointCount,
 

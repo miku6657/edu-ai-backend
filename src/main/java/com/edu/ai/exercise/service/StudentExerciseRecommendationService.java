@@ -1,12 +1,18 @@
 package com.edu.ai.exercise.service;
 
+import com.edu.ai.common.BusinessException;
 import com.edu.ai.course.service.CoursePermissionService;
 import com.edu.ai.exercise.dto.StudentExerciseRecommendationVO;
 import com.edu.ai.exercise.dto.StudentExerciseRecommendationVO.KnowledgePointMatch;
 import com.edu.ai.exercise.dto.StudentExerciseRecommendationVO.Recommendation;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
@@ -14,6 +20,11 @@ import java.util.*;
 
 @Service
 public class StudentExerciseRecommendationService {
+
+    private static final Logger log =
+            LoggerFactory.getLogger(
+                    StudentExerciseRecommendationService.class
+            );
 
     private final JdbcTemplate jdbc;
     private final CoursePermissionService permissions;
@@ -43,6 +54,9 @@ public class StudentExerciseRecommendationService {
             Long studentId,
             Long courseId) {
 
+        String recommendationBatchId =
+                UUID.randomUUID().toString();
+
         if (courseId != null) {
             permissions.requireActiveRead(courseId, studentId);
         }
@@ -53,6 +67,7 @@ public class StudentExerciseRecommendationService {
 
         if (pointStates.isEmpty()) {
             return new StudentExerciseRecommendationVO(
+                    recommendationBatchId,
                     0,
                     0,
                     List.of()
@@ -156,10 +171,240 @@ public class StudentExerciseRecommendationService {
                 )
                 .count();
 
+        // F7-05：记录本次推荐曝光。
+        recordRecommendationExposure(
+                studentId,
+                recommendationBatchId,
+                recommendations
+        );
+
         return new StudentExerciseRecommendationVO(
+                recommendationBatchId,
                 weakCount,
                 recommendations.size(),
                 recommendations
+        );
+    }
+
+    /**
+     * 记录一次推荐批次中的所有练习曝光。
+     *
+     * 推荐算法与统计记录相互独立：
+     * 统计失败不能影响学生正常获取推荐。
+     */
+    private void recordRecommendationExposure(
+            Long studentId,
+            String batchId,
+            List<Recommendation> recommendations) {
+
+        if (recommendations == null
+                || recommendations.isEmpty()) {
+            return;
+        }
+
+        List<Object[]> batchArgs = new ArrayList<>();
+
+        for (Recommendation recommendation : recommendations) {
+
+            batchArgs.add(new Object[]{
+
+                    batchId,
+
+                    Long.valueOf(recommendation.courseId()),
+
+                    studentId,
+
+                    Long.valueOf(recommendation.exerciseId())
+            });
+        }
+
+        try {
+
+            jdbc.batchUpdate(
+                    """
+                    INSERT IGNORE INTO
+                        course_exercise_recommendation_event (
+
+                            recommendation_batch_id,
+
+                            course_id,
+
+                            student_id,
+
+                            exercise_id,
+
+                            event_type,
+
+                            event_at
+
+                        )
+                    VALUES (
+                        ?, ?, ?, ?,
+                        'EXPOSURE',
+                        CURRENT_TIMESTAMP(3)
+                    )
+                    """,
+                    batchArgs
+            );
+
+        } catch (DataAccessException e) {
+
+            log.warn(
+                    "练习推荐曝光记录失败，studentId={}, batchId={}",
+                    studentId,
+                    batchId,
+                    e
+            );
+        }
+    }
+
+    /**
+     * 记录学生点击的推荐练习。
+     *
+     * 只能记录当前学生真实获得过的推荐结果。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void recordRecommendationClick(
+            Long studentId,
+            Long exerciseId,
+            String batchId) {
+
+        if (studentId == null
+                || exerciseId == null
+                || batchId == null
+                || batchId.isBlank()) {
+
+            throw new BusinessException(
+                    400,
+                    "推荐点击参数不完整"
+            );
+        }
+
+        try {
+
+            UUID.fromString(batchId);
+
+        } catch (IllegalArgumentException e) {
+
+            throw new BusinessException(
+                    400,
+                    "推荐批次ID格式错误"
+            );
+        }
+
+        // 确认当前学生确实看过该批次的推荐。
+        List<Long> courseIds = jdbc.queryForList(
+                """
+                SELECT course_id
+
+                FROM course_exercise_recommendation_event
+
+                WHERE recommendation_batch_id = ?
+
+                  AND student_id = ?
+
+                  AND exercise_id = ?
+
+                  AND event_type = 'EXPOSURE'
+
+                LIMIT 1
+                """,
+                Long.class,
+                batchId,
+                studentId,
+                exerciseId
+        );
+
+        if (courseIds.isEmpty()) {
+
+            throw new BusinessException(
+                    409,
+                    "推荐记录不存在或已经失效"
+            );
+        }
+
+        Long courseId = courseIds.get(0);
+
+        // 再次检查课程访问权限。
+        permissions.requireActiveRead(
+                courseId,
+                studentId
+        );
+
+        // 练习必须仍然处于已发布状态。
+        Integer published = jdbc.queryForObject(
+                """
+                SELECT COUNT(*)
+
+                FROM course_exercise
+
+                WHERE id = ?
+
+                  AND course_id = ?
+
+                  AND status = 'PUBLISHED'
+                """,
+                Integer.class,
+                exerciseId,
+                courseId
+        );
+
+        if (published == null || published != 1) {
+
+            throw new BusinessException(
+                    409,
+                    "该练习当前不可参加"
+            );
+        }
+
+        // INSERT IGNORE + 唯一索引，保证同一批次只计一次点击。
+        jdbc.update(
+                """
+                INSERT IGNORE INTO
+                    course_exercise_recommendation_event (
+
+                        recommendation_batch_id,
+
+                        course_id,
+
+                        student_id,
+
+                        exercise_id,
+
+                        event_type,
+
+                        event_at
+
+                    )
+
+                SELECT
+                    recommendation_batch_id,
+
+                    course_id,
+
+                    student_id,
+
+                    exercise_id,
+
+                    'CLICK',
+
+                    CURRENT_TIMESTAMP(3)
+
+                FROM course_exercise_recommendation_event
+
+                WHERE recommendation_batch_id = ?
+
+                  AND student_id = ?
+
+                  AND exercise_id = ?
+
+                  AND event_type = 'EXPOSURE'
+
+                LIMIT 1
+                """,
+                batchId,
+                studentId,
+                exerciseId
         );
     }
 

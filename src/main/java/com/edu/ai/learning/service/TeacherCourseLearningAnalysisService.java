@@ -6,6 +6,8 @@ import com.edu.ai.learning.dto.TeacherCourseLearningAnalysisVO.ChapterProgress;
 import com.edu.ai.learning.dto.TeacherCourseLearningAnalysisVO.KnowledgePointLearningStat;
 import com.edu.ai.learning.dto.TeacherCourseLearningAnalysisVO.MaterialSummary;
 import com.edu.ai.learning.dto.TeacherCourseLearningAnalysisVO.MaterialUsage;
+import com.edu.ai.learning.dto.TeacherCourseLearningAnalysisVO.RecommendationExerciseUsage;
+import com.edu.ai.learning.dto.TeacherCourseLearningAnalysisVO.RecommendationUsage;
 import com.edu.ai.learning.dto.TeacherCourseLearningAnalysisVO.StudentProgress;
 
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -84,6 +86,10 @@ public class TeacherCourseLearningAnalysisService {
                         .filter(ChapterProgress::lowCompletion)
                         .toList();
 
+        // F7-05：近30天练习推荐使用统计
+        RecommendationUsage recommendationUsage =
+                queryRecommendationUsage(courseId);
+
         return new TeacherCourseLearningAnalysisVO(
                 Long.toString(courseId),
                 summary.courseName(),
@@ -102,6 +108,7 @@ public class TeacherCourseLearningAnalysisService {
                 materials,
                 chapters,
                 lowCompletionChapters,
+                recommendationUsage,
                 LocalDateTime.now(APP_ZONE)
         );
     }
@@ -1243,6 +1250,183 @@ public class TeacherCourseLearningAnalysisService {
                     );
                 },
                 courseId
+        );
+    }
+
+    /**
+     * 查询课程近30天的练习推荐使用情况。
+     */
+    private RecommendationUsage queryRecommendationUsage(
+            Long courseId) {
+
+        List<RecommendationUsage> summaries =
+                jdbc.query(
+                        """
+                        SELECT
+
+                            COUNT(
+                                CASE
+                                    WHEN event_type = 'EXPOSURE'
+                                    THEN 1
+                                END
+                            ) AS exposure_count,
+
+                            COUNT(
+                                CASE
+                                    WHEN event_type = 'CLICK'
+                                    THEN 1
+                                END
+                            ) AS click_count,
+
+                            COUNT(
+                                DISTINCT CASE
+                                    WHEN event_type = 'EXPOSURE'
+                                    THEN student_id
+                                END
+                            ) AS exposed_student_count,
+
+                            COUNT(
+                                DISTINCT CASE
+                                    WHEN event_type = 'CLICK'
+                                    THEN student_id
+                                END
+                            ) AS clicked_student_count
+
+                        FROM course_exercise_recommendation_event
+
+                        WHERE course_id = ?
+
+                          AND event_at >=
+                              DATE_SUB(
+                                  CURRENT_TIMESTAMP(3),
+                                  INTERVAL 30 DAY
+                              )
+                        """,
+
+                        (rs, rowNum) -> {
+
+                            long exposures =
+                                    rs.getLong("exposure_count");
+
+                            long clicks =
+                                    rs.getLong("click_count");
+
+                            return new RecommendationUsage(
+                                    30,
+                                    exposures,
+                                    clicks,
+                                    rs.getLong("exposed_student_count"),
+                                    rs.getLong("clicked_student_count"),
+                                    percentage(clicks, exposures),
+                                    List.of()
+                            );
+                        },
+
+                        courseId
+                );
+
+        RecommendationUsage summary = summaries.get(0);
+
+        List<RecommendationExerciseUsage> topExercises =
+                jdbc.query(
+                        """
+                        SELECT
+
+                            e.id AS exercise_id,
+
+                            e.title AS exercise_title,
+
+                            COUNT(
+                                CASE
+                                    WHEN ev.event_type = 'EXPOSURE'
+                                    THEN 1
+                                END
+                            ) AS exposure_count,
+
+                            COUNT(
+                                CASE
+                                    WHEN ev.event_type = 'CLICK'
+                                    THEN 1
+                                END
+                            ) AS click_count,
+
+                            COUNT(
+                                DISTINCT CASE
+                                    WHEN ev.event_type = 'EXPOSURE'
+                                    THEN ev.student_id
+                                END
+                            ) AS exposed_student_count,
+
+                            COUNT(
+                                DISTINCT CASE
+                                    WHEN ev.event_type = 'CLICK'
+                                    THEN ev.student_id
+                                END
+                            ) AS clicked_student_count
+
+                        FROM course_exercise_recommendation_event ev
+
+                        JOIN course_exercise e
+                          ON e.id = ev.exercise_id
+                         AND e.course_id = ev.course_id
+
+                        WHERE ev.course_id = ?
+
+                          AND ev.event_at >=
+                              DATE_SUB(
+                                  CURRENT_TIMESTAMP(3),
+                                  INTERVAL 30 DAY
+                              )
+
+                        GROUP BY
+                            e.id,
+                            e.title
+
+                        ORDER BY
+                            exposure_count DESC,
+                            click_count DESC,
+                            e.id ASC
+
+                        LIMIT 10
+                        """,
+
+                        (rs, rowNum) -> {
+
+                            long exposures =
+                                    rs.getLong("exposure_count");
+
+                            long clicks =
+                                    rs.getLong("click_count");
+
+                            return new RecommendationExerciseUsage(
+
+                                    rs.getString("exercise_id"),
+
+                                    rs.getString("exercise_title"),
+
+                                    exposures,
+
+                                    clicks,
+
+                                    rs.getLong("exposed_student_count"),
+
+                                    rs.getLong("clicked_student_count"),
+
+                                    percentage(clicks, exposures)
+                            );
+                        },
+
+                        courseId
+                );
+
+        return new RecommendationUsage(
+                summary.periodDays(),
+                summary.exposureCount(),
+                summary.clickCount(),
+                summary.exposedStudentCount(),
+                summary.clickedStudentCount(),
+                summary.clickRate(),
+                topExercises
         );
     }
 

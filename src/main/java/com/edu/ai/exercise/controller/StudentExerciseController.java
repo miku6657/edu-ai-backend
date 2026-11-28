@@ -73,6 +73,33 @@ public class StudentExerciseController {
     }
 
     /**
+     * 记录学生点击推荐练习。
+     *
+     * POST /api/v1/student/exercises/recommendations/{exerciseId}/click
+     */
+    @PostMapping("/recommendations/{exerciseId}/click")
+    public Result<String> recordRecommendationClick(
+            @PathVariable Long exerciseId,
+            @Valid @RequestBody RecommendationClickRequest request,
+            Authentication authentication) {
+
+        recommendationService.recordRecommendationClick(
+                userId(authentication),
+                exerciseId,
+                request.recommendationBatchId()
+        );
+
+        return Result.success("推荐点击记录成功");
+    }
+
+    public record RecommendationClickRequest(
+            @jakarta.validation.constraints.NotBlank(
+                    message = "推荐批次ID不能为空"
+            )
+            String recommendationBatchId
+    ) {}
+
+    /**
      * 查看练习详情。
      *
      * GET /api/v1/student/exercises/{exerciseId}

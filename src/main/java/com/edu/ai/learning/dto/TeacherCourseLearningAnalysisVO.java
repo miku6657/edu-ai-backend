@@ -40,6 +40,8 @@ public record TeacherCourseLearningAnalysisVO(
 
         List<ChapterProgress> lowCompletionChapters,
 
+        RecommendationUsage recommendationUsage,
+
         LocalDateTime generatedAt
 
 ) {
@@ -129,5 +131,47 @@ public record TeacherCourseLearningAnalysisVO(
             long completedStudentQuestionCount,
             BigDecimal completionRate,
             boolean lowCompletion
+    ) {}
+
+    /**
+     * 近30天练习推荐使用情况。
+     */
+    public record RecommendationUsage(
+
+            int periodDays,
+
+            long exposureCount,
+
+            long clickCount,
+
+            long exposedStudentCount,
+
+            long clickedStudentCount,
+
+            BigDecimal clickRate,
+
+            List<RecommendationExerciseUsage> topExercises
+
+    ) {}
+
+    /**
+     * 推荐练习使用排行。
+     */
+    public record RecommendationExerciseUsage(
+
+            String exerciseId,
+
+            String exerciseTitle,
+
+            long exposureCount,
+
+            long clickCount,
+
+            long exposedStudentCount,
+
+            long clickedStudentCount,
+
+            BigDecimal clickRate
+
     ) {}
 }
