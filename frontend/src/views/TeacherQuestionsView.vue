@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 import {
   getQuestionAnalyticsSummary,
@@ -31,6 +31,7 @@ import { useCourseStore } from '@/stores/course'
 import { notifyError, notifyWarning } from '@/utils/notify'
 
 const router = useRouter()
+const route = useRoute()
 const auth = useAuthStore()
 const courseStore = useCourseStore()
 const canView = computed(
@@ -103,6 +104,67 @@ async function loadCourses(): Promise<void> {
   } finally {
     loadingCourses.value = false
   }
+}
+
+/**
+ * 处理从课程学习分析页面传递过来的筛选参数。
+ *
+ * 支持：
+ * courseId：指定课程
+ * pointId：指定知识点
+ */
+async function applyRouteFilters(): Promise<void> {
+  const requestedCourseId =
+    typeof route.query.courseId === 'string'
+      ? route.query.courseId
+      : ''
+
+  const requestedPointId =
+    typeof route.query.pointId === 'string'
+      ? route.query.pointId
+      : ''
+
+  // 如果路由指定了课程，必须先验证该课程在可访问课程列表中。
+  if (requestedCourseId) {
+    const targetCourse = courses.value.find(
+      item => String(item.id) === requestedCourseId,
+    )
+
+    if (!targetCourse) {
+      selectedCourseId.value = null
+      selectedPointId.value = ''
+      summary.value = null
+      hotQuestions.value = []
+      pointStats.value = []
+      records.value = []
+      total.value = 0
+      return
+    }
+
+    selectedCourseId.value = targetCourse.id
+  }
+
+  if (!selectedCourseId.value) {
+    return
+  }
+
+  courseStore.select(selectedCourseId.value)
+
+  // 先加载课程知识点，才能验证 pointId。
+  await loadPoints()
+
+  const pointExists = points.value.some(
+    point => String(point.id) === requestedPointId,
+  )
+
+  selectedPointId.value =
+    requestedPointId && pointExists
+      ? requestedPointId
+      : ''
+
+  page.value = 1
+
+  await loadAnalytics()
 }
 
 async function loadPoints(): Promise<void> {
@@ -306,17 +368,33 @@ watch(selectedCourseId, () => {
   detailVisible.value = false
 })
 
+const routeFiltersInitialized = ref(false)
+
 onMounted(async () => {
   if (!canView.value) {
     return
   }
+
   await loadCourses()
-  if (selectedCourseId.value) {
-    courseStore.select(selectedCourseId.value)
-    await loadPoints()
-    await loadAnalytics()
-  }
+
+  await applyRouteFilters()
+
+  routeFiltersInitialized.value = true
 })
+
+watch(
+  () => [
+    route.query.courseId,
+    route.query.pointId,
+  ],
+  async () => {
+    if (!routeFiltersInitialized.value || !canView.value) {
+      return
+    }
+
+    await applyRouteFilters()
+  },
+)
 </script>
 
 <template>

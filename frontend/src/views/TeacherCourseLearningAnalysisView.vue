@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 
 import {
   getTeacherCourseLearningAnalysis,
@@ -20,6 +21,8 @@ import { notifyError } from '@/utils/notify'
 defineOptions({
   name: 'TeacherCourseLearningAnalysisView',
 })
+
+const router = useRouter()
 
 const courseStore = useCourseStore()
 
@@ -129,6 +132,25 @@ async function loadAnalysis(): Promise<void> {
   } finally {
     loading.value = false
   }
+}
+
+/**
+ * 跳转到教师问答分析，并筛选指定知识点。
+ */
+function openKnowledgePointQuestions(
+  pointId: string | number,
+): void {
+  if (!analysis.value) {
+    return
+  }
+
+  void router.push({
+    name: 'teacher-questions',
+    query: {
+      courseId: String(analysis.value.courseId),
+      pointId: String(pointId),
+    },
+  })
 }
 
 function formatRate(value: number | null): string {
@@ -767,6 +789,23 @@ function progressStatus(
                 暂无练习
               </el-tag>
 
+            </template>
+          </el-table-column>
+
+          <el-table-column
+            label="操作"
+            width="110"
+            fixed="right"
+            align="center"
+          >
+            <template #default="{ row }">
+              <el-button
+                text
+                type="primary"
+                @click.stop="openKnowledgePointQuestions(row.pointId)"
+              >
+                查看提问
+              </el-button>
             </template>
           </el-table-column>
 
