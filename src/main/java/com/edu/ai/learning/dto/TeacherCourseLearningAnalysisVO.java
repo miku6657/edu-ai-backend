@@ -30,6 +30,10 @@ public record TeacherCourseLearningAnalysisVO(
 
         MaterialSummary materialSummary,
 
+        List<KnowledgePointLearningStat> knowledgePoints,
+
+        List<StudentProgress> students,
+
         List<MaterialUsage> materials,
 
         List<ChapterProgress> chapters,
@@ -39,6 +43,22 @@ public record TeacherCourseLearningAnalysisVO(
         LocalDateTime generatedAt
 
 ) {
+
+    public record StudentProgress(
+            String studentId,
+            String studentName,
+            String username,
+            long submittedAttemptCount,
+            long objectiveAnswerCount,
+            long correctObjectiveCount,
+            BigDecimal exerciseAccuracyRate,
+            long questionCount,
+            long completedTaskCount,
+            long totalTaskCount,
+            BigDecimal taskCompletionRate,
+            long materialAccessCount,
+            LocalDateTime lastActiveAt
+    ) {}
 
     public record MaterialSummary(
             long documentCount,
@@ -59,6 +79,34 @@ public record TeacherCourseLearningAnalysisVO(
             long totalAccessCount,
             long studentCount,
             LocalDateTime lastAccessAt
+    ) {}
+
+    public record KnowledgePointLearningStat(
+
+            String pointId,
+
+            String title,
+
+            long questionCount,
+
+            long questionStudentCount,
+
+            long practiceQuestionCount,
+
+            long masteredQuestionCount,
+
+            BigDecimal practiceMasteryRate,
+
+            long practiceStudentCount,
+
+            long selfAssessmentCount,
+
+            BigDecimal averageSelfAssessmentLevel,
+
+            LocalDateTime latestAskedAt,
+
+            LocalDateTime lastPracticedAt
+
     ) {}
 
     public record ChapterProgress(
