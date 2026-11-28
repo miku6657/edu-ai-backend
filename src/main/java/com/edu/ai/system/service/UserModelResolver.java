@@ -97,6 +97,15 @@ public class UserModelResolver {
     }
 
     /**
+     * 只解析当前平台配置的 Chat 模型。
+     *
+     * 用于摘要生成等不需要 Embedding 的 AI 功能。
+     */
+    public UserModelConfig resolveChatModel(Long userId) {
+        return resolveChatOnly(userId);
+    }
+
+    /**
      * 对话模型使用用户当前配置；
      * Embedding模型使用课程对应索引版本的固定配置。
      */
