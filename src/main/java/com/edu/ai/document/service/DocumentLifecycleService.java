@@ -2,6 +2,7 @@ package com.edu.ai.document.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.edu.ai.audit.service.ContentOperationLogService;
 import com.edu.ai.common.BusinessException;
 import com.edu.ai.course.service.CoursePermissionService;
 import com.edu.ai.document.entity.CourseDocument;
@@ -35,6 +36,7 @@ public class DocumentLifecycleService {
 
     private final CourseDocumentMapper documentMapper;
     private final CoursePermissionService coursePermissionService;
+    private final ContentOperationLogService operationLogService;
     private final DocumentIndexTask indexTask;
     private final CourseIndexLease courseIndexLease;
     private final HttpClient httpClient;
@@ -46,6 +48,7 @@ public class DocumentLifecycleService {
     public DocumentLifecycleService(
             CourseDocumentMapper documentMapper,
             CoursePermissionService coursePermissionService,
+            ContentOperationLogService operationLogService,
             DocumentIndexTask indexTask,
             CourseIndexLease courseIndexLease,
             @Value("${ai.service.url}") String aiUrl,
@@ -54,6 +57,7 @@ public class DocumentLifecycleService {
 
         this.documentMapper = documentMapper;
         this.coursePermissionService = coursePermissionService;
+        this.operationLogService = operationLogService;
         this.indexTask = indexTask;
         this.courseIndexLease = courseIndexLease;
 
@@ -164,6 +168,32 @@ public class DocumentLifecycleService {
             lease.assertValid();
 
             cleanup(documentId, lease);
+
+            // 删除成功后记录统一运营日志。
+            // 这里涉及 Python 向量库和磁盘文件，
+            // 日志写入失败不能反向报告为删除失败。
+            try {
+
+                operationLogService.write(
+                        latest.getCourseId(),
+                        latest.getId(),
+                        userId,
+                        "DOCUMENT_DELETE",
+                        "删除课程资料",
+                        "删除课程资料：《"
+                                + latest.getOriginalName() + "》",
+                        latest.getStatus(),
+                        "DELETED"
+                );
+
+            } catch (RuntimeException logError) {
+
+                log.error(
+                        "资料删除成功，但统一运营日志写入失败，documentId={}",
+                        documentId,
+                        logError
+                );
+            }
         }
     }
 

@@ -3,6 +3,7 @@ package com.edu.ai.document.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.edu.ai.audit.service.ContentOperationLogService;
 import com.edu.ai.common.BusinessException;
 import com.edu.ai.course.entity.Course;
 import com.edu.ai.course.service.CoursePermissionService;
@@ -49,6 +50,7 @@ public class DocumentServiceImpl implements DocumentService {
 
     private final CourseDocumentMapper documentMapper;
     private final CoursePermissionService coursePermissionService;
+    private final ContentOperationLogService operationLogService;
     private final JdbcTemplate jdbc;
     private final PdfMergeClient pdfMergeClient;
     private final Path storageRoot;
@@ -56,12 +58,14 @@ public class DocumentServiceImpl implements DocumentService {
     public DocumentServiceImpl(
             CourseDocumentMapper documentMapper,
             CoursePermissionService coursePermissionService,
+            ContentOperationLogService operationLogService,
             JdbcTemplate jdbc,
             PdfMergeClient pdfMergeClient,
             @Value("${app.storage.pdf-dir}") String storageDir) {
 
         this.documentMapper = documentMapper;
         this.coursePermissionService = coursePermissionService;
+        this.operationLogService = operationLogService;
         this.jdbc = jdbc;
         this.pdfMergeClient = pdfMergeClient;
 
@@ -82,7 +86,7 @@ public class DocumentServiceImpl implements DocumentService {
             String resourceType,
             String sourceInfo) {
 
-        return saveDocument(
+        DocumentVO created = saveDocument(
                 courseId,
                 userId,
                 file,
@@ -91,6 +95,19 @@ public class DocumentServiceImpl implements DocumentService {
                 null,
                 1
         );
+
+        operationLogService.write(
+                courseId,
+                created.getId(),
+                userId,
+                "DOCUMENT_UPLOAD",
+                "上传课程资料",
+                "上传课程资料：《" + created.getOriginalName() + "》",
+                null,
+                "资料状态=UPLOADED，版本=V1"
+        );
+
+        return created;
     }
 
     /**
@@ -561,6 +578,19 @@ public class DocumentServiceImpl implements DocumentService {
                 documentId
         );
 
+        operationLogService.write(
+                courseId,
+                newDocumentId,
+                userId,
+                "DOCUMENT_VERSION_UPLOAD",
+                "上传课程资料新版本",
+                "资源ID=" + resourceId
+                        + "，上传新版本V" + nextVersion
+                        + "，资料：《" + created.getOriginalName() + "》",
+                "原生效版本=V" + source.getVersionNo(),
+                "新版本=V" + nextVersion + "，状态=PENDING"
+        );
+
         return created;
     }
 
@@ -835,6 +865,19 @@ public class DocumentServiceImpl implements DocumentService {
                 + placeholders
                 + ")",
                 args.toArray()
+        );
+
+        operationLogService.write(
+                courseId,
+                newDocumentId,
+                userId,
+                "DOCUMENT_MERGE",
+                "合并课程资料",
+                "将" + documentIds.size()
+                        + "份课程资料合并为《"
+                        + created.getOriginalName() + "》",
+                "源资料ID=" + documentIds,
+                "新资料ID=" + newDocumentId + "，状态=UPLOADED"
         );
 
         return created;

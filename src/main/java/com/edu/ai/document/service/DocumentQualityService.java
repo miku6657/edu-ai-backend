@@ -2,6 +2,7 @@ package com.edu.ai.document.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 
+import com.edu.ai.audit.service.ContentOperationLogService;
 import com.edu.ai.common.BusinessException;
 
 import com.edu.ai.course.service.CoursePermissionService;
@@ -86,6 +87,8 @@ public class DocumentQualityService {
 
     private final NotificationService notificationService;
 
+    private final ContentOperationLogService operationLogService;
+
     public DocumentQualityService(
 
             JdbcTemplate jdbc,
@@ -96,7 +99,9 @@ public class DocumentQualityService {
 
             DocumentChunkService chunkService,
 
-            NotificationService notificationService) {
+            NotificationService notificationService,
+
+            ContentOperationLogService operationLogService) {
 
         this.jdbc = jdbc;
 
@@ -107,6 +112,8 @@ public class DocumentQualityService {
         this.chunkService = chunkService;
 
         this.notificationService = notificationService;
+
+        this.operationLogService = operationLogService;
     }
 
     // =================================================
@@ -203,6 +210,49 @@ public class DocumentQualityService {
         return value == null
                 ? 0L
                 : value;
+    }
+
+    /**
+     * 统一记录质量抽检任务下的操作。
+     */
+    private void logTaskOperation(
+            Long courseId,
+            Long taskId,
+            Long userId,
+            String operationType,
+            String operationName,
+            String description,
+            String beforeValue,
+            String afterValue) {
+
+        List<Long> documentIds = jdbc.queryForList(
+                """
+                SELECT document_id
+                FROM course_document_quality_task
+                WHERE id = ?
+                  AND course_id = ?
+                """,
+                Long.class,
+                taskId,
+                courseId
+        );
+
+        if (documentIds.isEmpty()) {
+            throw new IllegalStateException(
+                    "质量抽检任务不存在，无法写入统一运营日志"
+            );
+        }
+
+        operationLogService.write(
+                courseId,
+                documentIds.get(0),
+                userId,
+                operationType,
+                operationName,
+                description,
+                beforeValue,
+                afterValue
+        );
     }
 
     private String stringId(
@@ -1094,6 +1144,20 @@ public class DocumentQualityService {
             );
         }
 
+        logTaskOperation(
+                courseId,
+                taskId,
+                userId,
+                "QUALITY_TASK_CREATE",
+                "创建资料质量抽检任务",
+                "创建抽检任务《" + title
+                        + "》，抽检比例=" + sampleRate
+                        + "%，抽检样本数=" + sampleCount,
+                null,
+                "taskId=" + taskId
+                        + "，status=IN_PROGRESS"
+        );
+
         return getDetail(
 
                 courseId,
@@ -1655,6 +1719,21 @@ public class DocumentQualityService {
             }
         }
 
+        logTaskOperation(
+                courseId,
+                taskId,
+                userId,
+                "QUALITY_SAMPLE_CHECK",
+                "检查资料质量样本",
+                "检查样本ID=" + sampleId
+                        + "，检查结果=" + result
+                        + (comment == null
+                            ? ""
+                            : "，检查意见=" + comment),
+                "PENDING",
+                result
+        );
+
         return getDetail(
 
                 courseId,
@@ -1748,6 +1827,18 @@ public class DocumentQualityService {
                 assigneeId,
 
                 issue.description()
+        );
+
+        logTaskOperation(
+                courseId,
+                taskId,
+                userId,
+                "QUALITY_ISSUE_ASSIGN",
+                "调整质量整改责任人",
+                "质量问题ID=" + issueId
+                        + "，重新分配整改责任人",
+                "assigneeId=" + issue.assigneeId(),
+                "assigneeId=" + assigneeId
         );
 
         return getDetail(
@@ -1895,6 +1986,21 @@ public class DocumentQualityService {
                 "相关责任人已提交整改结果："
                         + issue.description()
                         + "。请前往知识库进行复核。"
+        );
+
+        logTaskOperation(
+                courseId,
+                taskId,
+                userId,
+                "QUALITY_ISSUE_RESOLVE",
+                "提交质量问题整改",
+                "质量问题ID=" + issueId
+                        + "，整改说明=" + resolution
+                        + (replacementId == null
+                            ? ""
+                            : "，整改新版本文档ID=" + replacementId),
+                OPEN,
+                RESOLVED
         );
 
         return getDetail(
@@ -2127,6 +2233,21 @@ public class DocumentQualityService {
             );
         }
 
+        logTaskOperation(
+                courseId,
+                taskId,
+                userId,
+                "QUALITY_ISSUE_REVIEW",
+                "复核质量整改结果",
+                "复核质量问题ID=" + issueId
+                        + "，决定=" + decision
+                        + (comment == null
+                            ? ""
+                            : "，复核意见=" + comment),
+                RESOLVED,
+                nextStatus
+        );
+
         return getDetail(
 
                 courseId,
@@ -2230,6 +2351,17 @@ public class DocumentQualityService {
                 ),
 
                 "完成抽检失败，任务状态已经变化"
+        );
+
+        logTaskOperation(
+                courseId,
+                taskId,
+                userId,
+                "QUALITY_TASK_COMPLETE",
+                "完成资料质量抽检任务",
+                "完成质量抽检任务ID=" + taskId,
+                "IN_PROGRESS",
+                "COMPLETED"
         );
 
         return getDetail(
@@ -2524,6 +2656,18 @@ public class DocumentQualityService {
                 reason
         );
 
+        operationLogService.write(
+                courseId,
+                documentId,
+                userId,
+                "DOCUMENT_SUSPEND",
+                "暂停资料检索",
+                "暂停资料《" + document.getOriginalName()
+                        + "》的知识库检索，原因=" + reason,
+                "qualityStatus=NORMAL",
+                "qualityStatus=SUSPENDED"
+        );
+
         return getDocumentControl(
                 courseId,
                 documentId,
@@ -2610,6 +2754,18 @@ public class DocumentQualityService {
                 "SUSPENDED",
                 "NORMAL",
                 reason
+        );
+
+        operationLogService.write(
+                courseId,
+                documentId,
+                userId,
+                "DOCUMENT_RESUME",
+                "恢复资料检索",
+                "恢复资料《" + document.getOriginalName()
+                        + "》的知识库检索，原因=" + reason,
+                "qualityStatus=SUSPENDED",
+                "qualityStatus=NORMAL"
         );
 
         return getDocumentControl(

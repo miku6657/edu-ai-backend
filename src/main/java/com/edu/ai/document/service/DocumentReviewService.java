@@ -2,6 +2,7 @@ package com.edu.ai.document.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 
+import com.edu.ai.audit.service.ContentOperationLogService;
 import com.edu.ai.common.BusinessException;
 
 import com.edu.ai.course.service.CoursePermissionService;
@@ -52,6 +53,8 @@ public class DocumentReviewService {
     private final CourseVersionChangeNotificationService
             versionChangeNotifications;
 
+    private final ContentOperationLogService operationLogService;
+
     public DocumentReviewService(
 
             JdbcTemplate jdbc,
@@ -66,7 +69,8 @@ public class DocumentReviewService {
 
             DocumentQualityService qualityService,
 
-            CourseVersionChangeNotificationService versionChangeNotifications) {
+            CourseVersionChangeNotificationService versionChangeNotifications,
+            ContentOperationLogService operationLogService) {
 
         this.jdbc = jdbc;
         this.documentMapper = documentMapper;
@@ -77,6 +81,8 @@ public class DocumentReviewService {
 
         this.versionChangeNotifications =
                 versionChangeNotifications;
+
+        this.operationLogService = operationLogService;
     }
 
     /**
@@ -536,6 +542,18 @@ public class DocumentReviewService {
                 normalizedComment
         );
 
+        operationLogService.write(
+                courseId,
+                documentId,
+                userId,
+                "DOCUMENT_REVIEW_SUBMIT",
+                "提交资料发布审核",
+                "提交资料《" + document.getOriginalName()
+                        + "》进行发布审核",
+                previousStatus,
+                PENDING
+        );
+
         return getDetail(
                 courseId,
                 documentId,
@@ -748,6 +766,23 @@ public class DocumentReviewService {
                 comment
         );
 
+        operationLogService.write(
+                courseId,
+                documentId,
+                userId,
+                replacingExistingVersion
+                        ? "DOCUMENT_VERSION_PUBLISH"
+                        : "DOCUMENT_PUBLISH",
+                replacingExistingVersion
+                        ? "发布课程资料新版本"
+                        : "首次发布课程资料",
+                "审核通过并发布资料《"
+                        + document.getOriginalName()
+                        + "》，版本V" + document.getVersionNo(),
+                "审核状态=PENDING，版本状态=PENDING",
+                "审核状态=APPROVED，版本状态=CURRENT"
+        );
+
         // F7-04：已有资源的新版本正式发布后，
         // 提醒同课程其他资料的更新责任人。
         if (replacingExistingVersion) {
@@ -811,6 +846,18 @@ public class DocumentReviewService {
                 REJECTED,
 
                 comment
+        );
+
+        operationLogService.write(
+                document.getCourseId(),
+                document.getId(),
+                userId,
+                "DOCUMENT_REVIEW_REJECT",
+                "驳回课程资料审核",
+                "驳回资料《" + document.getOriginalName()
+                        + "》，原因：" + comment,
+                PENDING,
+                REJECTED
         );
     }
 
@@ -899,6 +946,18 @@ public class DocumentReviewService {
                 DRAFT,
 
                 normalizedComment
+        );
+
+        operationLogService.write(
+                courseId,
+                documentId,
+                userId,
+                "DOCUMENT_REVIEW_WITHDRAW",
+                "撤回课程资料审核",
+                "撤回资料《" + document.getOriginalName()
+                        + "》的发布审核",
+                PENDING,
+                DRAFT
         );
 
         return getDetail(

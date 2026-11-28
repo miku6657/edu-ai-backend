@@ -1,6 +1,7 @@
 package com.edu.ai.document.service;
 
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.edu.ai.audit.service.ContentOperationLogService;
 import com.edu.ai.common.BusinessException;
 import com.edu.ai.course.entity.Course;
 import com.edu.ai.course.service.CoursePermissionService;
@@ -31,12 +32,16 @@ public class DocumentExpiryService {
 
     private final CoursePermissionService permissions;
 
+    private final ContentOperationLogService operationLogService;
+
     public DocumentExpiryService(
             CourseDocumentMapper documentMapper,
-            CoursePermissionService permissions) {
+            CoursePermissionService permissions,
+            ContentOperationLogService operationLogService) {
 
         this.documentMapper = documentMapper;
         this.permissions = permissions;
+        this.operationLogService = operationLogService;
     }
 
     /**
@@ -93,6 +98,13 @@ public class DocumentExpiryService {
         }
 
         validateRequest(request);
+
+        String beforeValue =
+                "validUntil=" + document.getValidUntil()
+                + ", responsibleId="
+                + document.getUpdateResponsibleId()
+                + ", remindDays="
+                + document.getExpiryRemindDays();
 
         Long responsibleId =
                 request.updateResponsibleId();
@@ -166,6 +178,25 @@ public class DocumentExpiryService {
 
         CourseDocument latest =
                 requireDocument(courseId, documentId);
+
+        String afterValue =
+                "validUntil=" + latest.getValidUntil()
+                + ", responsibleId="
+                + latest.getUpdateResponsibleId()
+                + ", remindDays="
+                + latest.getExpiryRemindDays();
+
+        operationLogService.write(
+                courseId,
+                documentId,
+                userId,
+                "DOCUMENT_EXPIRY_UPDATE",
+                "修改资料有效期配置",
+                "修改资料《" + latest.getOriginalName()
+                        + "》的有效期、更新责任人或提前提醒天数",
+                beforeValue,
+                afterValue
+        );
 
         return toVO(latest, course);
     }
