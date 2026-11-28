@@ -304,34 +304,95 @@ public class StudentLearningReportService {
         String content = request.content().trim();
 
         if (content.length() > 2000) {
-            throw new BusinessException(400, "批注内容不能超过2000字");
+            throw new BusinessException(
+                    400,
+                    "批注内容不能超过2000字"
+            );
         }
 
-        // 确认报告确实属于当前教师管理的课程。
+        // 确认报告属于当前教师管理的课程
         findReport(
                 "WHERE r.id = ? AND r.course_id = ?",
                 reportId,
                 courseId
         );
 
-        jdbc.update(
-                """
-                INSERT INTO student_learning_report_comment
-                    (report_id, teacher_id, comment_content)
-                VALUES (?, ?, ?)
-                """,
-                reportId,
-                teacherId,
-                content
-        );
+        KeyHolder keyHolder = new GeneratedKeyHolder();
 
-        List<CommentVO> comments = queryComments(reportId);
+        int affectedRows = jdbc.update(connection -> {
+
+            PreparedStatement ps = connection.prepareStatement(
+                    """
+                    INSERT INTO student_learning_report_comment (
+                        report_id,
+                        teacher_id,
+                        comment_content
+                    ) VALUES (?, ?, ?)
+                    """,
+                    Statement.RETURN_GENERATED_KEYS
+            );
+
+            ps.setLong(1, reportId);
+            ps.setLong(2, teacherId);
+            ps.setString(3, content);
+
+            return ps;
+
+        }, keyHolder);
+
+        Number generatedId = keyHolder.getKey();
+
+        if (affectedRows != 1 || generatedId == null) {
+            throw new BusinessException(500, "批注保存失败");
+        }
+
+        Long commentId = generatedId.longValue();
+
+        // 精确查询本次新增的批注
+        List<CommentVO> comments = jdbc.query(
+                """
+                SELECT
+                    CAST(c.id AS CHAR) AS id,
+
+                    CAST(c.teacher_id AS CHAR) AS teacher_id,
+
+                    COALESCE(
+                        NULLIF(u.nickname, ''),
+                        u.username
+                    ) AS teacher_name,
+
+                    c.comment_content,
+
+                    c.created_at
+
+                FROM student_learning_report_comment c
+
+                JOIN sys_user u
+                  ON u.id = c.teacher_id
+
+                WHERE c.id = ?
+                  AND c.report_id = ?
+                  AND c.teacher_id = ?
+                """,
+                (rs, rowNum) -> new CommentVO(
+                        rs.getString("id"),
+                        rs.getString("teacher_id"),
+                        rs.getString("teacher_name"),
+                        rs.getString("comment_content"),
+                        toLocalDateTime(
+                                rs.getTimestamp("created_at")
+                        )
+                ),
+                commentId,
+                reportId,
+                teacherId
+        );
 
         if (comments.isEmpty()) {
             throw new BusinessException(500, "批注保存失败");
         }
 
-        return comments.get(comments.size() - 1);
+        return comments.get(0);
     }
 
     /**
