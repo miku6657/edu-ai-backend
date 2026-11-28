@@ -1,10 +1,11 @@
 import { apiRequest } from '@/api/client'
 
 /**
- * 站内通知 API（`04` §4.7 `API-NOTIF-001/002`，TASK-802）。
+ * 站内通知 API。
  *
- * `notification_id` / `biz_id` 全程按十进制字符串处理；`read_status` 与 `outbound_status`
- * 保持后端枚举原样，前端不自行发明状态。
+ * notification_id 按字符串处理，避免 BIGINT 精度丢失。
+ * biz_id 为业务事件标识，可以是数字字符串或复合字符串。
+ * read_status 与 outbound_status 保持后端枚举原样。
  */
 
 export type NotificationBizType =
@@ -21,6 +22,8 @@ export type NotificationBizType =
   | 'DOC_QUALITY_REJECTED'
   | 'QA_TICKET_CREATED'
   | 'QA_TICKET_ANSWERED'
+  | 'DOC_EXPIRING'
+  | 'DOC_EXPIRED'
 
 export type NotificationReadStatus = 'UNREAD' | 'READ'
 
