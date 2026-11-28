@@ -2,6 +2,7 @@ import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 
 import AppLayout from '@/layouts/AppLayout.vue'
 import { installAuthGuard } from '@/router/guard'
+import AdminContentOperationLogsView from '@/views/AdminContentOperationLogsView.vue'
 import CoursesView from '@/views/CoursesView.vue'
 import DdlView from '@/views/DdlView.vue'
 import ExerciseReviewsView from '@/views/ExerciseReviewsView.vue'
@@ -229,6 +230,15 @@ const routes: RouteRecordRaw[] = [
         name: 'settings',
         component: SettingsView,
         meta: { title: '系统设置', requiresAuth: true },
+      },
+      {
+        path: 'admin/content-operation-logs',
+        name: 'admin-content-operation-logs',
+        component: AdminContentOperationLogsView,
+        meta: {
+          title: '内容运营日志',
+          requiresAuth: true,
+        },
       },
       {
         // 使用指南：不要求登录，未注册的人也能先看功能说明

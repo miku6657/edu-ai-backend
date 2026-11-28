@@ -103,6 +103,14 @@ const primaryNav = computed<NavEntry[]>(() => {
       routeName: 'teacher-learning-analysis',
     })
   }
+  if (auth.isAdmin) {
+    entries.push({
+      key: 'admin-content-operation-logs',
+      label: '内容运营日志',
+      icon: FileText,
+      routeName: 'admin-content-operation-logs',
+    })
+  }
   if (auth.isStudent) {
     entries.push({
       key: 'my-exercises',
