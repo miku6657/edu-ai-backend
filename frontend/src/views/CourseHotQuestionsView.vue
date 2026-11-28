@@ -988,6 +988,16 @@ onMounted(async () => {
           />
 
           <el-table-column
+            label="审核意见"
+            min-width="180"
+            show-overflow-tooltip
+          >
+            <template #default="{ row }">
+              {{ row.reviewComment || '—' }}
+            </template>
+          </el-table-column>
+
+          <el-table-column
             label="来源热度"
             width="120"
           >

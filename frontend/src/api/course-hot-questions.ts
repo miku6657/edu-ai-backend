@@ -33,6 +33,7 @@ export interface CourseHotQuestion {
   reviewComment: string | null
 
   createdAt: string
+  updatedAt: string
   submittedAt: string | null
   reviewedAt: string | null
   publishedAt: string | null
