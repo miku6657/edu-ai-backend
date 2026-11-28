@@ -16,6 +16,7 @@ import type { BigIntId } from '@/api/types'
 import {
   getStudentExerciseRecommendations,
   listStudentExercises,
+  recordStudentExerciseRecommendationClick,
 } from '@/api/exercises'
 
 import type {
@@ -35,6 +36,8 @@ const exercises = ref<StudentExercise[]>([])
 const recommendations = ref<StudentExerciseRecommendation[]>([])
 
 const recommendationWeakCount = ref(0)
+
+const recommendationBatchId = ref('')
 
 const recommendationError = ref('')
 
@@ -135,6 +138,9 @@ async function loadExercises(): Promise<void> {
     recommendations.value =
       recommendationResult?.recommendations ?? []
 
+    recommendationBatchId.value =
+      recommendationResult?.recommendationBatchId ?? ''
+
     recommendationWeakCount.value =
       recommendationResult?.weakKnowledgePointCount ?? 0
 
@@ -199,10 +205,37 @@ function openExercise(item: StudentExercise): void {
   })
 }
 
-function openRecommendedExercise(
+/**
+ * 点击推荐练习：
+ * 先记录点击，再进入练习详情。
+ *
+ * 统计服务异常不能阻止学生正常做题。
+ */
+async function openRecommendedExercise(
   item: StudentExerciseRecommendation,
-): void {
-  void router.push({
+): Promise<void> {
+
+  const batchId = recommendationBatchId.value
+
+  if (batchId) {
+
+    try {
+
+      await recordStudentExerciseRecommendationClick(
+        item.exerciseId,
+        batchId,
+      )
+
+    } catch (error) {
+
+      console.warn(
+        '推荐点击统计记录失败：',
+        error,
+      )
+    }
+  }
+
+  await router.push({
     name: 'student-exercise-detail',
     params: {
       exerciseId: item.exerciseId,

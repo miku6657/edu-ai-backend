@@ -180,6 +180,7 @@ export interface StudentExerciseRecommendation {
 }
 
 export interface StudentExerciseRecommendationResult {
+  recommendationBatchId: string
   weakKnowledgePointCount: number
   recommendedExerciseCount: number
   recommendations: StudentExerciseRecommendation[]
@@ -198,6 +199,25 @@ export function getStudentExerciseRecommendations(
 
   return apiRequest<StudentExerciseRecommendationResult>(
     `/v1/student/exercises/recommendations${query}`,
+  )
+}
+
+/**
+ * 记录学生点击个性化推荐练习。
+ */
+export function recordStudentExerciseRecommendationClick(
+  exerciseId: BigIntId,
+  recommendationBatchId: string,
+): Promise<string> {
+
+  return apiRequest<string>(
+    `/v1/student/exercises/recommendations/${encodeURIComponent(exerciseId)}/click`,
+    {
+      method: 'POST',
+      body: {
+        recommendationBatchId,
+      },
+    },
   )
 }
 
