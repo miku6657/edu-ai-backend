@@ -232,9 +232,9 @@ public class NotificationService {
     }
 
     /**
-     * 同一业务事件只生成一次通知。
+     * 普通业务通知。
      *
-     * MySQL唯一索引负责幂等去重。
+     * 兼容原有DDL、文档入库、质量整改等通知。
      */
     public void createIfAbsent(
             Long userId,
@@ -245,6 +245,51 @@ public class NotificationService {
 
         if (userId == null || bizId == null) {
             return;
+        }
+
+        createIfAbsentWithKey(
+                userId,
+                bizType,
+                bizId.toString(),
+                title,
+                content
+        );
+    }
+
+    /**
+     * 支持自定义业务事件标识的通知。
+     *
+     * 例如：
+     * 文档ID:有效截止日期
+     *
+     * 通过数据库唯一索引实现幂等去重。
+     */
+    public void createIfAbsentWithKey(
+            Long userId,
+            String bizType,
+            String bizKey,
+            String title,
+            String content) {
+
+        if (userId == null
+                || bizType == null
+                || bizType.isBlank()
+                || bizKey == null
+                || bizKey.isBlank()) {
+
+            return;
+        }
+
+        if (bizType.length() > 40) {
+            throw new IllegalArgumentException(
+                    "通知业务类型不能超过40字符"
+            );
+        }
+
+        if (bizKey.length() > 64) {
+            throw new IllegalArgumentException(
+                    "通知业务标识不能超过64字符"
+            );
         }
 
         jdbc.update(
@@ -266,7 +311,7 @@ public class NotificationService {
                 """,
                 userId,
                 bizType,
-                bizId.toString(),
+                bizKey,
                 trim(title, 200),
                 trim(content, 2000)
         );
