@@ -1,5 +1,6 @@
 import { apiRequest } from '@/api/client'
 import type { BigIntId } from '@/api/types'
+import type { StudentWeakPointDiagnostic } from '@/api/learning-path'
 
 export interface StudentProgress {
   studentId: BigIntId
@@ -108,5 +109,18 @@ export function getTeacherCourseLearningAnalysis(
 ): Promise<TeacherCourseLearningAnalysis> {
   return apiRequest<TeacherCourseLearningAnalysis>(
     `/v1/teacher/courses/${encodeURIComponent(courseId)}/learning-analysis`,
+  )
+}
+
+/**
+ * 教师查看指定课程学生的 F6-02 薄弱知识点诊断。
+ */
+export function getTeacherStudentWeakPointDiagnosis(
+  courseId: BigIntId,
+  studentId: BigIntId,
+): Promise<StudentWeakPointDiagnostic[]> {
+
+  return apiRequest<StudentWeakPointDiagnostic[]>(
+    `/v1/teacher/courses/${encodeURIComponent(courseId)}/learning-analysis/students/${encodeURIComponent(studentId)}/weak-point-diagnosis`,
   )
 }
