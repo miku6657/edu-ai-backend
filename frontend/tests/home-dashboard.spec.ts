@@ -111,6 +111,11 @@ function doc(id: string, overrides: Partial<KnowledgeDoc> = {}): KnowledgeDoc {
     status: 'READY',
     errorMessage: null,
     createTime: '2026-10-30T10:00:00+08:00',
+    validUntil: null,
+    updateResponsibleId: null,
+    expiryRemindDays: 7,
+    expiryStatus: 'UNLIMITED',
+    remainingDays: null,
     ...overrides,
   }
 }

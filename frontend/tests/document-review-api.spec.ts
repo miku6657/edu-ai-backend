@@ -149,6 +149,11 @@ describe('document review api', () => {
       status: 'READY',
       errorMessage: null,
       createTime: '2026-11-26T14:00:00',
+      validUntil: null,
+      updateResponsibleId: null,
+      expiryRemindDays: 7,
+      expiryStatus: 'UNLIMITED',
+      remainingDays: null,
     }
 
     expect(isDocumentKnowledgeEditable(base)).toBe(true)

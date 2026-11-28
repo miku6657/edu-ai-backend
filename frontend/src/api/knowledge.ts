@@ -1,5 +1,8 @@
 import { apiPdf, apiRequest } from '@/api/client'
 import type { BigIntId } from '@/api/types'
+import type {
+  DocumentExpiryStatus,
+} from '@/api/document-expiry'
 
 export type DocumentStatus =
   | 'UPLOADED'
@@ -88,6 +91,17 @@ export interface KnowledgeDoc {
   status: DocumentStatus
   errorMessage: string | null
   createTime: string
+
+  // F7-04 资料有效期管理
+  validUntil: string | null
+
+  updateResponsibleId: BigIntId | null
+
+  expiryRemindDays: number
+
+  expiryStatus: DocumentExpiryStatus
+
+  remainingDays: number | null
 }
 
 export interface UploadDocumentOptions {

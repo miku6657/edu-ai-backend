@@ -51,6 +51,11 @@ import DocumentQualityDialog from '@/views/knowledge/DocumentQualityDialog.vue'
 import DocumentMergeDialog from '@/views/knowledge/DocumentMergeDialog.vue'
 import DocumentPreviewDialog from '@/views/knowledge/DocumentPreviewDialog.vue'
 import DocumentVersionDialog from '@/views/knowledge/DocumentVersionDialog.vue'
+import DocumentExpiryDialog from '@/views/knowledge/DocumentExpiryDialog.vue'
+
+import type {
+  DocumentExpiryStatus,
+} from '@/api/document-expiry'
 import {
   documentStatusLabel,
   documentStatusTagType,
@@ -80,6 +85,8 @@ const selectedCourseId = ref<BigIntId | null>(
   courseStore.selectedCourseId,
 )
 const filterStatus = ref<DocumentStatus | ''>('')
+const filterExpiryStatus =
+  ref<DocumentExpiryStatus | ''>('')
 const uploadResourceType =
   ref<ResourceTypeSelection>('AUTO')
 const uploadSourceInfo = ref('')
@@ -99,6 +106,9 @@ const previewDoc = ref<
 >(null)
 const versionDialogVisible = ref(false)
 const versionDocument = ref<KnowledgeDoc | null>(null)
+// F7-04 资料有效期管理
+const expiryDialogVisible = ref(false)
+const expiryDocument = ref<KnowledgeDoc | null>(null)
 const mergeDialogVisible = ref(false)
 const chunkDialogVisible = ref(false)
 const chunkDocument = ref<KnowledgeDoc | null>(null)
@@ -111,6 +121,16 @@ const resourceFilterOptions = [
   ...RESOURCE_TYPE_OPTIONS.filter(
     (item) => item.value !== 'AUTO',
   ),
+]
+const expiryFilterOptions: Array<{
+  value: DocumentExpiryStatus | ''
+  label: string
+}> = [
+  { value: '', label: '全部有效期' },
+  { value: 'UNLIMITED', label: '长期有效' },
+  { value: 'VALID', label: '正常有效' },
+  { value: 'EXPIRING', label: '即将到期' },
+  { value: 'EXPIRED', label: '已经过期' },
 ]
 const loadingCourses = ref(true)
 const loadingDocs = ref(false)
@@ -180,6 +200,14 @@ const visibleDocs = computed(() => {
     if (
       filterStatus.value !== ''
       && doc.status !== filterStatus.value
+    ) {
+      return false
+    }
+
+    // F7-04 有效期状态筛选
+    if (
+      filterExpiryStatus.value !== ''
+      && doc.expiryStatus !== filterExpiryStatus.value
     ) {
       return false
     }
@@ -282,6 +310,8 @@ watch(
     previewDoc.value = null
     versionDialogVisible.value = false
     versionDocument.value = null
+    expiryDialogVisible.value = false
+    expiryDocument.value = null
     mergeDialogVisible.value = false
     chunkDialogVisible.value = false
     chunkDocument.value = null
@@ -641,6 +671,131 @@ function openVersionManager(doc: KnowledgeDoc): void {
   versionDialogVisible.value = true
 }
 
+/**
+ * 打开资料有效期管理。
+ */
+function openExpiryManager(doc: KnowledgeDoc): void {
+  if (!canManageDocuments.value) {
+    notifyWarning('无权管理资料有效期')
+    return
+  }
+
+  if (doc.courseId !== selectedCourseId.value) {
+    notifyWarning('该资料不属于当前课程')
+    return
+  }
+
+  if (doc.status !== 'READY') {
+    notifyWarning('资料尚未完成处理，不能配置有效期')
+    return
+  }
+
+  if (doc.versionStatus === 'HISTORY') {
+    notifyWarning('历史版本仅供查看，不能修改有效期')
+    return
+  }
+
+  expiryDocument.value = doc
+  expiryDialogVisible.value = true
+}
+
+/**
+ * 有效期配置保存后刷新资料列表。
+ */
+async function onExpiryChanged(): Promise<void> {
+  const courseId = selectedCourseId.value
+
+  await loadDocs()
+
+  if (
+    !courseId
+    || courseId !== selectedCourseId.value
+  ) {
+    return
+  }
+
+  if (expiryDocument.value) {
+    const latest = docs.value.find(
+      item => item.id === expiryDocument.value?.id,
+    )
+
+    if (latest) {
+      expiryDocument.value = latest
+    }
+  }
+}
+
+/**
+ * 有效期状态文本。
+ */
+function expiryStatusLabel(
+  status: DocumentExpiryStatus,
+): string {
+  switch (status) {
+    case 'UNLIMITED':
+      return '长期有效'
+
+    case 'VALID':
+      return '正常有效'
+
+    case 'EXPIRING':
+      return '即将到期'
+
+    case 'EXPIRED':
+      return '已经过期'
+
+    default:
+      return '未知状态'
+  }
+}
+
+/**
+ * 有效期状态颜色。
+ */
+function expiryStatusTagType(
+  status: DocumentExpiryStatus,
+): 'success' | 'warning' | 'danger' | 'info' {
+  switch (status) {
+    case 'VALID':
+      return 'success'
+
+    case 'EXPIRING':
+      return 'warning'
+
+    case 'EXPIRED':
+      return 'danger'
+
+    case 'UNLIMITED':
+    default:
+      return 'info'
+  }
+}
+
+/**
+ * 有效期剩余时间。
+ */
+function expiryRemainingText(
+  doc: KnowledgeDoc,
+): string {
+  if (doc.expiryStatus === 'UNLIMITED') {
+    return '不限制'
+  }
+
+  if (doc.remainingDays === null) {
+    return '—'
+  }
+
+  if (doc.remainingDays < 0) {
+    return `已过期 ${Math.abs(doc.remainingDays)} 天`
+  }
+
+  if (doc.remainingDays === 0) {
+    return '今日到期'
+  }
+
+  return `剩余 ${doc.remainingDays} 天`
+}
+
 function openHistoricalPreview(
   doc: Pick<KnowledgeDoc, 'id' | 'originalName'>,
 ): void {
@@ -658,6 +813,7 @@ function resetResourceFilters(): void {
   filterResourceType.value = ''
   filterChapterId.value = ''
   filterPointId.value = ''
+  filterExpiryStatus.value = ''
 }
 
 function chooseFile(): void {
@@ -1245,6 +1401,20 @@ function documentTone(doc: KnowledgeDoc): Tone {
                     />
                   </el-select>
 
+                  <el-select
+                    v-model="filterExpiryStatus"
+                    clearable
+                    :value-on-clear="''"
+                    placeholder="全部有效期"
+                  >
+                    <el-option
+                      v-for="option in expiryFilterOptions"
+                      :key="option.value"
+                      :label="option.label"
+                      :value="option.value"
+                    />
+                  </el-select>
+
                   <el-button @click="resetResourceFilters">
                     重置筛选
                   </el-button>
@@ -1446,6 +1616,37 @@ function documentTone(doc: KnowledgeDoc): Tone {
                     </el-tag>
                   </template>
                 </el-table-column>
+                <el-table-column
+                  label="有效期"
+                  :width="compact ? 115 : 165"
+                >
+                  <template #default="{ row }">
+                    <div class="resource-expiry-cell">
+
+                      <el-tag
+                        :type="expiryStatusTagType(row.expiryStatus)"
+                        size="small"
+                      >
+                        {{ expiryStatusLabel(row.expiryStatus) }}
+                      </el-tag>
+
+                      <span
+                        v-if="row.validUntil"
+                        class="knowledge-muted"
+                      >
+                        {{ row.validUntil }}
+                      </span>
+
+                      <span
+                        v-if="row.expiryStatus !== 'UNLIMITED'"
+                        class="resource-expiry-remaining"
+                      >
+                        {{ expiryRemainingText(row) }}
+                      </span>
+
+                    </div>
+                  </template>
+                </el-table-column>
                 <el-table-column label="状态" :width="compact ? 85 : 100">
                   <template #default="{ row }">
                     <TagBadge
@@ -1473,7 +1674,7 @@ function documentTone(doc: KnowledgeDoc): Tone {
                 </el-table-column>
                 <el-table-column
                   label="操作"
-                  :width="compact ? 250 : 520"
+                  :width="compact ? 310 : 620"
                   fixed="right"
                 >
                   <template #default="{ row }">
@@ -1548,6 +1749,19 @@ function documentTone(doc: KnowledgeDoc): Tone {
                         @click="onResumeRetrieval(row)"
                       >
                         恢复检索
+                      </el-button>
+
+                      <el-button
+                        v-if="
+                          canManageDocuments
+                          && row.status === 'READY'
+                          && row.versionStatus !== 'HISTORY'
+                        "
+                        text
+                        type="primary"
+                        @click="openExpiryManager(row)"
+                      >
+                        有效期
                       </el-button>
 
                       <el-button
@@ -1653,6 +1867,14 @@ function documentTone(doc: KnowledgeDoc): Tone {
       :refresh-key="resourceVersionKey"
       @changed="onVersionChanged"
       @preview="openHistoricalPreview"
+    />
+    <DocumentExpiryDialog
+      v-model="expiryDialogVisible"
+      :course-id="selectedCourseId"
+      :course-owner-id="currentCourse?.ownerId ?? null"
+      :document="expiryDocument"
+      :can-manage="canManageDocuments"
+      @changed="onExpiryChanged"
     />
     <DocumentPreviewDialog
       v-model="previewVisible"
@@ -2219,5 +2441,18 @@ function documentTone(doc: KnowledgeDoc): Tone {
 
 .resource-row-actions :deep(.el-button) {
   margin-left: 0;
+}
+
+.resource-expiry-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+}
+
+.resource-expiry-remaining {
+  color: var(--sc-text-secondary);
+  font-size: 11px;
+  line-height: 1.5;
 }
 </style>

@@ -38,6 +38,11 @@ function doc(status: KnowledgeDoc['status']): KnowledgeDoc {
     status,
     errorMessage: null,
     createTime: '2026-10-21T10:00:00.000+08:00',
+    validUntil: null,
+    updateResponsibleId: null,
+    expiryRemindDays: 7,
+    expiryStatus: 'UNLIMITED',
+    remainingDays: null,
   }
 }
 
