@@ -1264,39 +1264,41 @@ public class TeacherCourseLearningAnalysisService {
                         """
                         SELECT
 
-                            COUNT(
-                                CASE
-                                    WHEN event_type = 'EXPOSURE'
-                                    THEN 1
-                                END
-                            ) AS exposure_count,
+                            COUNT(DISTINCT exposure.id) AS exposure_count,
 
                             COUNT(
-                                CASE
-                                    WHEN event_type = 'CLICK'
-                                    THEN 1
+                                DISTINCT CASE
+                                    WHEN click.id IS NOT NULL
+                                    THEN exposure.id
                                 END
                             ) AS click_count,
 
-                            COUNT(
-                                DISTINCT CASE
-                                    WHEN event_type = 'EXPOSURE'
-                                    THEN student_id
-                                END
-                            ) AS exposed_student_count,
+                            COUNT(DISTINCT exposure.student_id)
+                                AS exposed_student_count,
 
                             COUNT(
                                 DISTINCT CASE
-                                    WHEN event_type = 'CLICK'
-                                    THEN student_id
+                                    WHEN click.id IS NOT NULL
+                                    THEN exposure.student_id
                                 END
                             ) AS clicked_student_count
 
-                        FROM course_exercise_recommendation_event
+                        FROM course_exercise_recommendation_event exposure
 
-                        WHERE course_id = ?
+                        LEFT JOIN course_exercise_recommendation_event click
+                          ON click.recommendation_batch_id =
+                             exposure.recommendation_batch_id
+                         AND click.student_id = exposure.student_id
+                         AND click.exercise_id = exposure.exercise_id
+                         AND click.course_id = exposure.course_id
+                         AND click.event_type = 'CLICK'
+                         AND click.event_at >= exposure.event_at
 
-                          AND event_at >=
+                        WHERE exposure.event_type = 'EXPOSURE'
+
+                          AND exposure.course_id = ?
+
+                          AND exposure.event_at >=
                               DATE_SUB(
                                   CURRENT_TIMESTAMP(3),
                                   INTERVAL 30 DAY
@@ -1336,43 +1338,45 @@ public class TeacherCourseLearningAnalysisService {
 
                             e.title AS exercise_title,
 
-                            COUNT(
-                                CASE
-                                    WHEN ev.event_type = 'EXPOSURE'
-                                    THEN 1
-                                END
-                            ) AS exposure_count,
+                            COUNT(DISTINCT exposure.id) AS exposure_count,
 
                             COUNT(
-                                CASE
-                                    WHEN ev.event_type = 'CLICK'
-                                    THEN 1
+                                DISTINCT CASE
+                                    WHEN click.id IS NOT NULL
+                                    THEN exposure.id
                                 END
                             ) AS click_count,
 
-                            COUNT(
-                                DISTINCT CASE
-                                    WHEN ev.event_type = 'EXPOSURE'
-                                    THEN ev.student_id
-                                END
-                            ) AS exposed_student_count,
+                            COUNT(DISTINCT exposure.student_id)
+                                AS exposed_student_count,
 
                             COUNT(
                                 DISTINCT CASE
-                                    WHEN ev.event_type = 'CLICK'
-                                    THEN ev.student_id
+                                    WHEN click.id IS NOT NULL
+                                    THEN exposure.student_id
                                 END
                             ) AS clicked_student_count
 
-                        FROM course_exercise_recommendation_event ev
+                        FROM course_exercise_recommendation_event exposure
+
+                        LEFT JOIN course_exercise_recommendation_event click
+                          ON click.recommendation_batch_id =
+                             exposure.recommendation_batch_id
+                         AND click.student_id = exposure.student_id
+                         AND click.exercise_id = exposure.exercise_id
+                         AND click.course_id = exposure.course_id
+                         AND click.event_type = 'CLICK'
+                         AND click.event_at >= exposure.event_at
 
                         JOIN course_exercise e
-                          ON e.id = ev.exercise_id
-                         AND e.course_id = ev.course_id
+                          ON e.id = exposure.exercise_id
+                         AND e.course_id = exposure.course_id
 
-                        WHERE ev.course_id = ?
+                        WHERE exposure.event_type = 'EXPOSURE'
 
-                          AND ev.event_at >=
+                          AND exposure.course_id = ?
+
+                          AND exposure.event_at >=
                               DATE_SUB(
                                   CURRENT_TIMESTAMP(3),
                                   INTERVAL 30 DAY
