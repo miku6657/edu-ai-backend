@@ -30,7 +30,9 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -817,6 +819,10 @@ public class DocumentServiceImpl implements DocumentService {
                         userId
                 );
 
+        LocalDate today = LocalDate.now(
+                ZoneId.of("Asia/Shanghai")
+        );
+
         LambdaQueryWrapper<CourseDocument> query =
                 new LambdaQueryWrapper<CourseDocument>()
                         .eq(
@@ -829,31 +835,41 @@ public class DocumentServiceImpl implements DocumentService {
                         )
                         .and(wrapper -> {
 
-                            // 所有课程成员都可以查看
-                            // 已完成索引的当前生效版本。
-                            wrapper.nested(current ->
-                                    current.eq(
-                                            CourseDocument::getVersionStatus,
-                                            "CURRENT"
-                                    ).eq(
-                                            CourseDocument::getStatus,
-                                            "READY"
-                                    ).eq(
-                                            CourseDocument::getReviewStatus,
-                                            "APPROVED"
-                                    )
-                            );
+                            wrapper.nested(current -> {
+
+                                current.eq(
+                                        CourseDocument::getVersionStatus,
+                                        "CURRENT"
+                                ).eq(
+                                        CourseDocument::getStatus,
+                                        "READY"
+                                ).eq(
+                                        CourseDocument::getReviewStatus,
+                                        "APPROVED"
+                                );
+
+                                // 学生不能查看已经过期的资料。
+                                // 教师和管理员仍然可以查看。
+                                if (!canManage) {
+
+                                    current.and(expiry ->
+                                            expiry.isNull(
+                                                    CourseDocument::getValidUntil
+                                            ).or().ge(
+                                                    CourseDocument::getValidUntil,
+                                                    today
+                                            )
+                                    );
+                                }
+                            });
 
                             if (canManage) {
 
-                                // 教师可以查看尚未完成处理的版本。
                                 wrapper.or().eq(
                                         CourseDocument::getVersionStatus,
                                         "PENDING"
                                 );
 
-                                // 教师还可以查看正在删除
-                                // 或删除失败的资源。
                                 wrapper.or().in(
                                         CourseDocument::getStatus,
                                         "DELETING",
@@ -916,6 +932,21 @@ public class DocumentServiceImpl implements DocumentService {
             throw new BusinessException(
                     403,
                     "该资料尚未正式发布"
+            );
+        }
+
+        // F7-04：过期资料禁止学生继续预览和下载。
+        if (!canManage
+                && doc.getValidUntil() != null
+                && doc.getValidUntil().isBefore(
+                        LocalDate.now(
+                                ZoneId.of("Asia/Shanghai")
+                        )
+                )) {
+
+            throw new BusinessException(
+                    403,
+                    "该资料已过期，暂时停止访问，请联系课程负责人"
             );
         }
 

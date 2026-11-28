@@ -40,7 +40,9 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -499,8 +501,12 @@ ChatService {
             // 查询当前课程所有已经生效的资源版本。
             // 白名单必须由Java后端生成，不能由前端指定。
             List<Long> allowedDocumentIds =
-                    documentMapper.selectReadyDocumentIds(
-                            session.getCourseId()
+                    documentMapper.selectRetrievableDocumentIds(
+                            session.getCourseId(),
+
+                            LocalDate.now(
+                                    ZoneId.of("Asia/Shanghai")
+                            )
                     );
 
             ArrayNode allowedDocuments =

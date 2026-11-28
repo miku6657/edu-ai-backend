@@ -7,7 +7,10 @@ import lombok.Data;
 import tools.jackson.databind.annotation.JsonSerialize;
 import tools.jackson.databind.ser.std.ToStringSerializer;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 
 @Data
 public class DocumentVO {
@@ -28,6 +31,20 @@ public class DocumentVO {
     private String resourceType;
 
     private String sourceInfo;
+
+    /**
+     * F7-04：资料有效期。
+     */
+    private LocalDate validUntil;
+
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long updateResponsibleId;
+
+    private Integer expiryRemindDays;
+
+    private String expiryStatus;
+
+    private Long remainingDays;
 
     @JsonSerialize(using = ToStringSerializer.class)
     private Long resourceId;
@@ -89,6 +106,53 @@ public class DocumentVO {
         vo.setResourceType(doc.getResourceType());
 
         vo.setSourceInfo(doc.getSourceInfo());
+
+        // F7-04：资料有效期信息
+        vo.setValidUntil(
+                doc.getValidUntil()
+        );
+
+        vo.setUpdateResponsibleId(
+                doc.getUpdateResponsibleId()
+        );
+
+        int remindDays =
+                doc.getExpiryRemindDays() == null
+                        ? 7
+                        : doc.getExpiryRemindDays();
+
+        vo.setExpiryRemindDays(remindDays);
+
+        if (doc.getValidUntil() == null) {
+
+            vo.setExpiryStatus("UNLIMITED");
+
+            vo.setRemainingDays(null);
+
+        } else {
+
+            long remainingDays = ChronoUnit.DAYS.between(
+                    LocalDate.now(
+                            ZoneId.of("Asia/Shanghai")
+                    ),
+                    doc.getValidUntil()
+            );
+
+            vo.setRemainingDays(remainingDays);
+
+            if (remainingDays < 0) {
+
+                vo.setExpiryStatus("EXPIRED");
+
+            } else if (remainingDays <= remindDays) {
+
+                vo.setExpiryStatus("EXPIRING");
+
+            } else {
+
+                vo.setExpiryStatus("VALID");
+            }
+        }
 
         vo.setResourceId(doc.getResourceId());
 

@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 @Data
@@ -31,6 +32,23 @@ public class CourseDocument {
      * 资源来源。
      */
     private String sourceInfo;
+
+    /**
+     * 资料有效截止日期。
+     * NULL 表示长期有效。
+     */
+    private LocalDate validUntil;
+
+    /**
+     * 资料更新责任人。
+     * NULL 表示由课程负责人承担更新责任。
+     */
+    private Long updateResponsibleId;
+
+    /**
+     * 到期前提醒天数。
+     */
+    private Integer expiryRemindDays;
 
     /**
      * 同一资源的所有版本共享resourceId。

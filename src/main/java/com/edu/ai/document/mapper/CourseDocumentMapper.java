@@ -8,6 +8,7 @@ import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 
+import java.time.LocalDate;
 import java.util.List;
 
 @Mapper
@@ -53,5 +54,38 @@ public interface CourseDocumentMapper
             """)
     List<Long> selectReadyDocumentIds(
             @Param("courseId") Long courseId
+    );
+
+    /**
+     * 查询当前允许参与RAG检索的文档ID。
+     *
+     * 与Embedding迁移使用的文档集合分开，
+     * 避免过期资料恢复有效期后缺少向量。
+     */
+    @Select("""
+            SELECT id
+
+            FROM course_document
+
+            WHERE course_id = #{courseId}
+
+              AND status = 'READY'
+
+              AND version_status = 'CURRENT'
+
+              AND review_status = 'APPROVED'
+
+              AND quality_status = 'NORMAL'
+
+              AND (
+                  valid_until IS NULL
+                  OR valid_until >= #{today}
+              )
+
+            ORDER BY id ASC
+            """)
+    List<Long> selectRetrievableDocumentIds(
+            @Param("courseId") Long courseId,
+            @Param("today") LocalDate today
     );
 }
