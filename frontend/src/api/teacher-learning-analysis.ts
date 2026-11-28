@@ -48,6 +48,26 @@ export interface KnowledgePointLearningStat {
   lastPracticedAt: string | null
 }
 
+export interface RecommendationExerciseUsage {
+  exerciseId: BigIntId
+  exerciseTitle: string
+  exposureCount: number
+  clickCount: number
+  exposedStudentCount: number
+  clickedStudentCount: number
+  clickRate: number | null
+}
+
+export interface RecommendationUsage {
+  periodDays: number
+  exposureCount: number
+  clickCount: number
+  exposedStudentCount: number
+  clickedStudentCount: number
+  clickRate: number | null
+  topExercises: RecommendationExerciseUsage[]
+}
+
 export interface TeacherCourseLearningAnalysis {
   courseId: BigIntId
   courseName: string
@@ -69,6 +89,9 @@ export interface TeacherCourseLearningAnalysis {
   materials: MaterialUsage[]
   chapters: ChapterProgress[]
   lowCompletionChapters: ChapterProgress[]
+
+  recommendationUsage: RecommendationUsage
+
   generatedAt: string
 }
 

@@ -1469,6 +1469,136 @@ async function submitStudentReportComment(): Promise<void> {
 
       </BaseCard>
 
+      <!-- 八、练习推荐使用情况 -->
+      <BaseCard title="练习推荐使用情况">
+
+        <template #header>
+          <div class="recommendation-analytics-header">
+            <div>
+              <h3>练习推荐使用情况</h3>
+              <p>统计近30天学生个性化练习推荐的曝光和点击情况。</p>
+            </div>
+
+            <el-tag type="info">
+              近{{ analysis.recommendationUsage.periodDays }}天
+            </el-tag>
+          </div>
+        </template>
+
+        <div class="recommendation-analytics-summary">
+
+          <div>
+            <span>推荐曝光次数</span>
+            <strong>
+              {{ analysis.recommendationUsage.exposureCount }}
+            </strong>
+          </div>
+
+          <div>
+            <span>推荐点击次数</span>
+            <strong>
+              {{ analysis.recommendationUsage.clickCount }}
+            </strong>
+          </div>
+
+          <div>
+            <span>曝光学生人数</span>
+            <strong>
+              {{ analysis.recommendationUsage.exposedStudentCount }}
+            </strong>
+          </div>
+
+          <div>
+            <span>点击学生人数</span>
+            <strong>
+              {{ analysis.recommendationUsage.clickedStudentCount }}
+            </strong>
+          </div>
+
+          <div>
+            <span>推荐点击率</span>
+            <strong>
+              {{
+                analysis.recommendationUsage.clickRate === null
+                  ? '—'
+                  : `${analysis.recommendationUsage.clickRate}%`
+              }}
+            </strong>
+          </div>
+
+        </div>
+
+        <el-table
+          :data="analysis.recommendationUsage.topExercises"
+          stripe
+          style="width: 100%"
+        >
+
+          <el-table-column
+            prop="exerciseTitle"
+            label="练习名称"
+            min-width="220"
+            show-overflow-tooltip
+          />
+
+          <el-table-column
+            prop="exposureCount"
+            label="曝光次数"
+            width="110"
+            align="center"
+          />
+
+          <el-table-column
+            prop="clickCount"
+            label="点击次数"
+            width="110"
+            align="center"
+          />
+
+          <el-table-column
+            prop="exposedStudentCount"
+            label="曝光学生"
+            width="110"
+            align="center"
+          />
+
+          <el-table-column
+            prop="clickedStudentCount"
+            label="点击学生"
+            width="110"
+            align="center"
+          />
+
+          <el-table-column
+            label="点击率"
+            width="110"
+            align="center"
+          >
+            <template #default="{ row }">
+              {{
+                row.clickRate === null
+                  ? '—'
+                  : `${row.clickRate}%`
+              }}
+            </template>
+          </el-table-column>
+
+        </el-table>
+
+        <el-empty
+          v-if="analysis.recommendationUsage.topExercises.length === 0"
+          description="近30天暂无练习推荐使用记录"
+          :image-size="80"
+        />
+
+        <p class="tracking-note">
+          曝光表示推荐结果成功返回学生端；
+          点击表示学生通过推荐卡片进入练习详情。
+          相同推荐批次内的重复点击不会重复计数。
+        </p>
+
+      </BaseCard>
+
       <div class="generated-at">
         数据统计时间：{{ formatDateTime(analysis.generatedAt) }}
       </div>
@@ -2351,6 +2481,58 @@ async function submitStudentReportComment(): Promise<void> {
 
   .teacher-comment-heading {
     flex-direction: column;
+  }
+}
+
+.recommendation-analytics-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.recommendation-analytics-header h3 {
+  margin: 0;
+  color: var(--sc-text);
+  font-size: 16px;
+}
+
+.recommendation-analytics-header p {
+  margin-top: 6px;
+  color: var(--sc-text-secondary);
+  font-size: 12px;
+}
+
+.recommendation-analytics-summary {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.recommendation-analytics-summary > div {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 9px;
+  background: var(--sc-surface-muted);
+}
+
+.recommendation-analytics-summary span {
+  color: var(--sc-text-secondary);
+  font-size: 12px;
+}
+
+.recommendation-analytics-summary strong {
+  color: var(--sc-text);
+  font-size: 23px;
+  font-weight: 700;
+}
+
+@media (max-width: 900px) {
+  .recommendation-analytics-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 </style>
