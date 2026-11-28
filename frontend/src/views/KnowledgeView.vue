@@ -1879,6 +1879,8 @@ function documentTone(doc: KnowledgeDoc): Tone {
     <DocumentPreviewDialog
       v-model="previewVisible"
       :document="previewDoc"
+      :course-id="selectedCourseId"
+      :can-manage="canManageDocuments"
     />
   </div>
 </template>

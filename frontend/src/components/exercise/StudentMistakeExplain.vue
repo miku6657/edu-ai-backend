@@ -620,6 +620,8 @@ onBeforeUnmount(() => {
       v-model="previewVisible"
       :document="previewDocument"
       :page="previewPage"
+      :course-id="props.mistake.courseId"
+      :can-manage="false"
     />
 
   </div>

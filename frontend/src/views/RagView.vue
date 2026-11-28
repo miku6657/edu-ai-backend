@@ -1063,6 +1063,8 @@ function relativeTime(value: string): string {
       v-model="citationPreviewVisible"
       :document="citationPreviewDocument"
       :page="citationPreviewPage"
+      :course-id="selectedCourseId"
+      :can-manage="auth.isTeacher || auth.isAdmin"
     />
   </div>
 </template>

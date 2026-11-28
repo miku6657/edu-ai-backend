@@ -11,16 +11,31 @@ import {
   previewDocument,
 } from '@/api/knowledge'
 import type { KnowledgeDoc } from '@/api/knowledge'
+import type { BigIntId } from '@/api/types'
 import { notifyError } from '@/utils/notify'
+import DocumentSummaryPanel from '@/views/knowledge/DocumentSummaryPanel.vue'
 
-const props = defineProps<{
-  modelValue: boolean
-  document: Pick<
-    KnowledgeDoc,
-    'id' | 'originalName'
-  > | null
-  page?: number | null
-}>()
+const props = withDefaults(
+  defineProps<{
+    modelValue: boolean
+
+    document: Pick<
+      KnowledgeDoc,
+      'id' | 'originalName'
+    > | null
+
+    page?: number | null
+
+    courseId?: BigIntId | null
+
+    canManage?: boolean
+  }>(),
+  {
+    page: null,
+    courseId: null,
+    canManage: false,
+  },
+)
 
 const emit = defineEmits<{
   'update:modelValue': [value: boolean]
@@ -216,6 +231,13 @@ onUnmounted(() => {
         正在加载课程资料……
       </p>
     </div>
+
+    <DocumentSummaryPanel
+      :visible="modelValue"
+      :course-id="courseId"
+      :document-id="document?.id ?? null"
+      :can-manage="canManage"
+    />
 
     <template #footer>
       <div class="pdf-preview-footer">
