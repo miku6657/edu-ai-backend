@@ -420,35 +420,44 @@ def internal_pdf_quality_inspect(
     pdf_path = (PDF_STORAGE_DIR / request.storage_name).resolve()
 
     if not pdf_path.is_relative_to(PDF_STORAGE_DIR.resolve()):
-        raise HTTPException(status_code=400, detail="非法文件名")
+        raise HTTPException(
+            status_code=400,
+            detail="非法文件名",
+        )
 
     if not pdf_path.is_file():
-        raise HTTPException(status_code=404, detail="PDF 文件不存在")
+        raise HTTPException(
+            status_code=404,
+            detail="PDF文件不存在",
+        )
 
     try:
-        document = pymupdf.open(pdf_path)
-        page_count = document.page_count
-
         pages_without_text = []
         image_only_pages = []
         parse_error_pages = []
 
-        for index, page in enumerate(document, start=1):
-            try:
-                page_text = (
-                    page.get_text("text") or ""
-                ).strip()
-                images = page.get_images(full=True)
+        with pymupdf.open(pdf_path) as document:
+            page_count = document.page_count
 
-                if not page_text:
-                    pages_without_text.append(index)
-                    if images:
-                        image_only_pages.append(index)
+            if page_count <= 0:
+                raise ValueError("PDF没有有效页面")
 
-            except Exception:
-                parse_error_pages.append(index)
+            for index, page in enumerate(
+                document,
+                start=1,
+            ):
+                try:
+                    page_text = (
+                        page.get_text("text") or ""
+                    ).strip()
+                    images = page.get_images(full=True)
 
-        document.close()
+                    if not page_text:
+                        pages_without_text.append(index)
+                        if images:
+                            image_only_pages.append(index)
+                except Exception:
+                    parse_error_pages.append(index)
 
         return {
             "page_count": page_count,
