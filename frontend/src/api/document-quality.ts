@@ -13,6 +13,7 @@ export type QualityIssueType =
   | 'DUPLICATE_CONTENT'
   | 'PARSE_ERROR'
   | 'WRONG_KNOWLEDGE_POINT'
+  | 'EXPIRED_DOCUMENT'
   | 'OTHER'
 
 export interface QualityTask {
@@ -165,6 +166,24 @@ export function createQualityTask(
   )
 }
 
+/**
+ * 对课程资料执行自动质量检查。
+ *
+ * 自动生成抽检任务、样本和质量问题。
+ */
+export function runDocumentQualityScan(
+  courseId: BigIntId,
+  documentId: BigIntId,
+): Promise<QualityDetail> {
+
+  return apiRequest<QualityDetail>(
+    `${baseUrl(courseId)}/documents/${encodeURIComponent(documentId)}/scan`,
+    {
+      method: 'POST',
+    },
+  )
+}
+
 export function listQualityTasks(
   courseId: BigIntId,
   documentId?: BigIntId,
@@ -261,6 +280,7 @@ export const QUALITY_ISSUE_OPTIONS: Array<{
   { value: 'DUPLICATE_CONTENT', label: '重复内容' },
   { value: 'PARSE_ERROR', label: '解析错误' },
   { value: 'WRONG_KNOWLEDGE_POINT', label: '知识点关联错误' },
+  { value: 'EXPIRED_DOCUMENT', label: '资料已经过期' },
   { value: 'OTHER', label: '其他问题' },
 ]
 

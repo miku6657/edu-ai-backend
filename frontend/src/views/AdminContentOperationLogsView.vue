@@ -82,11 +82,17 @@ const operationOptions = [
 
   { label: '恢复资料检索', value: 'DOCUMENT_RESUME' },
 
+  { label: '自动质量检查', value: 'QUALITY_AUTO_SCAN' },
+
 ]
 
 function operationTagType(
   type: string,
 ): 'success' | 'warning' | 'danger' | 'info' {
+
+  if (type === 'QUALITY_AUTO_SCAN') {
+    return 'warning'
+  }
 
   if (
     type.includes('DELETE')

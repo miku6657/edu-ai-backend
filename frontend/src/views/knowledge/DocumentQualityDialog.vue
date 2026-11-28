@@ -11,6 +11,7 @@ import {
   getQualityDetail,
   listQualityAssignees,
   listQualityTasks,
+  runDocumentQualityScan,
   qualityIssueStatusLabel,
   qualityIssueTagType,
   qualityIssueTypeLabel,
@@ -85,6 +86,14 @@ const canCreateTask = computed(
     props.document?.status === 'READY'
     && props.document.versionStatus !== 'HISTORY'
     && props.document.reviewStatus !== 'PENDING'
+    && !hasActiveTask.value
+    && !busy.value,
+)
+const canRunAutomaticScan = computed(
+  () =>
+    props.document?.status === 'READY'
+    && props.document.versionStatus === 'CURRENT'
+    && props.document.reviewStatus === 'APPROVED'
     && !hasActiveTask.value
     && !busy.value,
 )
@@ -306,6 +315,95 @@ async function saveTask(): Promise<void> {
   }
 }
 
+/**
+ * 执行PDF自动质量检查。
+ */
+async function runAutomaticScan(): Promise<void> {
+
+  const context = currentContext()
+
+  if (
+    !context
+    || !canRunAutomaticScan.value
+    || saving.value
+  ) {
+    return
+  }
+
+  try {
+
+    await ElMessageBox.confirm(
+      [
+        '本次检查将扫描PDF全部页面和知识切片。',
+        '检查内容包括：',
+        '1. 无法提取文本的页面。',
+        '2. PDF页面解析异常。',
+        '3. 同课程其他资料中的重复内容。',
+        '4. 资料有效期。',
+        '',
+        '发现的问题将自动生成整改任务，并分配给课程负责人。',
+      ].join('\n'),
+      '开始自动质量检查',
+      {
+        type: 'warning',
+        confirmButtonText: '开始检查',
+        cancelButtonText: '取消',
+      },
+    )
+
+  } catch {
+    return
+  }
+
+  saving.value = true
+
+  try {
+
+    const result = await runDocumentQualityScan(
+      context.courseId,
+      context.documentId,
+    )
+
+    if (!isCurrentContext(context)) return
+
+    applyDetail(result)
+
+    activeTab.value =
+      result.issues.length > 0
+        ? 'issues'
+        : 'samples'
+
+    if (result.issues.length > 0) {
+
+      notifyWarning(
+        `自动检查完成，发现${result.issues.length}项质量问题，请及时整改`,
+      )
+
+    } else {
+
+      notifySuccess(
+        '自动检查完成，暂未发现质量问题',
+      )
+    }
+
+    emit('changed')
+
+  } catch (error) {
+
+    if (isCurrentContext(context)) {
+
+      notifyError(
+        error,
+        '自动质量检查失败',
+      )
+    }
+
+  } finally {
+
+    saving.value = false
+  }
+}
+
 function openSample(sample: QualitySample): void {
   if (busy.value) return
   selectedSample.value = sample
@@ -434,6 +532,14 @@ watch(
             刷新
           </el-button>
           <el-button
+            type="warning"
+            :disabled="!canRunAutomaticScan"
+            :loading="saving"
+            @click="runAutomaticScan"
+          >
+            自动质量检查
+          </el-button>
+          <el-button
             type="primary"
             :disabled="!canCreateTask"
             @click="openCreateDialog"
@@ -443,6 +549,12 @@ watch(
         </div>
       </div>
 
+      <el-alert
+        title="自动检查会扫描全部PDF页面及知识切片，发现的问题将进入现有质量整改流程。页面无文本不代表物理缺页，需要人工核对。"
+        type="info"
+        :closable="false"
+        show-icon
+      />
       <el-alert
         v-if="hasActiveTask"
         title="当前资料存在进行中的抽检任务"
