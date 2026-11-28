@@ -135,6 +135,14 @@ function formatRate(value: number | null): string {
   return value === null ? '--' : `${value.toFixed(2)}%`
 }
 
+function formatSelfAssessment(
+  value: number | null,
+): string {
+  return value === null
+    ? '--'
+    : `${value.toFixed(2)} / 3`
+}
+
 function formatDateTime(value: string | null): string {
   if (!value) return '暂无访问记录'
 
@@ -579,7 +587,206 @@ function progressStatus(
 
       </BaseCard>
 
-      <!-- 五、全部章节情况 -->
+      <!-- 五、知识点综合学习情况 -->
+      <BaseCard>
+
+        <template #header>
+          <div class="section-heading">
+            <div>
+              <h3>知识点综合学习情况</h3>
+              <p>
+                综合学生提问、练习表现和自评数据，识别需要重点关注的知识点。
+              </p>
+            </div>
+          </div>
+        </template>
+
+        <el-table
+          :data="analysis.knowledgePoints"
+          stripe
+          style="width: 100%"
+          row-key="pointId"
+        >
+
+          <el-table-column
+            prop="title"
+            label="知识点"
+            min-width="160"
+            fixed="left"
+          />
+
+          <el-table-column
+            label="提问次数"
+            width="100"
+            align="center"
+          >
+            <template #default="{ row }">
+              {{ row.questionCount }}
+            </template>
+          </el-table-column>
+
+          <el-table-column
+            label="提问学生"
+            width="110"
+            align="center"
+          >
+            <template #default="{ row }">
+              {{ row.questionStudentCount }}
+            </template>
+          </el-table-column>
+
+          <el-table-column
+            label="练习记录"
+            width="110"
+            align="center"
+          >
+            <template #default="{ row }">
+              {{ row.practiceQuestionCount }}
+            </template>
+          </el-table-column>
+
+          <el-table-column
+            label="掌握题数"
+            width="100"
+            align="center"
+          >
+            <template #default="{ row }">
+              {{ row.masteredQuestionCount }}
+            </template>
+          </el-table-column>
+
+          <el-table-column
+            label="练习掌握率"
+            min-width="165"
+          >
+            <template #default="{ row }">
+
+              <div class="rate-cell">
+
+                <span>
+                  {{ formatRate(row.practiceMasteryRate) }}
+                </span>
+
+                <el-progress
+                  v-if="row.practiceMasteryRate !== null"
+                  :percentage="row.practiceMasteryRate"
+                  :status="progressStatus(row.practiceMasteryRate)"
+                  :show-text="false"
+                  :stroke-width="8"
+                />
+
+                <span v-else class="empty-rate">
+                  暂无练习数据
+                </span>
+
+              </div>
+
+            </template>
+          </el-table-column>
+
+          <el-table-column
+            label="练习学生"
+            width="100"
+            align="center"
+          >
+            <template #default="{ row }">
+              {{ row.practiceStudentCount }}
+            </template>
+          </el-table-column>
+
+          <el-table-column
+            label="自评人数"
+            width="100"
+            align="center"
+          >
+            <template #default="{ row }">
+              {{ row.selfAssessmentCount }}
+            </template>
+          </el-table-column>
+
+          <el-table-column
+            label="平均自评等级"
+            width="130"
+            align="center"
+          >
+            <template #default="{ row }">
+              {{ formatSelfAssessment(row.averageSelfAssessmentLevel) }}
+            </template>
+          </el-table-column>
+
+          <el-table-column
+            label="最近提问"
+            min-width="160"
+          >
+            <template #default="{ row }">
+              {{ formatDateTime(row.latestAskedAt) }}
+            </template>
+          </el-table-column>
+
+          <el-table-column
+            label="最近练习"
+            min-width="160"
+          >
+            <template #default="{ row }">
+              {{ formatDateTime(row.lastPracticedAt) }}
+            </template>
+          </el-table-column>
+
+          <el-table-column
+            label="学习情况"
+            width="110"
+            fixed="right"
+            align="center"
+          >
+            <template #default="{ row }">
+
+              <el-tag
+                v-if="
+                  row.practiceMasteryRate !== null
+                  && row.practiceMasteryRate < 60
+                "
+                type="warning"
+                size="small"
+              >
+                需要巩固
+              </el-tag>
+
+              <el-tag
+                v-else-if="row.practiceMasteryRate !== null"
+                type="success"
+                size="small"
+              >
+                练习正常
+              </el-tag>
+
+              <el-tag
+                v-else
+                type="info"
+                size="small"
+              >
+                暂无练习
+              </el-tag>
+
+            </template>
+          </el-table-column>
+
+        </el-table>
+
+        <el-empty
+          v-if="analysis.knowledgePoints.length === 0"
+          description="当前课程尚未建立知识点体系"
+          :image-size="80"
+        />
+
+        <p class="tracking-note">
+          练习掌握率按每名学生每道题的最近一次练习结果计算；
+          提问次数仅统计成功关联知识点的课程普通提问；
+          自评等级范围为 0～3，分别代表薄弱、不熟练、一般、熟练。
+        </p>
+
+      </BaseCard>
+
+      <!-- 六、全部章节情况 -->
       <BaseCard title="全部章节练习情况">
 
         <el-table
@@ -674,7 +881,7 @@ function progressStatus(
 
       </BaseCard>
 
-      <!-- 六、课程资料使用情况 -->
+      <!-- 七、课程资料使用情况 -->
       <BaseCard title="课程资料使用情况">
 
         <div class="material-summary">
@@ -916,6 +1123,11 @@ function progressStatus(
   display: flex;
   flex-direction: column;
   gap: 7px;
+}
+
+.empty-rate {
+  color: var(--sc-text-placeholder);
+  font-size: 11px;
 }
 
 .material-summary {

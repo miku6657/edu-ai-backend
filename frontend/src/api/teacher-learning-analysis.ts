@@ -25,6 +25,25 @@ export interface StudentProgress {
   lastActiveAt: string | null
 }
 
+export interface KnowledgePointLearningStat {
+  pointId: BigIntId
+  title: string
+
+  questionCount: number
+  questionStudentCount: number
+
+  practiceQuestionCount: number
+  masteredQuestionCount: number
+  practiceMasteryRate: number | null
+  practiceStudentCount: number
+
+  selfAssessmentCount: number
+  averageSelfAssessmentLevel: number | null
+
+  latestAskedAt: string | null
+  lastPracticedAt: string | null
+}
+
 export interface TeacherCourseLearningAnalysis {
   courseId: BigIntId
   courseName: string
@@ -38,6 +57,8 @@ export interface TeacherCourseLearningAnalysis {
   participatingStudentCount: number
   exerciseParticipationRate: number | null
   materialSummary: MaterialSummary
+
+  knowledgePoints: KnowledgePointLearningStat[]
 
   students: StudentProgress[]
 
