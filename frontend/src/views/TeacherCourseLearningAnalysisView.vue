@@ -39,26 +39,45 @@ const loading = ref(false)
 
 const studentKeyword = ref('')
 
+const studentStatusFilter = ref<
+  'ALL' | 'ATTENTION' | 'NO_DATA' | 'NORMAL'
+>('ALL')
+
 const filteredStudents = computed(() => {
   const students = analysis.value?.students ?? []
 
   const keyword = studentKeyword.value.trim().toLowerCase()
 
-  if (!keyword) {
-    return students
-  }
-
   return students.filter(student => {
-    return (
-      student.studentName.toLowerCase().includes(keyword)
+
+    const matchesKeyword =
+      !keyword
+      || student.studentName.toLowerCase().includes(keyword)
       || student.username.toLowerCase().includes(keyword)
-    )
+
+    const matchesStatus =
+      studentStatusFilter.value === 'ALL'
+      || student.learningStatus === studentStatusFilter.value
+
+    return matchesKeyword && matchesStatus
   })
 })
 
 const lowCompletionCount = computed(
   () => analysis.value?.lowCompletionChapters.length ?? 0,
 )
+
+const attentionStudentCount = computed(() => {
+  return (analysis.value?.students ?? []).filter(
+    student => student.learningStatus === 'ATTENTION',
+  ).length
+})
+
+const noDataStudentCount = computed(() => {
+  return (analysis.value?.students ?? []).filter(
+    student => student.learningStatus === 'NO_DATA',
+  ).length
+})
 
 const materialUsageRate = computed(() => {
   const summary = analysis.value?.materialSummary
@@ -163,6 +182,36 @@ function formatSelfAssessment(
   return value === null
     ? '--'
     : `${value.toFixed(2)} / 3`
+}
+
+function learningStatusLabel(
+  status: 'NORMAL' | 'ATTENTION' | 'NO_DATA',
+): string {
+  switch (status) {
+    case 'ATTENTION':
+      return '需要关注'
+
+    case 'NO_DATA':
+      return '暂无记录'
+
+    default:
+      return '正常'
+  }
+}
+
+function learningStatusType(
+  status: 'NORMAL' | 'ATTENTION' | 'NO_DATA',
+): 'success' | 'warning' | 'info' {
+  switch (status) {
+    case 'ATTENTION':
+      return 'warning'
+
+    case 'NO_DATA':
+      return 'info'
+
+    default:
+      return 'success'
+  }
 }
 
 function formatDateTime(value: string | null): string {
@@ -375,15 +424,46 @@ function progressStatus(
         <div class="student-table-toolbar">
 
           <div class="student-table-description">
-            查看每名学生的练习、提问、任务完成和资料使用情况。
+
+            <div>
+              查看每名学生的练习、提问、任务完成和资料使用情况。
+            </div>
+
+            <div class="student-risk-summary">
+
+              <el-tag type="warning" size="small">
+                需要关注 {{ attentionStudentCount }} 人
+              </el-tag>
+
+              <el-tag type="info" size="small">
+                暂无记录 {{ noDataStudentCount }} 人
+              </el-tag>
+
+            </div>
+
           </div>
 
-          <el-input
-            v-model="studentKeyword"
-            placeholder="搜索学生姓名或账号"
-            clearable
-            style="width: 260px"
-          />
+          <div class="student-table-actions">
+
+            <el-select
+              v-model="studentStatusFilter"
+              placeholder="学习状态"
+              style="width: 140px"
+            >
+              <el-option label="全部学生" value="ALL" />
+              <el-option label="需要关注" value="ATTENTION" />
+              <el-option label="暂无记录" value="NO_DATA" />
+              <el-option label="学习正常" value="NORMAL" />
+            </el-select>
+
+            <el-input
+              v-model="studentKeyword"
+              placeholder="搜索学生姓名或账号"
+              clearable
+              style="width: 220px"
+            />
+
+          </div>
 
         </div>
 
@@ -404,6 +484,37 @@ function progressStatus(
                 <strong>{{ row.studentName }}</strong>
                 <small>{{ row.username }}</small>
               </div>
+            </template>
+          </el-table-column>
+
+          <el-table-column
+            label="学习状态"
+            width="125"
+            align="center"
+          >
+            <template #default="{ row }">
+
+              <el-tooltip
+                v-if="row.statusReasons.length > 0"
+                :content="row.statusReasons.join('；')"
+                placement="top"
+              >
+                <el-tag
+                  :type="learningStatusType(row.learningStatus)"
+                  size="small"
+                >
+                  {{ learningStatusLabel(row.learningStatus) }}
+                </el-tag>
+              </el-tooltip>
+
+              <el-tag
+                v-else
+                :type="learningStatusType(row.learningStatus)"
+                size="small"
+              >
+                {{ learningStatusLabel(row.learningStatus) }}
+              </el-tag>
+
             </template>
           </el-table-column>
 
@@ -505,8 +616,10 @@ function progressStatus(
         />
 
         <p class="student-table-note">
-          说明：正确率只统计已判分客观题；没有练习或任务数据时显示“--”。
-          资料访问次数从启用访问记录功能后开始累计。
+          预警规则：任务完成率或客观题正确率低于60%，
+          或连续14天没有学习活动。
+          没有可统计学习活动的学生单独标记为暂无记录。
+          正确率仅统计已判分客观题。
         </p>
 
       </BaseCard>
@@ -1245,6 +1358,33 @@ function progressStatus(
   color: var(--sc-text-placeholder);
   font-size: 11px;
   line-height: 1.7;
+}
+
+.student-risk-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 9px;
+}
+
+.student-table-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+@media (max-width: 640px) {
+  .student-table-actions {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .student-table-actions .el-select,
+  .student-table-actions .el-input {
+    width: 100% !important;
+  }
 }
 
 @media (max-width: 640px) {

@@ -23,6 +23,9 @@ export interface StudentProgress {
   materialAccessCount: number
 
   lastActiveAt: string | null
+
+  learningStatus: 'NORMAL' | 'ATTENTION' | 'NO_DATA'
+  statusReasons: string[]
 }
 
 export interface KnowledgePointLearningStat {
