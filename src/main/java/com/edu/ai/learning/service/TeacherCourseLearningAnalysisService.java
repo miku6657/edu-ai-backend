@@ -16,6 +16,7 @@ import java.math.RoundingMode;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.List;
 
 @Service
@@ -202,8 +203,9 @@ public class TeacherCourseLearningAnalysisService {
                             0
                         ) AS correct_objective_count,
 
-                        MAX(a.submitted_at)
-                            AS last_practice_at
+                        MAX(
+                            COALESCE(a.submitted_at, a.started_at)
+                        ) AS last_practice_at
 
                     FROM course_exercise_attempt a
 
@@ -390,12 +392,87 @@ public class TeacherCourseLearningAnalysisService {
                     sb.student_id
                 """;
 
+        LocalDateTime analyzedAt = LocalDateTime.now(APP_ZONE);
+
         return jdbc.query(
                 sql,
                 (rs, rowNum) -> {
 
                     Timestamp lastActive =
                             rs.getTimestamp("last_active_at");
+
+                    LocalDateTime lastActiveAt =
+                            lastActive == null
+                                    ? null
+                                    : lastActive.toLocalDateTime();
+
+                    BigDecimal accuracyRate =
+                            rs.getBigDecimal("exercise_accuracy_rate");
+
+                    BigDecimal taskRate =
+                            rs.getBigDecimal("task_completion_rate");
+
+                    List<String> statusReasons = new ArrayList<>();
+
+                    // 1. 任务完成率预警
+                    if (taskRate != null
+                            && taskRate.compareTo(LOW_COMPLETION_THRESHOLD) < 0) {
+
+                        statusReasons.add(
+                                "任务完成率低于60%，当前为"
+                                        + taskRate.stripTrailingZeros().toPlainString()
+                                        + "%"
+                        );
+                    }
+
+                    // 2. 客观题正确率预警
+                    if (accuracyRate != null
+                            && accuracyRate.compareTo(LOW_COMPLETION_THRESHOLD) < 0) {
+
+                        statusReasons.add(
+                                "客观题正确率低于60%，当前为"
+                                        + accuracyRate.stripTrailingZeros().toPlainString()
+                                        + "%"
+                        );
+                    }
+
+                    // 3. 学习活动时间预警
+                    if (lastActiveAt == null) {
+
+                        statusReasons.add("暂无可统计的学习活动");
+
+                    } else if (lastActiveAt.isBefore(
+                            analyzedAt.minusDays(14))) {
+
+                        statusReasons.add("连续14天没有学习活动");
+                    }
+
+                    // 4. 综合学习状态
+                    String learningStatus;
+
+                    boolean hasLearningRisk =
+                            taskRate != null
+                                    && taskRate.compareTo(
+                                            LOW_COMPLETION_THRESHOLD
+                                    ) < 0
+                            ||
+                            accuracyRate != null
+                                    && accuracyRate.compareTo(
+                                            LOW_COMPLETION_THRESHOLD
+                                    ) < 0
+                            ||
+                            lastActiveAt != null
+                                    && lastActiveAt.isBefore(
+                                            analyzedAt.minusDays(14)
+                                    );
+
+                    if (hasLearningRisk) {
+                        learningStatus = "ATTENTION";
+                    } else if (lastActiveAt == null) {
+                        learningStatus = "NO_DATA";
+                    } else {
+                        learningStatus = "NORMAL";
+                    }
 
                     return new StudentProgress(
                             rs.getString("student_id"),
@@ -408,7 +485,7 @@ public class TeacherCourseLearningAnalysisService {
 
                             rs.getLong("correct_objective_count"),
 
-                            rs.getBigDecimal("exercise_accuracy_rate"),
+                            accuracyRate,
 
                             rs.getLong("question_count"),
 
@@ -416,13 +493,15 @@ public class TeacherCourseLearningAnalysisService {
 
                             rs.getLong("total_task_count"),
 
-                            rs.getBigDecimal("task_completion_rate"),
+                            taskRate,
 
                             rs.getLong("material_access_count"),
 
-                            lastActive == null
-                                    ? null
-                                    : lastActive.toLocalDateTime()
+                            lastActiveAt,
+
+                            learningStatus,
+
+                            statusReasons
                     );
                 },
                 courseId,

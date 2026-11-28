@@ -48,16 +48,27 @@ public record TeacherCourseLearningAnalysisVO(
             String studentId,
             String studentName,
             String username,
+
             long submittedAttemptCount,
+
             long objectiveAnswerCount,
             long correctObjectiveCount,
             BigDecimal exerciseAccuracyRate,
+
             long questionCount,
+
             long completedTaskCount,
             long totalTaskCount,
             BigDecimal taskCompletionRate,
+
             long materialAccessCount,
-            LocalDateTime lastActiveAt
+            LocalDateTime lastActiveAt,
+
+            // 新增：学习状态
+            String learningStatus,
+
+            // 新增：预警原因
+            List<String> statusReasons
     ) {}
 
     public record MaterialSummary(
