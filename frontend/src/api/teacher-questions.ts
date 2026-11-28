@@ -66,6 +66,7 @@ export interface QuestionAnalyticsFilter {
   startDate?: string
   endDate?: string
   pointId?: BigIntId
+  limit?: number
 }
 
 function buildQuery(
@@ -107,7 +108,7 @@ export function listHotQuestions(
     pointId: filter.pointId,
     startDate: filter.startDate,
     endDate: filter.endDate,
-    limit: 10,
+    limit: filter.limit ?? 10,
   })
 
   return apiRequest<HotQuestion[]>(

@@ -84,6 +84,18 @@ const operationOptions = [
 
   { label: '自动质量检查', value: 'QUALITY_AUTO_SCAN' },
 
+  { label: '创建热门标准问答', value: 'HOT_QUESTION_CREATE' },
+
+  { label: '修改热门标准问答', value: 'HOT_QUESTION_UPDATE' },
+
+  { label: '提交热门问题审核', value: 'HOT_QUESTION_SUBMIT' },
+
+  { label: '审核通过热门问题', value: 'HOT_QUESTION_APPROVE' },
+
+  { label: '驳回热门问题', value: 'HOT_QUESTION_REJECT' },
+
+  { label: '下架热门标准问答', value: 'HOT_QUESTION_OFFLINE' },
+
 ]
 
 function operationTagType(
@@ -91,6 +103,21 @@ function operationTagType(
 ): 'success' | 'warning' | 'danger' | 'info' {
 
   if (type === 'QUALITY_AUTO_SCAN') {
+    return 'warning'
+  }
+
+  if (type.includes('HOT_QUESTION_APPROVE')) {
+    return 'success'
+  }
+
+  if (
+    type.includes('HOT_QUESTION_REJECT')
+    || type.includes('HOT_QUESTION_OFFLINE')
+  ) {
+    return 'danger'
+  }
+
+  if (type.includes('HOT_QUESTION')) {
     return 'warning'
   }
 

@@ -68,6 +68,12 @@ const primaryNav = computed<NavEntry[]>(() => {
     { key: 'rag', label: 'AI 学习', icon: Sparkles, routeName: 'rag' },
     { key: 'qa-tickets', label: '课程答疑', icon: ClipboardList, routeName: 'qa-tickets' },
     { key: 'knowledge', label: '知识库', icon: Library, routeName: 'knowledge' },
+    {
+      key: 'course-hot-questions',
+      label: auth.isStudent ? '课程热门问题' : '热门问题维护',
+      icon: MessagesSquare,
+      routeName: 'course-hot-questions',
+    },
     { key: 'courses', label: '我的课程', icon: BookOpen, routeName: 'courses' },
     { key: 'ddl', label: 'DDL 任务', icon: CalendarClock, routeName: 'ddl' },
   ]

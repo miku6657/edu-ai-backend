@@ -353,6 +353,19 @@ function goToTickets(): void {
   void router.push({ name: 'qa-tickets' })
 }
 
+function goToHotQuestions(): void {
+  if (!selectedCourseId.value) {
+    return
+  }
+
+  void router.push({
+    name: 'course-hot-questions',
+    query: {
+      courseId: String(selectedCourseId.value),
+    },
+  })
+}
+
 function goToKnowledge(): void {
   void router.push({ name: 'knowledge' })
 }
@@ -695,6 +708,15 @@ watch(
               title="高频问题"
               subtitle="相同问题被不同学生重复提出的情况"
             >
+              <template #actions>
+                <el-button
+                  type="primary"
+                  plain
+                  @click="goToHotQuestions"
+                >
+                  整理为标准问答
+                </el-button>
+              </template>
               <el-table
                 v-loading="loading"
                 :data="hotQuestions"

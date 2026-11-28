@@ -4,6 +4,7 @@ import AppLayout from '@/layouts/AppLayout.vue'
 import { installAuthGuard } from '@/router/guard'
 import AdminContentOperationLogsView from '@/views/AdminContentOperationLogsView.vue'
 import CoursesView from '@/views/CoursesView.vue'
+import CourseHotQuestionsView from '@/views/CourseHotQuestionsView.vue'
 import DdlView from '@/views/DdlView.vue'
 import ExerciseReviewsView from '@/views/ExerciseReviewsView.vue'
 import ExercisesView from '@/views/ExercisesView.vue'
@@ -84,6 +85,15 @@ const routes: RouteRecordRaw[] = [
         component: QaTicketsView,
         meta: {
           title: '课程答疑',
+          requiresAuth: true,
+        },
+      },
+      {
+        path: 'hot-questions',
+        name: 'course-hot-questions',
+        component: CourseHotQuestionsView,
+        meta: {
+          title: '课程热门问题',
           requiresAuth: true,
         },
       },
