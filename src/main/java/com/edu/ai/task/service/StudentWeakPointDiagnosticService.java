@@ -1,5 +1,6 @@
 package com.edu.ai.task.service;
 
+import com.edu.ai.common.BusinessException;
 import com.edu.ai.course.service.CoursePermissionService;
 import com.edu.ai.task.dto.StudentWeakPointDiagnosticVO;
 
@@ -33,7 +34,7 @@ public class StudentWeakPointDiagnosticService {
     }
 
     /**
-     * 查询课程全部知识点的综合诊断。
+     * 学生查询自己的课程知识点综合诊断。
      */
     public List<StudentWeakPointDiagnosticVO> diagnose(
             Long courseId,
@@ -41,10 +42,59 @@ public class StudentWeakPointDiagnosticService {
 
         permissions.requireActiveRead(courseId, studentId);
 
-        // 1. 获取最近30天提问薄弱点
+        return diagnoseInternal(courseId, studentId);
+    }
+
+    /**
+     * 教师查询自己管理课程中某个学生的诊断。
+     */
+    public List<StudentWeakPointDiagnosticVO> diagnoseForTeacher(
+            Long courseId,
+            Long studentId,
+            Long teacherId) {
+
+        // 验证教师是否拥有课程管理权限
+        permissions.requireManage(courseId, teacherId);
+        permissions.requireActiveRead(courseId, teacherId);
+
+        // 验证学生确实属于当前课程
+        Long memberCount = jdbc.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM course_student cs
+                JOIN sys_user u
+                  ON u.id = cs.student_id
+                 AND u.role = 'STUDENT'
+                 AND u.status = 1
+                WHERE cs.course_id = ?
+                  AND cs.student_id = ?
+                """,
+                Long.class,
+                courseId,
+                studentId
+        );
+
+        if (memberCount == null || memberCount == 0) {
+            throw new BusinessException(
+                    404,
+                    "该学生不属于当前课程或账号已停用"
+            );
+        }
+
+        return diagnoseInternal(courseId, studentId);
+    }
+
+    /**
+     * 学生端和教师端共用的诊断逻辑。
+     */
+    private List<StudentWeakPointDiagnosticVO> diagnoseInternal(
+            Long courseId,
+            Long studentId) {
+
         Map<Long, QuestionKnowledgeService.WeakPoint> questionMap =
                 new HashMap<>();
 
+        // 最近30天提问统计
         for (QuestionKnowledgeService.WeakPoint point :
                 questionKnowledgeService.listWeakPoints(
                         courseId,
@@ -56,11 +106,10 @@ public class StudentWeakPointDiagnosticService {
             );
         }
 
-        // 2. 获取练习掌握率和学生自评
+        // 练习掌握率及自评
         List<PracticePoint> practicePoints =
                 queryPracticePoints(courseId, studentId);
 
-        // 3. 合并两种数据
         List<StudentWeakPointDiagnosticVO> result =
                 new ArrayList<>();
 
@@ -86,7 +135,6 @@ public class StudentWeakPointDiagnosticService {
                     practice.practiceMasteryRate()
             );
 
-            // 4. 综合诊断：取有有效数据的证据中较弱的等级
             int diagnosisLevel = questionLevel;
 
             if (practiceLevel != null) {
