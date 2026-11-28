@@ -495,6 +495,46 @@ public class DocumentServiceImpl implements DocumentService {
 
         Long newDocumentId = created.getId();
 
+        // F7-04：新版本继承原版本的有效期配置。
+        // 使用数据库关联更新，确保读取的是当前生效版本的最新配置。
+        int expiryCopied = jdbc.update(
+                """
+                UPDATE course_document target
+
+                JOIN course_document source
+                  ON source.id = ?
+                 AND source.course_id = target.course_id
+                 AND source.resource_id = target.resource_id
+                 AND source.version_status = 'CURRENT'
+                 AND source.status = 'READY'
+
+                SET target.valid_until = source.valid_until,
+                    target.update_responsible_id =
+                        source.update_responsible_id,
+                    target.expiry_remind_days =
+                        source.expiry_remind_days,
+                    target.update_time = NOW()
+
+                WHERE target.id = ?
+                  AND target.course_id = ?
+                  AND target.resource_id = ?
+                  AND target.version_no = ?
+                  AND target.version_status = 'PENDING'
+                """,
+                documentId,
+                newDocumentId,
+                courseId,
+                resourceId,
+                nextVersion
+        );
+
+        if (expiryCopied != 1) {
+            throw new BusinessException(
+                    500,
+                    "新版本有效期配置继承失败"
+            );
+        }
+
         // 继承原有章节关联。
         jdbc.update(
                 """

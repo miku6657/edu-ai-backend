@@ -49,6 +49,9 @@ public class DocumentReviewService {
 
     private final DocumentQualityService qualityService;
 
+    private final CourseVersionChangeNotificationService
+            versionChangeNotifications;
+
     public DocumentReviewService(
 
             JdbcTemplate jdbc,
@@ -61,7 +64,9 @@ public class DocumentReviewService {
 
             ChunkKnowledgeService knowledgeService,
 
-            DocumentQualityService qualityService) {
+            DocumentQualityService qualityService,
+
+            CourseVersionChangeNotificationService versionChangeNotifications) {
 
         this.jdbc = jdbc;
         this.documentMapper = documentMapper;
@@ -69,6 +74,9 @@ public class DocumentReviewService {
         this.permissions = permissions;
         this.knowledgeService = knowledgeService;
         this.qualityService = qualityService;
+
+        this.versionChangeNotifications =
+                versionChangeNotifications;
     }
 
     /**
@@ -656,6 +664,27 @@ public class DocumentReviewService {
 
         requireNoNewerVersion(document);
 
+        // 判断本次发布是否替换已有生效版本。
+        // 首次发布V1不触发课程版本变化提醒。
+        Long previousCurrentCount = jdbc.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM course_document
+                WHERE course_id = ?
+                  AND resource_id = ?
+                  AND version_status = 'CURRENT'
+                  AND id <> ?
+                """,
+                Long.class,
+                courseId,
+                document.getResourceId(),
+                documentId
+        );
+
+        boolean replacingExistingVersion =
+                previousCurrentCount != null
+                        && previousCurrentCount > 0;
+
         // 原生效版本转为历史版本。
         jdbc.update(
                 """
@@ -718,6 +747,14 @@ public class DocumentReviewService {
 
                 comment
         );
+
+        // F7-04：已有资源的新版本正式发布后，
+        // 提醒同课程其他资料的更新责任人。
+        if (replacingExistingVersion) {
+
+            versionChangeNotifications
+                    .notifyOtherDocumentResponsibles(document);
+        }
     }
 
     /**
