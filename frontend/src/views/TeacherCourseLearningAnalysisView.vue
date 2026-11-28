@@ -34,6 +34,25 @@ const analysis = ref<TeacherCourseLearningAnalysis | null>(null)
 const loadingCourses = ref(false)
 const loading = ref(false)
 
+const studentKeyword = ref('')
+
+const filteredStudents = computed(() => {
+  const students = analysis.value?.students ?? []
+
+  const keyword = studentKeyword.value.trim().toLowerCase()
+
+  if (!keyword) {
+    return students
+  }
+
+  return students.filter(student => {
+    return (
+      student.studentName.toLowerCase().includes(keyword)
+      || student.username.toLowerCase().includes(keyword)
+    )
+  })
+})
+
 const lowCompletionCount = computed(
   () => analysis.value?.lowCompletionChapters.length ?? 0,
 )
@@ -161,8 +180,8 @@ function progressStatus(
         <h2>课程学习分析</h2>
 
         <p>
-          查看班级学习进度、课程资料使用情况和章节练习覆盖率，
-          及时发现学习参与不足的章节。
+          查看学生综合学习进度、课程资料使用情况和章节练习覆盖率，
+          及时发现学习参与不足的学生和章节。
         </p>
       </div>
 
@@ -320,7 +339,149 @@ function progressStatus(
 
       </BaseCard>
 
-      <!-- 三、低完成率章节 -->
+      <!-- 三、学生综合学习情况 -->
+      <BaseCard title="学生综合学习情况">
+
+        <div class="student-table-toolbar">
+
+          <div class="student-table-description">
+            查看每名学生的练习、提问、任务完成和资料使用情况。
+          </div>
+
+          <el-input
+            v-model="studentKeyword"
+            placeholder="搜索学生姓名或账号"
+            clearable
+            style="width: 260px"
+          />
+
+        </div>
+
+        <el-table
+          :data="filteredStudents"
+          stripe
+          style="width: 100%"
+          row-key="studentId"
+        >
+
+          <el-table-column
+            label="学生"
+            min-width="130"
+            fixed="left"
+          >
+            <template #default="{ row }">
+              <div class="student-name-cell">
+                <strong>{{ row.studentName }}</strong>
+                <small>{{ row.username }}</small>
+              </div>
+            </template>
+          </el-table-column>
+
+          <el-table-column
+            label="提交练习"
+            width="100"
+            align="center"
+          >
+            <template #default="{ row }">
+              {{ row.submittedAttemptCount }}
+            </template>
+          </el-table-column>
+
+          <el-table-column
+            label="客观题正确率"
+            width="130"
+            align="center"
+          >
+            <template #default="{ row }">
+              {{ formatRate(row.exerciseAccuracyRate) }}
+            </template>
+          </el-table-column>
+
+          <el-table-column
+            label="课程提问"
+            width="100"
+            align="center"
+          >
+            <template #default="{ row }">
+              {{ row.questionCount }}
+            </template>
+          </el-table-column>
+
+          <el-table-column
+            label="任务完成"
+            width="110"
+            align="center"
+          >
+            <template #default="{ row }">
+              {{ row.completedTaskCount }}/{{ row.totalTaskCount }}
+            </template>
+          </el-table-column>
+
+          <el-table-column
+            label="任务完成率"
+            min-width="160"
+          >
+            <template #default="{ row }">
+
+              <div class="student-progress-cell">
+
+                <span>
+                  {{ formatRate(row.taskCompletionRate) }}
+                </span>
+
+                <el-progress
+                  :percentage="row.taskCompletionRate ?? 0"
+                  :status="progressStatus(row.taskCompletionRate)"
+                  :show-text="false"
+                  :stroke-width="7"
+                />
+
+              </div>
+
+            </template>
+          </el-table-column>
+
+          <el-table-column
+            label="资料访问"
+            width="100"
+            align="center"
+          >
+            <template #default="{ row }">
+              {{ row.materialAccessCount }} 次
+            </template>
+          </el-table-column>
+
+          <el-table-column
+            label="最近学习时间"
+            min-width="165"
+          >
+            <template #default="{ row }">
+              {{ formatDateTime(row.lastActiveAt) }}
+            </template>
+          </el-table-column>
+
+        </el-table>
+
+        <el-empty
+          v-if="analysis.students.length === 0"
+          description="当前课程暂无有效学生"
+          :image-size="75"
+        />
+
+        <el-empty
+          v-else-if="filteredStudents.length === 0"
+          description="没有找到符合条件的学生"
+          :image-size="75"
+        />
+
+        <p class="student-table-note">
+          说明：正确率只统计已判分客观题；没有练习或任务数据时显示“--”。
+          资料访问次数从启用访问记录功能后开始累计。
+        </p>
+
+      </BaseCard>
+
+      <!-- 四、低完成率章节 -->
       <BaseCard>
 
         <template #header>
@@ -418,7 +579,7 @@ function progressStatus(
 
       </BaseCard>
 
-      <!-- 四、全部章节情况 -->
+      <!-- 五、全部章节情况 -->
       <BaseCard title="全部章节练习情况">
 
         <el-table
@@ -513,7 +674,7 @@ function progressStatus(
 
       </BaseCard>
 
-      <!-- 五、课程资料使用情况 -->
+      <!-- 六、课程资料使用情况 -->
       <BaseCard title="课程资料使用情况">
 
         <div class="material-summary">
@@ -784,6 +945,66 @@ function progressStatus(
   color: var(--sc-text-placeholder);
   font-size: 11px;
   text-align: right;
+}
+
+.student-table-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.student-table-description {
+  color: var(--sc-text-secondary);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.student-name-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.student-name-cell strong {
+  color: var(--sc-text);
+  font-size: 13px;
+}
+
+.student-name-cell small {
+  color: var(--sc-text-placeholder);
+  font-size: 11px;
+}
+
+.student-progress-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.student-progress-cell span {
+  color: var(--sc-text-secondary);
+  font-size: 12px;
+}
+
+.student-table-note {
+  margin-top: 12px;
+  color: var(--sc-text-placeholder);
+  font-size: 11px;
+  line-height: 1.7;
+}
+
+@media (max-width: 640px) {
+  .student-table-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .student-table-toolbar .el-input {
+    width: 100% !important;
+  }
 }
 
 @media (max-width: 900px) {

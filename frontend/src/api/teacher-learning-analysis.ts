@@ -1,6 +1,30 @@
 import { apiRequest } from '@/api/client'
 import type { BigIntId } from '@/api/types'
 
+export interface StudentProgress {
+  studentId: BigIntId
+  studentName: string
+  username: string
+
+  submittedAttemptCount: number
+
+  objectiveAnswerCount: number
+  correctObjectiveCount: number
+
+  exerciseAccuracyRate: number | null
+
+  questionCount: number
+
+  completedTaskCount: number
+  totalTaskCount: number
+
+  taskCompletionRate: number | null
+
+  materialAccessCount: number
+
+  lastActiveAt: string | null
+}
+
 export interface TeacherCourseLearningAnalysis {
   courseId: BigIntId
   courseName: string
@@ -14,6 +38,9 @@ export interface TeacherCourseLearningAnalysis {
   participatingStudentCount: number
   exerciseParticipationRate: number | null
   materialSummary: MaterialSummary
+
+  students: StudentProgress[]
+
   materials: MaterialUsage[]
   chapters: ChapterProgress[]
   lowCompletionChapters: ChapterProgress[]
